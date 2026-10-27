@@ -31,13 +31,18 @@ echo "installed=$installed unlocked_by_efi=$won"
 if [ "$installed" = 0 ]; then exit 0; fi
 
 if [ "$won" -ge "$installed" ]; then
-    rm -f "$STATE/rolls"
+    rm -f "$STATE/rolls" "$STATE/accepted"
     echo "ALL-UNLOCKED"
     touch /run/50hx-unlocked
     exit 0
 fi
 
-# degraded boot — is this a new power cycle? (roll state older than 6 h = reset)
+# episode boundary: a previous boot spent the budget and accepted degraded
+# cards => THIS boot starts a fresh episode (ticket-04 policy, 2026-10-27 fix)
+if [ -e "$STATE/accepted" ]; then
+    echo "new episode after previous degraded-accept"; rm -f "$STATE/rolls" "$STATE/accepted"
+fi
+# fallback: is this a new power cycle? (roll state older than 6 h = reset)
 if [ -e "$STATE/rolls" ] && \
    [ $(( $(date +%s) - $(stat -c %Y "$STATE/rolls") )) -gt 21600 ]; then
     echo "reset stale roll counter"; rm -f "$STATE/rolls"
@@ -54,5 +59,6 @@ if [ "$rolls" -lt "$MAX_ROLLS" ]; then
 fi
 
 echo "DEGRADED win=$won/$installed — roll budget spent; accepting capped cards"
+touch "$STATE/accepted"
 logger -t 50hx-boothealth -- "accepting degraded boot ($won/$installed unlocked, no PDU: manual PSU cut cures)"
 exit 0

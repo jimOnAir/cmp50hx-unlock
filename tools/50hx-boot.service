@@ -1,0 +1,14 @@
+[Unit]
+Description=50HX boot flow: archive unlocker evidence, then health verdict + warm re-rolls
+DefaultDependencies=no
+After=boot-efi.mount local-fs.target
+Before=docker.service multi-user.target
+Wants=boot-efi.mount
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/50hx-boot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
