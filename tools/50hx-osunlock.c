@@ -4,13 +4,17 @@
  * no engine reset, no DMA transfer) against /sys BAR0 MMIO. Runs BEFORE
  * nvidia.ko probes: POST-GSP mutex flapping is over by then (ticket 09).
  *
- * usage: 50hx-osunlock [--bdf 0000:04:00.0] [--wait 60] [--meta-zero]
- *          --bdf    only this device (repeatable not needed: default = all)
- *          --wait   seconds to wait for canary acceptance per card
+ * usage: 50hx-osunlock [--bdf 0000:04:00.0] [--wait 60] [--flr] [--fwsec-only]
+ *          --bdf        only this device
+ *          --wait       seconds to wait for canary acceptance per card
+ *          --flr        PCIe FLR first (fresh POST-like state)
+ *          --fwsec-only run the GSP FWSEC/WPR2 bring-up but do NOT attempt
+ *                       the booter (safe first-hardware test of ticket 12)
  *          --blob   path to booter_ucode_prod.bin (default /usr/local/share/50hx/)
  *
- * Safety: no engine resets ever. Only writes: COMMAND cmd bits, SEC2 falcon
- * regs, PLM-agnostic. Already-unlocked cards are skipped.
+ * Safety: NO SEC2 engine resets ever (that's what injured cards). Only
+ * writes: COMMAND cmd bits, GSP engine reset (driver-standard kgspResetHw),
+ * GSP/SEC2 falcon regs, PLM gate. Already-unlocked cards are skipped.
  */
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -53,9 +57,58 @@
 #define STARTCPU          0x2u
 #define HALTED            0x10u
 
+/* GSP falcon + FWSEC bring-up (ticket 12: port of fwsec_boot_gsp_50hx,
+ * efi-unlock/unlock50x_v1.c:1392-1650, per ticket 10's verified design) */
+#define WPR2_LO           0x001FA824
+#define WPR2_HI           0x001FA828
+#define FW50_WPR2_LO_UP   0x027FE000u    /* 10 GiB layout: FRTS = FB-2MB */
+#define FW50_WPR2_HI_UP   0x027FEE00u
+#define GSP_BASE          0x00110000
+#define GSP_IRQMSET       (GSP_BASE + 0x080)
+#define GSP_MAILBOX0      (GSP_BASE + 0x040)
+#define GSP_MAILBOX1      (GSP_BASE + 0x044)
+#define GSP_CPUCTL        (GSP_BASE + 0x100)
+#define GSP_BOOTVEC       (GSP_BASE + 0x104)
+#define GSP_DMACTL        (GSP_BASE + 0x10C)
+#define GSP_HWCFG         (GSP_BASE + 0x108)
+#define GSP_HWCFG2        (GSP_BASE + 0x0F4)
+#define GSP_ENGINE        (GSP_BASE + 0x3C0)
+#define GSP_RM            (GSP_BASE + 0x084)
+#define GSP_DBG           (GSP_BASE + 0x094)
+#define GSP_IMEMC0        (GSP_BASE + 0x180)
+#define GSP_IMEMD0        (GSP_BASE + 0x184)
+#define GSP_IMEMT0        (GSP_BASE + 0x188)
+#define GSP_DMEMC0        (GSP_BASE + 0x1C0)
+#define GSP_DMEMD0        (GSP_BASE + 0x1C4)
+#define GSP_FBIF_CTL      (GSP_BASE + 0x624)
+#define GSP_TRANSCFG0     (GSP_BASE + 0x600)
+#define GSP_TRANSCFG4     (GSP_BASE + 0x610)
+#define GSP_FALCON2_BASE  0x00111000
+#define GSP_BCR           (GSP_FALCON2_BASE + 0x668)
+#define GSP_TRACE_CTRL    (GSP_FALCON2_BASE + 0x400)
+#define GSP_TRACE_RDIDX   (GSP_FALCON2_BASE + 0x404)
+#define GSP_TRACE_ENT     (GSP_FALCON2_BASE + 0x40C)
+#define GSP_CHIPID0_50HX  0x162000A1u
+#define GSP_BL_CODE_SIZE  0x200u
+#define GSP_BL_START_TAG  0xFDu
+#define FW50_BLOB_SIZE    0x9DF0u
+#define FW50_DATA_OFF     0x9A00u
+#define FW50_DMEM_SIZE    0x3F0u
+#define FW50_MAPPER_OFF   0x360u
+#define FW50_CMDIN_OFF    0x3B0u
+#define FW50_NS_SIZE      0x400u
+#define FW50_SEC_BASE     0x400u
+#define FW50_SEC_SIZE     0x9600u
+#define FWSEC_CMD_FRTS    0x15u
+#define BL_DESC_SIZE      0x54u
+
 static volatile uint32_t *g_bar;
 static uint64_t g_meta_phys;
 static uint64_t g_ucode_phys;
+static uint64_t g_fwsec_phys;
+static uint8_t *g_fwsec_virt;
+static uint8_t *g_bl_img;
+static int fwsec_only;
 static inline uint32_t rd(uint32_t off) { return g_bar[off / 4]; }
 static inline void wr(uint32_t off, uint32_t v) { g_bar[off / 4] = v; }
 
@@ -102,6 +155,116 @@ static int meta_phys(void **out_virt, uint64_t *out_phys)
     close(fd);
     *out_virt = p;
     *out_phys = (e & ((1ULL << 55) - 1)) << 12;
+    return 0;
+}
+
+/* kflcnReset(GSP) + patch host copy + WITH_LOADER boot of 50HX FWSEC:
+ * BL (port-written) DMAs NS+SEC code and data from host PA>=4G, FWSEC runs
+ * FRTS -> WPR2 up. Returns 1 if WPR2 reached the unlocked geometry. */
+static int fwsec_boot_gsp(const char *bdf)
+{
+    uint8_t desc[BL_DESC_SIZE];
+    uint32_t *d = (uint32_t *)desc;
+    uint32_t *mapper, *c, i, v, tag, dst, lo, hi;
+    uint8_t *blob = g_fwsec_virt;
+    uint64_t fwsecPhys = g_fwsec_phys, dataPhys = fwsecPhys + FW50_DATA_OFF;
+    uint64_t frts = ((uint64_t)FW50_WPR2_LO_UP) << 8;   /* 0x27FE00000 */
+
+    memset(desc, 0, sizeof desc);
+
+    /* 1. kflcnReset(GSP): engine reset, scrub-wait, BCR=FALCON, RM=chipId0 */
+    wr(GSP_IRQMSET, 0);
+    for (i = 0; i < 10000; i++) { if (rd(GSP_HWCFG2) & (1u << 31)) break; usleep(100); }
+    wr(GSP_ENGINE, 1); for (i = 0; i < 16; i++) rd(GSP_ENGINE);
+    wr(GSP_ENGINE, 0); for (i = 0; i < 16; i++) rd(GSP_ENGINE);
+    for (i = 0; i < 30000; i++) {   /* scrub: DMACTL[2:1]==0 && !HWCFG2[12] */
+        if ((rd(GSP_DMACTL) & 6) == 0 && !(rd(GSP_HWCFG2) & (1u << 12))) break;
+        usleep(100);
+    }
+    usleep(50000);
+    wr(GSP_BCR, 0); for (i = 0; i < 16; i++) rd(GSP_BCR);
+    wr(GSP_RM, GSP_CHIPID0_50HX); for (i = 0; i < 16; i++) rd(GSP_RM);
+    v = rd(GSP_CPUCTL);
+    printf("%s: fwsec50: GSP reset cpuctl=0x%x hwcfg2=0x%08x\n", bdf, v, rd(GSP_HWCFG2));
+    if ((v & 0xBADF0000u) == 0xBADF0000u) {
+        printf("%s: fwsec50: GSP still 0xBADF-locked — abort\n", bdf);
+        return 0;
+    }
+
+    /* 2. patch data region: cmd_in descriptors + mapper.init_cmd=FRTS */
+    mapper = (uint32_t *)(blob + FW50_DATA_OFF + FW50_MAPPER_OFF);
+    c = (uint32_t *)(blob + FW50_DATA_OFF + FW50_CMDIN_OFF);
+    if (mapper[2] != FW50_CMDIN_OFF)
+        printf("%s: fwsec50: NOTE mapper.cmd_in_off=0x%x (using 0x%x)\n",
+               bdf, mapper[2], FW50_CMDIN_OFF);
+    c[0] = 1; c[1] = 24; c[2] = 0; c[3] = 0; c[4] = 0; c[5] = 2;   /* readVbiosDesc */
+    c[6] = 1; c[7] = 20;
+    c[8] = (uint32_t)(frts >> 12); c[9] = 0x100; c[10] = 2;         /* frtsRegionDesc */
+    mapper[11] = FWSEC_CMD_FRTS;
+    printf("%s: fwsec50: mapper.init_cmd=0x%x frts4k=0x%x\n", bdf, mapper[11], c[8]);
+
+    /* 3. aperture: phys coherent sysmem on TRANSCFG0/4 */
+    wr(GSP_FBIF_CTL, rd(GSP_FBIF_CTL) | (1u << 7));
+    wr(GSP_DMACTL, 0);
+    wr(GSP_TRANSCFG0, 0x15);
+    wr(GSP_TRANSCFG4, 0x15);
+
+    /* 4a. BL DMEM desc -> GSP DMEM 0 */
+    d[0x20 / 4] = 4;
+    d[0x24 / 4] = (uint32_t)fwsecPhys;
+    d[0x28 / 4] = (uint32_t)(fwsecPhys >> 32);
+    d[0x2C / 4] = 0;             d[0x30 / 4] = FW50_NS_SIZE;
+    d[0x34 / 4] = FW50_SEC_BASE; d[0x38 / 4] = FW50_SEC_SIZE;
+    d[0x3C / 4] = 0;
+    d[0x40 / 4] = (uint32_t)dataPhys;
+    d[0x44 / 4] = (uint32_t)(dataPhys >> 32);
+    d[0x48 / 4] = FW50_DMEM_SIZE;
+    wr(GSP_DMEMC0, (1u << 24));
+    for (i = 0; i < BL_DESC_SIZE / 4; i++) wr(GSP_DMEMD0, d[i]);
+    wr(GSP_DMEMC0, 0);
+
+    /* 4b. generic BL code -> IMEM top, tag 0xFD */
+    dst = ((rd(GSP_HWCFG) & 0x1FFu) - (GSP_BL_CODE_SIZE / 256)) << 8;
+    wr(GSP_IMEMC0, dst | (1u << 24));
+    tag = GSP_BL_START_TAG;
+    for (i = 0; i < GSP_BL_CODE_SIZE / 4; i++) {
+        if ((i & 63u) == 0) { wr(GSP_IMEMT0, tag); tag++; }
+        wr(GSP_IMEMD0, ((uint32_t *)g_bl_img)[i]);
+    }
+    wr(GSP_IMEMC0, 0);
+    wr(GSP_IMEMC0, dst);
+    v = rd(GSP_IMEMD0); wr(GSP_IMEMC0, 0);
+    if (v != *(uint32_t *)g_bl_img)
+        printf("%s: fwsec50: WARN BL rb 0x%08x != 0x%08x\n", bdf, v, *(uint32_t *)g_bl_img);
+
+    /* 5. start; BL DMAs FWSEC, FWSEC runs FRTS */
+    wr(GSP_BOOTVEC, GSP_BL_START_TAG << 8);
+    wr(GSP_TRACE_CTRL, 0x10B0FF00);
+    wr(GSP_CPUCTL, STARTCPU);
+
+    /* 6. poll WPR2 up, 5 s */
+    for (i = 0; i < 5000; i++) {
+        lo = rd(WPR2_LO) & 0xFFFFFFF0u; hi = rd(WPR2_HI) & 0xFFFFFFF0u;
+        if (lo == FW50_WPR2_LO_UP && hi == FW50_WPR2_HI_UP) {
+            printf("%s: fwsec50: *** WPR2 UP lo=0x%08x hi=0x%08x after %ums ***\n",
+                   bdf, lo, hi, i);
+            return 1;
+        }
+        usleep(1000);
+    }
+    wr(GSP_IMEMC0, 0); v = rd(GSP_IMEMD0); wr(GSP_IMEMC0, 0);
+    wr(GSP_DMEMC0, 0x10); uint32_t vD = rd(GSP_DMEMD0); wr(GSP_DMEMC0, 0);
+    printf("%s: fwsec50: TIMEOUT wpr2=0x%08x:0x%08x cpuctl=0x%x hwcfg2=0x%08x "
+           "dbg=0x%x mbox0=0x%x mbox1=0x%x IMEM[0]=0x%08x(exp 0x%08x) "
+           "DMEM[0x10]=0x%08x trace0=0x%08x\n",
+           bdf, rd(WPR2_HI), rd(WPR2_LO), rd(GSP_CPUCTL), rd(GSP_HWCFG2),
+           rd(GSP_DBG), rd(GSP_MAILBOX0), rd(GSP_MAILBOX1),
+           v, *(uint32_t *)blob, vD, rd(GSP_TRACE_RDIDX));
+    for (i = 0; i < 4; i++) {   /* last trace entries: BL liveness */
+        wr(GSP_TRACE_RDIDX, (0 - i - 1) & 0xFF);
+        printf(" trace[-%u]=0x%08x", i + 1, rd(GSP_TRACE_ENT));
+    }
+    printf("\n");
     return 0;
 }
 
@@ -195,8 +358,27 @@ static int unlock_one(const char *bdf, const uint8_t *img, int wait_s,
         }
         printf("%s: after GFW-kill: cpuctl=0x%x (exp 0x10) plm_gate=0x%x\n",
                bdf, rd(SEC2_CPUCTL), rd(SEC2_RESET_PLM));
-        printf("%s: WPR2=0x%08x:0x%08x (exp up: 027fee00:027fe000)\n", bdf,
-               rd(0x001FA828), rd(0x001FA824));
+        printf("%s: WPR2=0x%08x:0x%08x (exp up: 027fee00:027fe000)\n",
+               bdf, rd(0x001FA828), rd(0x001FA824));
+    }
+
+    /* ticket 12: FWSEC HS-boot on GSP when POST/FLR left WPR2 down (the
+     * locked SKU's VBIOS never runs FRTS — EFI does it itself, U:4742-4767) */
+    if (g_fwsec_virt && g_fwsec_phys >= 0x100000000ULL) {
+        int wprUp;
+        if ((rd(WPR2_LO) & 0xFFFFFFF0u) == FW50_WPR2_LO_UP &&
+            (rd(WPR2_HI) & 0xFFFFFFF0u) == FW50_WPR2_HI_UP) {
+            printf("%s: WPR2 already up — skip FWSEC\n", bdf);
+            wprUp = 1;
+        } else {
+            wprUp = fwsec_boot_gsp(bdf);
+        }
+        if (!wprUp) goto out;
+    }
+    if (fwsec_only) {
+        printf("%s: --fwsec-only: booter not attempted\n", bdf);
+        rc = 0;
+        goto out;
     }
 
     /* canary gate: wait for SEC2 aperture */
@@ -266,6 +448,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--wait") && i + 1 < argc) wait_s = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--blob") && i + 1 < argc) blob = argv[++i];
         else if (!strcmp(argv[i], "--flr")) do_flr = 1;
+        else if (!strcmp(argv[i], "--fwsec-only")) fwsec_only = 1;
     }
     if (geteuid()) { fprintf(stderr, "root required\n"); return 2; }
 
@@ -279,17 +462,39 @@ int main(int argc, char **argv)
     memcpy(img + SIG_PATCH_OFF, sig, 16);
 
     void *mvirt; uint64_t mphys;
-    uint64_t pBl, pSig, pElf; void *vBl, *vSig, *vElf;
+    uint64_t pBl, pSig, pElf, pFw; void *vBl, *vSig, *vElf, *vFw;
     for (int rtry = 0; rtry < 60; rtry++) {
         if (meta_phys(&mvirt, &mphys)) return 2;
         if (meta_phys(&vBl, &pBl) || meta_phys(&vSig, &pSig) ||
-            meta_phys(&vElf, &pElf)) return 2;
-        printf("phys[try %d]: meta=0x%llx bl=0x%llx sig=0x%llx elf=0x%llx\n",
+            meta_phys(&vElf, &pElf) || meta_phys(&vFw, &pFw)) return 2;
+        printf("phys[try %d]: meta=0x%llx bl=0x%llx sig=0x%llx elf=0x%llx fwsec=0x%llx\n",
                rtry, (unsigned long long)mphys, (unsigned long long)pBl,
-               (unsigned long long)pSig, (unsigned long long)pElf);
+               (unsigned long long)pSig, (unsigned long long)pElf,
+               (unsigned long long)pFw);
         if (mphys >= 0x100000000ULL && pBl >= 0x100000000ULL &&
-            pSig >= 0x100000000ULL && pElf >= 0x100000000ULL)
+            pSig >= 0x100000000ULL && pElf >= 0x100000000ULL &&
+            pFw >= 0x100000000ULL)
             break;
+    }
+    {   /* ticket 12: FWSEC + generic falcon BL blobs */
+        g_fwsec_virt = vFw; g_fwsec_phys = pFw;
+        size_t got = 0;
+        FILE *ff = fopen("/usr/local/share/50hx/fwsec_50hx_prod.bin", "rb");
+        got = ff ? fread(vFw, 1, FW50_BLOB_SIZE, ff) : 0; if (ff) fclose(ff);
+        if (got != FW50_BLOB_SIZE)
+            fprintf(stderr, "fwsec_50hx_prod.bin: %zu/%x bytes — FWSEC stage disabled\n",
+                    got, FW50_BLOB_SIZE);
+        if (got == FW50_BLOB_SIZE) {
+            g_bl_img = malloc(0x300);
+            FILE *fb = fopen("/usr/local/share/50hx/bl_gsp_tu102.bin", "rb");
+            got = fb ? fread(g_bl_img, 1, 0x300, fb) : 0; if (fb) fclose(fb);
+            printf("fwsec blob + BL (%zu B) loaded @0x%llx\n", got,
+                   (unsigned long long)pFw);
+            if (got != 0x300) {
+                fprintf(stderr, "bl_gsp_tu102.bin: %zu/768 bytes — FWSEC stage disabled\n", got);
+                g_fwsec_virt = NULL;
+            }
+        } else g_fwsec_virt = NULL;
     }
     {   /* load real blobs into their own 2 MB pinned pages */
         size_t got;
