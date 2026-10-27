@@ -305,6 +305,16 @@ static int unlock_one(const char *bdf, const uint8_t *img, int wait_s,
         munmap(bar, 16u << 20);
         return 0;
     }
+    /* NEVER touch a card the driver has bound — GSP-kill under a live
+     * driver wedges it (learned the hard way, 2026-10-27) */
+    {
+        char dp[300];
+        snprintf(dp, sizeof dp, "/sys/bus/pci/devices/%s/driver", bdf);
+        if (access(dp, F_OK) == 0) {
+            printf("%s: driver bound — refuse (locked-under-driver; use --force)\n", bdf);
+            if (!getenv("FORCE50HX")) { munmap(bar, 16u << 20); return 1; }
+        }
+    }
 
     if (flr) {   /* fresh POST-like state: clears requires-reset AND
                   * re-runs VBIOS init; pre-driver so nothing else touches
