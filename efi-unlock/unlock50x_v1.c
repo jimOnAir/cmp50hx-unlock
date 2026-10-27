@@ -4487,6 +4487,244 @@ u40x_rebar_try(UINT64 want, UINT32 selector)
 }
 
 /* ===== v55 主entry（DIRECT_SEC2，40HX） ===== */
+
+/* ==== MULTI-CARD LOOP (load option "multi") ============================
+ * Upstream unlocks only the first 10de:1e09 found (README: "multi-GPU
+ * hosts need an iteration loop (not yet ported)"). This collects every
+ * CMP 50HX via CF8 enumeration, then runs the whole per-card sequence
+ * [2]..[10.5] once per card. Host-side resources ([6]/[7]) are re-allocated
+ * per card (~45 MB each, negligible); WPR meta geometry is re-detected per
+ * card (detect_fb_size) and the <4GB WPR-meta bounce copy is re-allocated
+ * per card (cmp90_metaLowPhys reset). One attempt per card per boot; a
+ * failure records its verdict and moves on (no in-boot retries). ReBAR +
+ * chainload still run once, for card 0.
+ * CONSOLE PREFLIGHT (issue: the first 1e09 on the bus is the POST video
+ * console; its held SEC2 Falcon mutex makes every attempt end 0x11 and
+ * risks the live GOP): the console BDF is taken from firmware state
+ * (handles carrying BOTH PciIo and GraphicsOutput — locked CMPs have no
+ * bound driver and can never false-positive), never from GPU registers.
+ * Cards matched against it are skipped before any config/MMIO write.
+ * If firmware exposes no GOP at all, fall back to "lowest-bus 1e09 is the
+ * console" and stamp the assumption in the log for the ledger.
+ * Without the token behavior is bit-identical to upstream single-card. */
+#define U40X_MAX_CARDS 8
+static struct { UINTN bus, dev, fn; INTN enc; } g_cards[U40X_MAX_CARDS];
+static UINTN g_nLowest10de = 0xFFFFFFFFu; /* lowest bus of ANY 10de device */
+
+static UINTN g_nCards = 0;
+static UINT32 g_cardRes[U40X_MAX_CARDS];   /* 0=failed 1=unlocked 2=was-already 3=bar-fail 4=skip-console(gop) 5=skip-console(assumed) */
+
+static void u40x_fb_defaults(void) {
+    g_fbSize     = 0x280000000ULL;
+    g_frtsOffset = FW50_FRTS_OFFSET;
+    g_wpr2LoUp   = FW50_WPR2_LO_UP;
+    g_wpr2HiUp   = FW50_WPR2_HI_UP;
+}
+
+static UINTN u40x_collect_cards(void) {
+    UINTN b, d, f, n = 0, maxf;
+    g_nLowest10de = 0xFFFFFFFFu;
+    for (b = 0; b < 256 && n < U40X_MAX_CARDS; b++) {
+        for (d = 0; d < 32 && n < U40X_MAX_CARDS; d++) {
+            UINT32 id0 = u40x_pci_rbdf(b, d, 0, 0, 2);   /* CF8-safe enumeration */
+            UINT32 hdr;
+            maxf = 1;
+            if (id0 == 0xFFFFFFFFu || (id0 & 0xFFFFu) == 0u)
+                continue;
+            /* any 10de device (e.g. CMP 90HX 220d) counts for the
+             * lowest-NVIDIA-device console heuristic */
+            if ((id0 & 0xFFFFu) == 0x10DEu && g_nLowest10de == 0xFFFFFFFFu)
+                g_nLowest10de = b;
+            hdr = u40x_pci_rbdf(b, d, 0, 0x0C, 2);
+            if (hdr & 0x800000u)
+                maxf = 8;
+            for (f = 0; f < maxf; f++) {
+                UINT32 id = (f == 0) ? id0 : u40x_pci_rbdf(b, d, f, 0, 2);
+                if (id == 0xFFFFFFFFu)
+                    continue;
+                if ((id & 0xFFFFu) == 0x10DEu && ((id >> 16) & 0xFFFFu) == 0x1E09u) {
+                    g_cards[n].bus = b; g_cards[n].dev = d; g_cards[n].fn = f;
+                    g_cards[n].enc = 2;
+                    Print(L"[multi] card %d at %02x:%02x.%x\n",
+                          (INTN)n, (INTN)b, (INTN)d, (INTN)f);
+                    if (++n == U40X_MAX_CARDS)
+                        break;
+                }
+            }
+        }
+    }
+    return n;
+}
+
+/* ---- [multi preflight] console identification from firmware state ------
+ * The active video console is the PCI device that has BOTH PciIo and a
+ * bound GraphicsOutput protocol (the PCI bus driver bound them at POST;
+ * locked CMP 50HX expose no UEFI driver and are absent from this set).
+ * GetLocation only reads the handle's bookkeeping — no device access. */
+static BOOLEAN g_consoleFound = FALSE;
+static UINTN g_consoleBus = 0, g_consoleDev = 0, g_consoleFn = 0;
+static UINTN g_assumeIdx = 0;   /* fallback: index of lowest-bus candidate */
+static UINT32 g_t0 = 0xFFFFFFFFu;
+static UINTN u40x_elapsed_s(void)
+{
+    EFI_TIME tt;
+    UINT32 now;
+    if (g_t0 == 0xFFFFFFFFu) return 0;
+    if (uefi_call_wrapper(gRT->GetTime, 2, &tt, NULL)) return 0;
+    now = (UINT32)tt.Hour * 3600u + (UINT32)tt.Minute * 60u + (UINT32)tt.Second;
+    return (now >= g_t0) ? (now - g_t0) : (86400u - g_t0 + now);
+}
+
+static void u40x_console_detect(void)
+{
+    EFI_HANDLE *hb = NULL;
+    UINTN n = 0, k, gop_n = 0, pio_fail = 0, loc_fail = 0;
+
+    g_consoleFound = FALSE;
+    if (uefi_call_wrapper(BS->LocateHandleBuffer, 5, ByProtocol,
+            &gEfiPciIoProtocolGuid, NULL, &n, &hb) || !n) {
+        Print(L"[multi] console detect: no PciIo handles; no fallback "
+              L"source\n");
+        return;
+    }
+    Print(L"[multi] console detect: %d PciIo handle(s)\n", (INTN)n);
+    for (k = 0; k < n; k++) {
+        EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
+        EFI_PCI_IO_PROTOCOL *pio = NULL;
+        UINTN rb, bus, dev, fn;
+        if (uefi_call_wrapper(BS->HandleProtocol, 3, hb[k],
+                &gEfiGraphicsOutputProtocolGuid, (VOID **)&gop) || !gop)
+            continue;
+        gop_n++;
+        if (uefi_call_wrapper(BS->HandleProtocol, 3, hb[k],
+                &gEfiPciIoProtocolGuid, (VOID **)&pio) || !pio) {
+            pio_fail++;
+            continue;
+        }
+        if (uefi_call_wrapper(pio->GetLocation, 5, pio, &rb, &bus, &dev, &fn)) {
+            loc_fail++;
+            continue;
+        }
+        Print(L"[multi] console candidate (GOP+PciIo): rb=%d %02x:%02x.%x\n",
+              (INTN)rb, (INTN)bus, (INTN)dev, (INTN)fn);
+        g_consoleBus = bus; g_consoleDev = dev; g_consoleFn = fn;
+        g_consoleFound = TRUE;
+    }
+    uefi_call_wrapper(BS->FreePool, 1, hb);
+    Print(L"[multi] console detect: GOP handles=%d (pciio-bind fail=%d, "
+          L"loc fail=%d)\n", (INTN)gop_n, (INTN)pio_fail, (INTN)loc_fail);
+    if (!g_consoleFound)
+        Print(L"[multi] console detect: no GOP device; using lowest-bus "
+              L"assumption\n");
+}
+
+/* ---- [tel] read-only forensic snapshot (load option "tel") -------------
+ * One cold boot must answer: what POST left on EACH 1e09 (falcon state,
+ * SEC2 mutexes, PLM/WPR2), how the console differs from the others, and
+ * what the per-attempt failing state looks like. NO MMIO writes; config
+ * space is only touched to (temporarily) set the MEM bit if a BAR is
+ * still dark, and cmd is restored byte-exactly afterwards. Run BEFORE
+ * the unlock sequence so cards stay pristine for the attempt that
+ * follows. */
+static void u40x_tel_snap_card(UINTN b, UINTN d, UINTN f, INTN enc)
+{
+    UINT32 cmd = u40x_pci_rbdf(b, d, f, 0x04, 2);
+    UINT32 id = u40x_pci_rbdf(b, d, f, 0x00, 2);
+    UINT32 subs = u40x_pci_rbdf(b, d, f, 0x2C, 2);
+    UINT32 cls = u40x_pci_rbdf(b, d, f, 0x08, 2);
+    UINT64 bar0 = (UINT64)u40x_pci_rbdf(b, d, f, 0x14, 2) & ~0xFu;
+    UINT64 saveBase = gBar0Base;
+    UINTN sb = gBus, sd = gDev, sf = gFn;
+    INTN se = u40x_enc_found;
+    BOOLEAN temp = FALSE;
+
+    bar0 |= (UINT64)u40x_pci_rbdf(b, d, f, 0x18, 2) << 32;
+    if (!(cmd & 0x2u)) {
+        u40x_pci_wbdf(b, d, f, 0x04, cmd | 0x2u, 2);
+        temp = TRUE;
+    }
+    gBar0Base = bar0; gBus = b; gDev = d; gFn = f; u40x_enc_found = enc;
+    Print(L"[tel] %02x:%02x.%x id=%08x subs=%08x cls=%08x cmd=%08x BAR0=%lx\n",
+          (INTN)b, (INTN)d, (INTN)f, id, subs, cls, cmd, bar0);
+    Print(L"[tel]  SEC2 cpu=%08x hwcfg2=%08x mb0=%08x mb1=%08x irq=%08x "
+          L"dmactl=%08x trf=%08x fbif=%08x bcr=%08x\n",
+          mmio_read32(SEC2_CPUCTL), mmio_read32(SEC2_HWCFG2),
+          mmio_read32(SEC2_MAILBOX0), mmio_read32(SEC2_MAILBOX1),
+          mmio_read32(SEC2_IRQSTAT), mmio_read32(SEC2_DMACTL),
+          mmio_read32(SEC2_DMATRFCMD), mmio_read32(SEC2_FBIF_CTL),
+          mmio_read32(SEC2_BCR_CTRL));
+    Print(L"[tel]  PSEC 348=%08x 34c=%08x 350=%08x | GSP cpu=%08x hwcfg=%08x "
+          L"mb0=%08x mb1=%08x bcr=%08x\n",
+          mmio_read32(NV_PSEC_BASE + 0x348), mmio_read32(NV_PSEC_BASE + 0x34c),
+          mmio_read32(NV_PSEC_BASE + 0x350),
+          mmio_read32(GSP_CPUCTL), mmio_read32(GSP_HWCFG),
+          mmio_read32(GSP_BASE + 0x040), mmio_read32(GSP_BASE + 0x044),
+          mmio_read32(GSP_BCR));
+    Print(L"[tel]  PLM=%08x SS0=%08x SS1=%08x GFW=%08x BOOT0=%08x "
+          L"WPR2=%08x:%08x\n",
+          mmio_read32(REG_FEAT_OVR_PLM), mmio_read32(REG_FEAT_OVR_SM_SPD),
+          mmio_read32(REG_FEAT_OVR_SM_SPD_1), mmio_read32(REG_GFW_BOOT_OK),
+          mmio_read32(0x00000000UL),
+          mmio_read32(REG_PFB_MMU_WPR2_LO), mmio_read32(REG_PFB_MMU_WPR2_HI));
+    if (temp)
+        u40x_pci_wbdf(b, d, f, 0x04, cmd, 2);
+    gBar0Base = saveBase; gBus = sb; gDev = sd; gFn = sf;
+    u40x_enc_found = se;
+}
+
+/* ---- [sbr] Secondary Bus Reset of the card's upstream root port -------
+ * (load option "sbr") Returns the card to a pristine, pre-POST SEC2 state
+ * before the unlock sequence. The Oct-25 refutation of this approach was
+ * produced by the poisoned DBG build and never retested on a clean base;
+ * the 0x11 booter-mutex failure is exactly the state a per-card SBR
+ * should erase. BAR/CMD state is saved and restored around the pulse. */
+static void u40x_sbr_reset(UINTN cBus, UINTN cDev, UINTN cFn, INTN enc)
+{
+    UINTN dd, df, hdr, sec, i, tryn;
+    INTN bdev = -1, bfn = -1;
+    UINT32 saved[7], v;
+
+    for (dd = 0; dd < 32 && bdev < 0; dd++)
+        for (df = 0; df < 8; df++) {
+            hdr = u40x_pci_rbdf(0, dd, df, 0x0C, 2);
+            if (hdr == 0xFFFFFFFFu)
+                continue;
+            if (((hdr >> 16) & 0x7F) != 1)
+                continue;
+            sec = (u40x_pci_rbdf(0, dd, df, 0x18, 2) >> 16) & 0xFF;
+            if (sec == cBus) { bdev = (INTN)dd; bfn = (INTN)df; break; }
+        }
+    if (bdev < 0) {
+        Print(L"[sbr] no type-1 bridge behind bus 00 for bus %02x; skip\n",
+              (INTN)cBus);
+        return;
+    }
+    for (i = 0; i < 5; i++)
+        saved[i] = u40x_pci_rbdf(cBus, cDev, cFn, 0x10 + 4 * i, enc);
+    saved[5] = u40x_pci_rbdf(cBus, cDev, cFn, 0x04, enc);
+    saved[6] = u40x_pci_rbdf(cBus, cDev, cFn, 0x24, enc);
+
+    v = u40x_pci_rbdf(0, (UINTN)bdev, (UINTN)bfn, 0x3C, 2);
+    u40x_pci_wbdf(0, (UINTN)bdev, (UINTN)bfn, 0x3C, v | 0x40000000u, 2);
+    uefi_call_wrapper(BS->Stall, 1, 200000);                 /* hold 200ms */
+    u40x_pci_wbdf(0, (UINTN)bdev, (UINTN)bfn, 0x3C, v & ~0x40000000u, 2);
+    uefi_call_wrapper(BS->Stall, 1, 1000);                   /* spec 1ms   */
+
+    for (tryn = 0; tryn < 300; tryn++) {
+        v = u40x_pci_rbdf(cBus, cDev, cFn, 0x00, enc);
+        if (v != 0xFFFFFFFFu && v != 0x00000000u)
+            break;
+        uefi_call_wrapper(BS->Stall, 1, 10000);              /* poll 10ms  */
+    }
+    for (i = 0; i < 5; i++)
+        u40x_pci_wbdf(cBus, cDev, cFn, 0x10 + 4 * i, saved[i], enc);
+    u40x_pci_wbdf(cBus, cDev, cFn, 0x24, saved[6], enc);
+    u40x_pci_wbdf(cBus, cDev, cFn, 0x04, saved[5] | 0x7u, enc);
+    Print(L"[sbr] %02x:%02x.%x reset via bridge 00:%02x.%x, vendor back "
+          L"after %dms\n", (INTN)cBus, (INTN)cDev, (INTN)cFn, (UINTN)bdev,
+          (UINTN)bfn, (INTN)(tryn * 10 + 1));
+}
+
 EFI_STATUS
 efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
@@ -4500,8 +4738,17 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     GspFwWprMeta *wprMeta = NULL;
     UINT32 boot0 = 0;
     UINTN i;
+    UINTN ci, cj;
+    BOOLEAN multi = FALSE;
 
     InitializeLib(ImageHandle, SystemTable);
+    /* [tick] phase-race telemetry: seconds since EFI entry */
+    {
+        EFI_TIME tt;
+        if (!uefi_call_wrapper(gRT->GetTime, 2, &tt, NULL))
+            g_t0 = (UINT32)tt.Hour * 3600u + (UINT32)tt.Minute * 60u
+                   + (UINT32)tt.Second;
+    }
     /* v1.50 (Linux build): with the stock crt0 entry the u40x_entry wrapper
      * never runs, so open the ESP log here instead (same effect: all later
      * Print output lands in \50hx_log.txt on our boot device). The gnu-efi
@@ -4521,6 +4768,9 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     }
     u40x_open_log(ImageHandle);
     Print(L"\n=== CMP50HX Unlock v1-50HX (TU102 GSP WITH_LOADER) ===\n");
+#ifdef U40X_BUILD_STAMP
+    Print(L"[build] " U40X_BUILD_STAMP L"\n");
+#endif
     returnToGrub = u40x_has_load_option(ImageHandle, L"--return-to-grub");
     if (returnToGrub)
         Print(L"[50HX] GRUB handoff mode: internal chainload disabled\n");
@@ -4537,10 +4787,156 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         return returnToGrub ? EFI_SUCCESS : EFI_NOT_FOUND;
     }
 
+    /* [tel] pristine per-card forensics BEFORE any unlock action */
+    if (u40x_has_load_option(ImageHandle, L"tel")) {
+        UINTN tn = u40x_collect_cards(), tj;
+        Print(L"[tel] snapshot of %d candidate(s) BEFORE any unlock "
+              L"action\n", (INTN)tn);
+        for (tj = 0; tj < tn; tj++)
+            u40x_tel_snap_card(g_cards[tj].bus, g_cards[tj].dev,
+                               g_cards[tj].fn, 2);
+    }
+
+    multi = u40x_has_load_option(ImageHandle, L"multi");
+    if (multi) {
+        g_nCards = u40x_collect_cards();
+        if (g_nCards < 2) {
+            multi = FALSE;
+        } else {
+            /* keep the first card exactly as find_gpu chose it (enc included) */
+            g_cards[0].bus = gBus; g_cards[0].dev = gDev;
+            g_cards[0].fn = gFn;   g_cards[0].enc = u40x_enc_found;
+        }
+    }
+    if (!multi) {
+        g_nCards = 1;
+        g_cards[0].bus = gBus; g_cards[0].dev = gDev;
+        g_cards[0].fn = gFn;   g_cards[0].enc = u40x_enc_found;
+    }
+    if (multi) {
+        UINTN j;
+        Print(L"[multi] looping over %d card(s)\n", (INTN)g_nCards);
+        u40x_console_detect();
+        /* lowest-bus-assumption fallback: only the lowest NVIDIA DEVICE
+         * overall can be the assumed console — if a non-CMP GPU (220d)
+         * sits below the CMP cards it IS the console (bench E2/E6
+         * 2026-10-26), and no CMP may be skipped. collect_cards() must
+         * have run (it records g_nLowest10de). */
+        g_assumeIdx = U40X_MAX_CARDS;   /* sentinel: never matches */
+        for (j = 0; j < g_nCards; j++)
+            if (g_cards[j].bus == g_nLowest10de) {
+                g_assumeIdx = j;
+                break;
+            }
+        if (!g_consoleFound)
+            Print(L"[multi] console fallback: %s\n",
+                  g_assumeIdx < U40X_MAX_CARDS
+                      ? L"lowest 10de device is a CMP candidate"
+                      : L"lowest NVIDIA device is NOT a 1e09 — no skip");
+    }
+
+    /* [retry] timing-lottery mitigation: up to 3 full passes over failed
+     * cards within ONE boot (each pass re-SBRs when token sbr is set).
+     * If per-attempt failures are marginal/timing-dependent, per-boot
+     * success compounds; if state-based, passes fail identically —
+     * itself diagnostic. Unlocked/verdicted cards short-circuit. */
+    {
+    UINTN pass, pmax = u40x_has_load_option(ImageHandle, L"retry") ? 3 : 1;
+    for (pass = 0; pass < pmax; pass++) {
+    if (pass) {
+        UINTN any = 0, az;
+        for (az = 0; az < g_nCards; az++)
+            if (g_cardRes[az] == 0) any = 1;
+        if (!any) break;
+        Print(L"\n[multi] ########## retry pass %d ##########\n",
+              (INTN)(pass + 1));
+        {   /* [delay] phase-race ladder: sweep time-since-POST/GSP-start
+             * before retrying — if 0x11 is a race against VBIOS SEC2
+             * firmware activity, the win window lives at some offset.
+             * E2/20:56 wins came ~3-4 min after power-on (long POST);
+             * all fast boots (<=~2 min) lose. */
+            UINTN dl = (pass == 1) ? 45u : 165u;
+            UINTN di;
+            Print(L"[delay] pass %d: waiting %d s (now +%d s since EFI)\n",
+                  (INTN)(pass + 1), (INTN)dl, (INTN)u40x_elapsed_s());
+            for (di = 0; di < dl; di++)
+                uefi_call_wrapper(BS->Stall, 1, 1000000);
+        }
+    }
+    for (ci = 0; ci < g_nCards; ci++) {
+    /* [rev] attempt order: ascending (default) or reversed — isolates
+     * whether the first-attempted card (the console/dud slot) contaminates
+     * the second one, or the good card fails on its own (bench 2026-10-26) */
+    cj = u40x_has_load_option(ImageHandle, L"rev")
+         ? (g_nCards - 1 - ci) : ci;
+    if (pass && g_cardRes[cj] != 0) goto next_card;   /* done/failed-keep?
+        * retry only res==0 (attempted&failed); skips unlocked & skipped */
+
     /* ---------- [2] BAR0 enable ---------- */
+    u40x_fb_defaults();
+    cmp90_metaLowPhys = 0;   /* [multi] fresh <4GB WPR-meta bounce per card */
+    gBus = g_cards[cj].bus; gDev = g_cards[cj].dev;
+    gFn = g_cards[cj].fn;   u40x_enc_found = g_cards[cj].enc;
+    Print(L"\n[multi] === card %d/%d  %02x:%02x.%x ===\n", (INTN)cj,
+          (INTN)g_nCards, (INTN)gBus, (INTN)gDev, (INTN)gFn);
+    Print(L"[tick] attempt @ +%d s since EFI entry\n",
+          (INTN)u40x_elapsed_s());
+    /* [multi preflight] the console card is off-limits: its held SEC2
+     * Falcon mutex guarantees an 0x11 failure and the attempt itself
+     * risks the live GOP. Skip before touching config space at all. */
+    if (multi) {
+        if (g_consoleFound && gBus == g_consoleBus && gDev == g_consoleDev
+            && gFn == g_consoleFn) {
+            Print(L"[multi] card %d skipped: CONSOLE (conout-gop)\n",
+                  (INTN)cj);
+            g_cardRes[cj] = 4; goto next_card;
+        }
+        if (!g_consoleFound && cj == g_assumeIdx
+            && !u40x_has_load_option(ImageHandle, L"noskip")) {
+            Print(L"[multi] card %d skipped: CONSOLE "
+                  L"(lowest-bus-assumption)\n", (INTN)cj);
+            g_cardRes[cj] = 5; goto next_card;
+        }
+    }
+    /* [sbr] pristine-state reset before touching the card (root-cause fix
+     * candidate for the POST-time 0x11 SEC2 mutex state) */
+    if (u40x_has_load_option(ImageHandle, L"sbr"))
+        u40x_sbr_reset(gBus, gDev, gFn, u40x_enc_found);
+    /* [lnk] link state at attempt time (timing/link theory telemetry) */
+    {
+        UINTN hdr = u40x_pci_rbdf(g_cards[cj].bus, g_cards[cj].dev,
+                                  g_cards[cj].fn, 0x0C, 2);
+        (void)hdr;
+        UINTN capp = u40x_pci_rbdf(g_cards[cj].bus, g_cards[cj].dev,
+                                   g_cards[cj].fn, 0x34, 2) & 0xFFu;
+        UINTN guard = 0;
+        while (capp >= 0x40 && capp < 0x100 && guard++ < 40) {
+            UINT32 cw = u40x_pci_rbdf(g_cards[cj].bus, g_cards[cj].dev,
+                                      g_cards[cj].fn, capp, 2);
+            UINTN id = cw & 0xFFu, next = (cw >> 8) & 0xFFu;
+            if (id == 0x10u) {
+                UINT32 lcap = u40x_pci_rbdf(g_cards[cj].bus, g_cards[cj].dev,
+                                            g_cards[cj].fn, capp + 0x0C, 2);
+                UINT32 lctl = u40x_pci_rbdf(g_cards[cj].bus, g_cards[cj].dev,
+                                            g_cards[cj].fn, capp + 0x10, 2);
+                UINT32 lsta = u40x_pci_rbdf(g_cards[cj].bus, g_cards[cj].dev,
+                                            g_cards[cj].fn, capp + 0x12, 2);
+                Print(L"[lnk] %02x:%02x.%x cap=%08x ctl=%08x "
+                      L"(sta=%04x spd=%x wid=%x)\n",
+                      (INTN)g_cards[cj].bus, (INTN)g_cards[cj].dev,
+                      (INTN)g_cards[cj].fn, lcap, lctl,
+                      (lsta >> 16) & 0xFFFFu,
+                      ((lsta >> 16) & 0xFu), ((lsta >> 20) & 0x3Fu));
+                break;
+            }
+            if (next == 0u || next == capp) break;
+            capp = next;
+        }
+    }
     if (u40x_enable_bar()) {
-        Print(L"[50HX] BAR enable failed; abort\n");
-        return returnToGrub ? EFI_SUCCESS : EFI_DEVICE_ERROR;
+        Print(L"[50HX] card %d BAR enable failed; skip\n", (INTN)cj);
+        g_cardRes[cj] = 3;
+        goto next_card;
     }
     /* Detect the card SKU from the WPR2 the VBIOS POST latched (10 GiB vs 20 GiB).
      * Must happen before any code path that consumes g_fbSize / g_frtsOffset
@@ -4548,7 +4944,7 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
      * no VBIOS FWSEC keeps the 10 GiB defaults — same fallback as before. */
     detect_fb_size(ImageHandle);
 #ifdef VBIOS_DUMP
-    u40x_vbios_dump();          /* v65: after BAR enable; -> \50hx_vbios.bin */
+    if (ci == 0) u40x_vbios_dump();          /* v65: after BAR enable; -> \50hx_vbios.bin */
 #endif
 
     /* ---------- [3] BOOT0 芯片verify ---------- */
@@ -4563,11 +4959,11 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     /* ---------- [4] 快捷path：unlock / 直写可粘 ---------- */
     if (is_unlocked()) {
         Print(L"[50HX] already unlocked (SS0/SS1 exact) — skip injection\n");
-        goto done;
+        g_cardRes[cj] = 2; goto next_card;
     }
     if (direct_write_probe()) {
         Print(L"[50HX] direct MMIO probe succeeded — skip booter\n");
-        goto done;
+        g_cardRes[cj] = 1; goto next_card;
     }
 
     /* ---------- [5] GFW status + timeseed ---------- */
@@ -4664,10 +5060,11 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         }
         if ((cpuctl & 0xBADF0000u) == 0xBADF0000u) {
             Print(L"[50HX] SEC2 still locked — stop\n");
-            goto done;
+            goto next_card;
         }
         Print(L"[50HX] SEC2 unlocked — direct booter load (DIRECT_SEC2)\n");
     }
+
 
     /* ---------- [8b] FWSEC on GSP → FRTS → WPR2 up (fallback only) ---------
      * v1.50: 50HX native FWSEC (extracted from the board ROM 90.02.60.00.1A,
@@ -4738,9 +5135,43 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         UINT32 plm = mmio_read32(REG_FEAT_OVR_PLM);
         UINT32 ss0 = mmio_read32(REG_FEAT_OVR_SM_SPD);
         UINT32 ss1 = mmio_read32(REG_FEAT_OVR_SM_SPD_1);
+        /* [late-unlock tolerance] A2-class anomaly: SS0 can flip to
+         * 0x88888888 seconds after the attempt "failed" (the transient
+         * 13.16 TF measured post-boot). Do not declare FAILED on the
+         * first read — poll up to 3 s. */
+        {
+            UINTN lw;
+            for (lw = 0; lw < 60 && ss0 != 0x88888888u; lw++) {
+                uefi_call_wrapper(BS->Stall, 1, 50000);
+                ss0 = mmio_read32(REG_FEAT_OVR_SM_SPD);
+                ss1 = mmio_read32(REG_FEAT_OVR_SM_SPD_1);
+            }
+            if (lw && ss0 == 0x88888888u)
+                Print(L"[50HX] *** LATE UNLOCK after %dms ***\n",
+                      (INTN)(lw * 50));
+        }
         Print(L"[50HX] RESULT: PLM=0x%08x SS0=0x%08x SS1=0x%08x\n", plm, ss0, ss1);
-        if (is_unlocked())
+        if (u40x_has_load_option(ImageHandle, L"tel")) {
+            Print(L"[tel] post-attempt %02x:%02x.%x: SEC2 cpu=%08x mb0=%08x "
+                  L"mb1=%08x irq=%08x dmactl=%08x bcr=%08x\n",
+                  (INTN)gBus, (INTN)gDev, (INTN)gFn,
+                  mmio_read32(SEC2_CPUCTL), mmio_read32(SEC2_MAILBOX0),
+                  mmio_read32(SEC2_MAILBOX1), mmio_read32(SEC2_IRQSTAT),
+                  mmio_read32(SEC2_DMACTL), mmio_read32(SEC2_BCR_CTRL));
+            Print(L"[tel] post-attempt: PSEC348=%08x 34c=%08x 350=%08x "
+                  L"GSPcpu=%08x gspmb0=%08x WPR2=%08x:%08x GFW=%08x\n",
+                  mmio_read32(NV_PSEC_BASE + 0x348),
+                  mmio_read32(NV_PSEC_BASE + 0x34c),
+                  mmio_read32(NV_PSEC_BASE + 0x350),
+                  mmio_read32(GSP_CPUCTL), mmio_read32(GSP_BASE + 0x040),
+                  mmio_read32(REG_PFB_MMU_WPR2_LO),
+                  mmio_read32(REG_PFB_MMU_WPR2_HI),
+                  mmio_read32(REG_GFW_BOOT_OK));
+        }
+        if (is_unlocked()) {
+            g_cardRes[cj] = 1;
             Print(L"[50HX] *** UNLOCKED (SS0=0x88888888 SS1=0x8) ***\n");
+        }
         else if (plm == VAL_PLM_OPEN || plm == 0xFFFFFF8Fu)
             Print(L"[50HX] PLM %s — SS0 still gated\n",
                   plm == VAL_PLM_OPEN ? L"OPEN" : L"STAGED");
@@ -4790,6 +5221,23 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
      * Gen2 (not Auto/Gen1; makes PL_LINK_RATE come up 0x00240032),
      * kernel patch 04 + cmp50hx-gen2.service / the Windows logon task. */
     Print(L"[gen2] not attempted pre-OS - OS-side Gen2 only (issue #25)\n");
+next_card: ;
+    }   /* for each card (multi) */
+    }   /* for pass (retry) */
+    }   /* retry block */
+
+    for (ci = 0; ci < g_nCards; ci++)
+        Print(L"[multi] card %d result: %s\n", (INTN)ci,
+              g_cardRes[ci] == 1 ? L"UNLOCKED" :
+              g_cardRes[ci] == 2 ? L"was already unlocked" :
+              g_cardRes[ci] == 3 ? L"BAR FAIL" :
+              g_cardRes[ci] == 4 ? L"SKIPPED console (gop)" :
+              g_cardRes[ci] == 5 ? L"SKIPPED console (assumed)" :
+              L"FAILED");
+
+    /* ReBAR + chainload target = card 0 (upstream behavior) */
+    gBus = g_cards[0].bus; gDev = g_cards[0].dev; gFn = g_cards[0].fn;
+    u40x_enc_found = g_cards[0].enc;
 
 done:
     dump_regs(L"[v55 final]");
