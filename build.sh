@@ -15,9 +15,10 @@ source_tarball=''
 
 usage() {
     cat <<'EOF'
-usage: bash ./build.sh [--card cmp50hx] [--source-dir DIR | --source-tarball FILE]
+usage: bash ./build.sh [--card cmp50hx|cmp90hx|both] [--source-dir DIR | --source-tarball FILE]
 
-Card defaults to cmp50hx, or the CARD environment variable.
+Card selects the patch profile: cmp50hx (default), cmp90hx (vendored
+WildFlash1st series), or both (mixed fleet). CARD env also honored.
 
 With no source option, the exact NVIDIA 610.43.03 source archive is downloaded
 and checked by SHA-256. The script builds artifacts only.
@@ -75,8 +76,42 @@ case "${card}" in
             08-cmp50-driver-profiling.patch
         )
         ;;
+    cmp90hx)
+        readonly source_url="https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/${driver_version}.tar.gz"
+        readonly source_sha256="9df87d753cd9c05aa0eedc462af9b35debb549a657136e863282f94c96ee2640"
+        # Vendored from WildFlash1st/cmp90hx-unlock (GPL-2.0, commit 76940ae),
+        # profile cmp90-rejoin15 — see docs/cmp90hx/VENDORED.md.
+        patch_order=(
+            0014-6104303-cmp90hx-stockflow-rejoin14-multigpu-state.patch
+            0015-6104303-cmp90hx-stockflow-rejoin15-serialized-start.patch
+        )
+        patch_dir="${script_dir}/patches/cmp90hx"
+        ;;
+    both)
+        # Mixed CMP fleet (90HX GA102 + 50HX TU102): the cmp90 rejoin series
+        # applies to stock first, then the rebased cmp50 stockflow (generated
+        # 2026-10-27 as git-diff of the conflict-resolved tree; rebase it
+        # again whenever either stockflow series changes), then the rest of
+        # the cmp50 series which stacks cleanly on top.
+        readonly source_url="https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/${driver_version}.tar.gz"
+        readonly source_sha256="9df87d753cd9c05aa0eedc462af9b35debb549a657136e863282f94c96ee2640"
+        patch_files=()
+        for p in "${script_dir}/patches/cmp90hx/0014-6104303-cmp90hx-stockflow-rejoin14-multigpu-state.patch" \
+                 "${script_dir}/patches/cmp90hx/0015-6104303-cmp90hx-stockflow-rejoin15-serialized-start.patch" \
+                 "${script_dir}/patches/both/01-cmp50-stockflow-rebased-on-cmp90hx.patch" \
+                 "${script_dir}/patches/cmp50hx/02-cmp50-rt-core-count.patch" \
+                 "${script_dir}/patches/cmp50hx/03-cmp50-rebar.patch" \
+                 "${script_dir}/patches/cmp50hx/04-cmp50-pcie-gen2.patch" \
+                 "${script_dir}/patches/cmp50hx/05-rtx2080ti-rebar.patch" \
+                 "${script_dir}/patches/cmp50hx/06-aikitoria-p2p.patch" \
+                 "${script_dir}/patches/cmp50hx/07-turing-p2p.patch" \
+                 "${script_dir}/patches/cmp50hx/08-cmp50-driver-profiling.patch"; do
+            [[ -f "$p" ]] || { printf 'missing patch: %s\n' "$p" >&2; exit 5; }
+            patch_files+=("$p")
+        done
+        ;;
     *)
-        printf 'unknown card: %s (supported: cmp50hx)\n' "${card}" >&2
+        printf 'unknown card: %s (supported: cmp50hx cmp90hx both)\n' "${card}" >&2
         exit 2
         ;;
 esac
@@ -97,8 +132,9 @@ done
     printf 'kernel headers not found for %s\n' "${kernel_release}" >&2
     exit 4
 }
-patch_files=()
 [[ -f "${script_dir}/verify/rm_issue_rate.c" ]]
+if [[ "${card}" != both ]]; then
+patch_files=()
 for patch_name in "${patch_order[@]}"; do
     patch_file="${patch_dir}/${patch_name}"
     [[ -f "${patch_file}" ]] || {
@@ -107,6 +143,7 @@ for patch_name in "${patch_order[@]}"; do
     }
     patch_files+=("${patch_file}")
 done
+fi
 common_patch_file="${script_dir}/patches/common/01-nvidia-kernel-string-api.patch"
 [[ -f "${common_patch_file}" ]] || {
     printf 'missing common patch: %s\n' "${common_patch_file}" >&2
@@ -157,6 +194,7 @@ for patch_file in "${patch_files[@]}"; do
     patch -d "${source_dir}" -p1 < "${patch_file}" >/dev/null
 done
 
+if [[ "${card}" != cmp90hx ]]; then
 grep -q 'CMP50_GEN2: POLICY_PASS' \
     "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c"
 grep -q 'CMP50_GEN2: RETRAIN_PASS' \
@@ -165,6 +203,13 @@ grep -q 'CMP50_PCIE_DIAG_V1' "${source_dir}/kernel-open/nvidia/nv.c"
 if grep -Eq '0x0008E1B[48C]U|0x008205(7C|80|20)U' "${patch_files[@]}"; then
     printf 'the patch contains a GA100-only PCIe register\n' >&2
     exit 13
+fi
+fi
+if [[ "${card}" == cmp90hx || "${card}" == both ]]; then
+grep -q 'CMP90_STOCKFLOW_REJOIN' \
+    "${source_dir}/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c"
+grep -q 'CMP90_PC_EXACT_PCI_DEVICE_ID' \
+    "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c"
 fi
 
 make -C "${source_dir}" modules -j"${jobs}" KERNEL_UNAME="${kernel_release}"
@@ -182,10 +227,15 @@ cc -O2 -Wall -Wextra -Werror -std=c11 "${script_dir}/verify/rm_issue_rate.c" \
 [[ -f "${artifact_dir}/nvidia.ko" ]]
 [[ "$(modinfo -F version "${artifact_dir}/nvidia.ko")" == "${driver_version}" ]]
 [[ "$(modinfo -F vermagic "${artifact_dir}/nvidia.ko" | awk '{print $1}')" == "${kernel_release}" ]]
+if [[ "${card}" != cmp90hx ]]; then
 grep -a -q 'CMP50_STOCKFLOW_' "${artifact_dir}/nvidia.ko"
 grep -a -q 'CMP50_GSP_READY_' "${artifact_dir}/nvidia.ko"
 grep -a -q 'CMP50_REBAR' "${artifact_dir}/nvidia.ko"
 grep -a -q 'CMP50_PCIE_DIAG_V1' "${artifact_dir}/nvidia.ko"
+fi
+if [[ "${card}" == cmp90hx || "${card}" == both ]]; then
+grep -a -q 'CMP90_STOCKFLOW_' "${artifact_dir}/nvidia.ko"
+fi
 grep -q 'NV2080_CTRL_GR_INFO_INDEX_RT_CORE_COUNT' "${source_dir}/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c"
 grep -q 'data = 56U' "${source_dir}/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c"
 
