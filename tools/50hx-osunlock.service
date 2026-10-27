@@ -1,0 +1,17 @@
+[Unit]
+Description=CMP 50HX pre-driver SEC2 unlock (ticket 09)
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=gpu-unwedge.service docker.service nvidia-persistenced.service nvidia-suspend.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/sh -c 'test $(grep -c "" /dev/null) = 0; grep -q "nr_hugepages" /proc/sys/vm/nr_hugepages && [ $(cat /proc/sys/vm/nr_hugepages) -ge 2 ] || echo 4 > /proc/sys/vm/nr_hugepages'
+ExecStart=/usr/local/bin/50hx-osunlock --wait 120
+ExecStartPost=/usr/sbin/modprobe nvidia
+ExecStartPost=/usr/sbin/modprobe nvidia-drm
+ExecStartPost=/usr/sbin/modprobe nvidia_uvm
+
+[Install]
+WantedBy=multi-user.target
