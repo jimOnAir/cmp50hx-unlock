@@ -39,6 +39,20 @@
  * font, and Russian strings rendered as boxes in user logs.
  */
 
+#if defined(U40X_TARGET_BUS) && (U40X_TARGET_BUS == 0x01)
+#define U40X_LOG_NAME   L"\\50hx_log_u1.txt"
+#define U40X_VBIOS_NAME L"\\50hx_vbios_u1.bin"
+#elif defined(U40X_TARGET_BUS) && (U40X_TARGET_BUS == 0x03)
+#define U40X_LOG_NAME   L"\\50hx_log_u3.txt"
+#define U40X_VBIOS_NAME L"\\50hx_vbios_u3.bin"
+#elif defined(U40X_TARGET_BUS)
+#define U40X_LOG_NAME   L"\\50hx_log_u4.txt"
+#define U40X_VBIOS_NAME L"\\50hx_vbios_u4.bin"
+#else
+#define U40X_LOG_NAME   U40X_LOG_NAME
+#define U40X_VBIOS_NAME U40X_VBIOS_NAME
+#endif
+
 #include <efi.h>
 #include <efilib.h>
 #include <efipciio.h>
@@ -101,7 +115,7 @@ static void u40x_flush(void) {
         return;
     if (uefi_call_wrapper(fs->OpenVolume, 2, fs, &root) || !root)
         return;
-    st = uefi_call_wrapper(root->Open, 5, root, &f, L"\\50hx_log.txt",
+    st = uefi_call_wrapper(root->Open, 5, root, &f, U40X_LOG_NAME,
                            EFI_FILE_MODE_CREATE | EFI_FILE_MODE_READ |
                            EFI_FILE_MODE_WRITE, 0);
     if (EFI_ERROR(st) || !f) {
@@ -130,10 +144,10 @@ static void u40x_open_log(EFI_HANDLE IH) {
     if (EFI_ERROR(st) || !fs) return;
     st = uefi_call_wrapper(fs->OpenVolume, 2, fs, &root);
     if (EFI_ERROR(st) || !root) return;
-    uefi_call_wrapper(root->Open, 5, root, &f, L"\\50hx_log.txt",
+    uefi_call_wrapper(root->Open, 5, root, &f, U40X_LOG_NAME,
                EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE, 0);
     if (f) { uefi_call_wrapper(f->Delete, 1, f); f = NULL; }
-    st = uefi_call_wrapper(root->Open, 5, root, &u40x_log, L"\\50hx_log.txt",
+    st = uefi_call_wrapper(root->Open, 5, root, &u40x_log, U40X_LOG_NAME,
                     EFI_FILE_MODE_CREATE | EFI_FILE_MODE_READ |
                     EFI_FILE_MODE_WRITE, 0);
     if (EFI_ERROR(st)) u40x_log = NULL;
@@ -261,6 +275,19 @@ extern EFI_BOOT_SERVICES *BS;
 EFI_HANDLE ImageHandle = NULL; /* crt0 global - provided by ourselves */
 
 EFI_STATUS efi_main(EFI_HANDLE, EFI_SYSTEM_TABLE *);
+
+/* [tick] timing instrumentation (only additions vs upstream):
+ * seconds since EFI entry, printed at entry / attempt / final result. */
+static UINT32 g_t0 = 0xFFFFFFFFu;
+static UINTN u40x_elapsed_s(void)
+{
+    EFI_TIME tt;
+    UINT32 now;
+    if (g_t0 == 0xFFFFFFFFu) return 0;
+    if (uefi_call_wrapper(gRT->GetTime, 2, &tt, NULL)) return 0;
+    now = (UINT32)tt.Hour * 3600u + (UINT32)tt.Minute * 60u + (UINT32)tt.Second;
+    return (now >= g_t0) ? (now - g_t0) : (86400u - g_t0 + now);
+}
 
 EFI_STATUS EFIAPI
 u40x_entry(EFI_HANDLE ImageHandle_, EFI_SYSTEM_TABLE *SystemTable_)
@@ -736,10 +763,10 @@ static void u40x_vbios_dump(void) {
     if (EFI_ERROR(st) || !fs) return;
     st = uefi_call_wrapper(fs->OpenVolume, 2, fs, &root);
     if (EFI_ERROR(st) || !root) return;
-    uefi_call_wrapper(root->Open, 5, root, &f, L"\\50hx_vbios.bin",
+    uefi_call_wrapper(root->Open, 5, root, &f, U40X_VBIOS_NAME,
                EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE, 0);
     if (f) { uefi_call_wrapper(f->Delete, 1, f); f = NULL; }
-    st = uefi_call_wrapper(root->Open, 5, root, &f, L"\\50hx_vbios.bin",
+    st = uefi_call_wrapper(root->Open, 5, root, &f, U40X_VBIOS_NAME,
                     EFI_FILE_MODE_CREATE | EFI_FILE_MODE_READ |
                     EFI_FILE_MODE_WRITE, 0);
     if (EFI_ERROR(st) || !f) { Print(L"[vbios] open fail %r\n", st); uefi_call_wrapper(root->Close, 1, root); return; }
@@ -2187,12 +2214,18 @@ booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys)
     data = mmio_read32(SEC2_RESET_PLM_REG);
     Print(L"tu102 v62:   reset_plm=0x%08x (cyridd 期望 0xff)\n", data);
 
+#ifdef U40X_A_ONLY
+    for (attempt = 0; attempt < 1; attempt++) {   /* never engine-reset here */
+#else
     for (attempt = 0; attempt < 2; attempt++) {
+#endif
         BOOLEAN bReset = (attempt == 1);
         UINT32 rbNs = 0, rbSec = 0;
 
         Print(L"\n--- tu102 attempt %d/%d: %s ---\n", (INTN)attempt + 1, 2,
               bReset ? L"engine-reset" : L"no-reset (driver-style)");
+        Print(L"[tick] tu102 attempt begins @ +%d s since EFI entry\n",
+              (INTN)u40x_elapsed_s());
 
         /* 准备engine（A: 不加复bit——driver exploit 用 FWSEC 后 halted 的engine；
          *  B: kflcnReset_TU102 = pre-wait→reset→scrub wait→BCR=0→RM=chipId0） */
@@ -2262,6 +2295,24 @@ booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys)
         metaLow = wprMetaPhys;
         Print(L"tu102: BOOTVEC=0, mailbox0=0x%08x mailbox1=0x%08x, STARTCPU...\n",
               (UINT32)(metaLow & 0xFFFFFFFFu), (UINT32)(metaLow >> 32));
+#ifdef U40X_RACE_SEMA
+        {   /* v5 acquire spin: hold mailbox0-write + STARTCPU hostage until
+             * the card firmware releases SEC2 (mailbox0 accepts host write).
+             * 100 ms poll; start issued within microseconds of door opening
+             * to beat POST-GSP re-acquisition in the flap window. */
+            UINTN spin;
+            for (spin = 0; spin < 2400; spin++) {
+                UINT32 rb5;
+                mmio_write32(SEC2_MAILBOX0, 0xA5A5C3C3u);
+                rb5 = mmio_read32(SEC2_MAILBOX0);
+                if (rb5 == 0xA5A5C3C3u)
+                    break;
+                uefi_call_wrapper(BS->Stall, 1, 100000);
+            }
+            Print(L"[race] acquire spin done after %d x100ms @ +%d s\n",
+                  (INTN)spin, (INTN)u40x_elapsed_s());
+        }
+#endif
         mmio_write32(SEC2_BOOTVEC, 0x0u);
         mmio_write32(SEC2_MAILBOX0, (UINT32)(metaLow & 0xFFFFFFFFu));
         mmio_write32(SEC2_MAILBOX1, (UINT32)(metaLow >> 32));
@@ -4107,6 +4158,9 @@ static int u40x_find_gpu_pass(INTN enc)
             continue;
         if ((id & 0xFFFFu) == 0x10DEu &&
             ((id >> 16) & 0xFFFFu) == 0x1E09u) {
+#ifdef U40X_TARGET_BUS
+            if (fastL[k][0] != (U40X_TARGET_BUS)) continue;
+#endif
             gBus = fastL[k][0]; gDev = fastL[k][1]; gFn = fastL[k][2];
             u40x_enc_found = enc;
             Print(L"[50HX f] fast hit enc=%d %02x:%02x.%x id=0x%08x\n",
@@ -4130,6 +4184,9 @@ static int u40x_find_gpu_pass(INTN enc)
                     continue;
                 if ((id & 0xFFFFu) == 0x10DEu &&
                     ((id >> 16) & 0xFFFFu) == 0x1E09u) {
+#ifdef U40X_TARGET_BUS
+                    if (b != (U40X_TARGET_BUS)) continue;
+#endif
                     gBus = b; gDev = d; gFn = f;
                     u40x_enc_found = enc;
                     Print(L"[50HX f] sweep hit enc=%d %02x:%02x.%x id=0x%08x\n",
@@ -4502,6 +4559,16 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     UINTN i;
 
     InitializeLib(ImageHandle, SystemTable);
+    /* [warm] disarm boot watchdog if armed (firmware resets at ~5 min) */
+    uefi_call_wrapper(BS->SetWatchdogTimer, 4, (UINTN)0, (UINT64)0,
+                             (UINTN)0, (CHAR16 *)NULL);
+    {
+        EFI_TIME tt;
+        if (!uefi_call_wrapper(gRT->GetTime, 2, &tt, NULL))
+            g_t0 = (UINT32)tt.Hour * 3600u + (UINT32)tt.Minute * 60u
+                   + (UINT32)tt.Second;
+    }
+    Print(L"[tick] orig entry @ +%d s\n", (INTN)u40x_elapsed_s());
     /* v1.50 (Linux build): with the stock crt0 entry the u40x_entry wrapper
      * never runs, so open the ESP log here instead (same effect: all later
      * Print output lands in \50hx_log.txt on our boot device). The gnu-efi
@@ -4522,6 +4589,9 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     u40x_open_log(ImageHandle);
     Print(L"\n=== CMP50HX Unlock v1-50HX (TU102 GSP WITH_LOADER) ===\n");
     returnToGrub = u40x_has_load_option(ImageHandle, L"--return-to-grub");
+#ifdef U40X_FORCE_RETURN
+    returnToGrub = TRUE;   /* chaining build: always let firmware continue */
+#endif
     if (returnToGrub)
         Print(L"[50HX] GRUB handoff mode: internal chainload disabled\n");
     else
@@ -4720,10 +4790,70 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
                 u40x_booter_sig_prod, sizeof(u40x_booter_sig_prod));
     }
     __asm__ volatile("wbinvd" ::: "memory");
-    Print(L"[50HX] booter_load_tu102_direct (ports, BOOTVEC=0, RM=0x162000A1)...\n");
-    Status = booter_load_tu102_direct(wprMetaPhys, ucodePhys);
-    Print(L"[50HX] booter_load_tu102_direct returned %r\n", Status);
-    if (EFI_ERROR(Status)) {
+    /* [warm2] canary-gated settle curve (ticket 03, SAFE v2): read-only
+     * probes + refused mailbox0 canary writes every 30 s until the card's
+     * SEC2 ACCEPTS a host write; only then run the full direct load ONCE.
+     * v1's repeated engine resets on an OCCUPIED core re-injured the card
+     * into POST-AD stall — never reset a busy SEC2. */
+    BOOLEAN warm_attempted;
+    warm_attempted = FALSE;
+    {
+        BOOLEAN ready = FALSE;
+        UINTN t, s2;
+        Print(L"[warm] probe @ +%d s: mbox0=0x%08x\n",
+              (INTN)u40x_elapsed_s(), mmio_read32(SEC2_MAILBOX0));
+        for (t = 0; t <= 300 && !ready; t += 10) {
+            if (t)
+                for (s2 = 0; s2 < 10; s2++)
+                    uefi_call_wrapper(BS->Stall, 1, 1000000);
+            Print(L"[warm] probe @ +%d s: mbox0=0x%08x\n",
+                  (INTN)u40x_elapsed_s(), mmio_read32(SEC2_MAILBOX0));
+            if ((t % 30) == 0) {
+                UINT32 m0old = mmio_read32(SEC2_MAILBOX0);
+                UINT32 rb;
+                mmio_write32(SEC2_MAILBOX0, 0xA5A5C3C3);
+                rb = mmio_read32(SEC2_MAILBOX0);
+                mmio_write32(SEC2_MAILBOX0, m0old);
+                if (rb == 0xA5A5C3C3) {
+                    Print(L"[warm] canary @ +%d s: ACCEPTED (mbox0 was 0x%08x)\n",
+                          (INTN)u40x_elapsed_s(), m0old);
+                    ready = TRUE;
+                } else {
+                    Print(L"[warm] canary @ +%d s: refused (rb=0x%08x)\n",
+                          (INTN)u40x_elapsed_s(), rb);
+                }
+            }
+        }
+        if (ready) {
+            UINTN tr;
+            warm_attempted = TRUE;
+            sec2_health(L"warm-gated");
+            for (tr = 0; tr < 6; tr++) {
+                Print(L"[warm] direct try %d/6 @ +%d s\n",
+                      (INTN)tr + 1, (INTN)u40x_elapsed_s());
+                Status = booter_load_tu102_direct(wprMetaPhys, ucodePhys);
+                Print(L"[50HX] booter_load_tu102_direct returned %r\n", Status);
+                if (!EFI_ERROR(Status)) break;
+                if (tr < 5) {
+                    UINT32 m0o = mmio_read32(SEC2_MAILBOX0);
+                    UINT32 rb2;
+                    UINTN s3;
+                    mmio_write32(SEC2_MAILBOX0, 0xA5A5C3C3);
+                    rb2 = mmio_read32(SEC2_MAILBOX0);
+                    mmio_write32(SEC2_MAILBOX0, m0o);
+                    if (rb2 != 0xA5A5C3C3) {
+                        Print(L"[warm] canary closed after try - stop (rb=0x%08x)\n", rb2);
+                        break;
+                    }
+                    for (s3 = 0; s3 < 15; s3++)
+                        uefi_call_wrapper(BS->Stall, 1, 1000000);
+                }
+            }
+        } else {
+            Print(L"[warm] no write-window <= 300 s; attempt SKIPPED, card untouched\n");
+        }
+    }
+    if (EFI_ERROR(Status) && FALSE) {
         /* v56 fallback：GA102 风格 DMA path（v55 用的那套），结果对比用 */
         Print(L"[50HX] fallback: booter_load_v67 (DMA path, GA102-style)...\n");
         Status = booter_load_v67(wprMetaPhys, ucodePhys);
@@ -4739,6 +4869,8 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         UINT32 ss0 = mmio_read32(REG_FEAT_OVR_SM_SPD);
         UINT32 ss1 = mmio_read32(REG_FEAT_OVR_SM_SPD_1);
         Print(L"[50HX] RESULT: PLM=0x%08x SS0=0x%08x SS1=0x%08x\n", plm, ss0, ss1);
+        Print(L"[tick] final RESULT @ +%d s since EFI entry\n",
+              (INTN)u40x_elapsed_s());
         if (is_unlocked())
             Print(L"[50HX] *** UNLOCKED (SS0=0x88888888 SS1=0x8) ***\n");
         else if (plm == VAL_PLM_OPEN || plm == 0xFFFFFF8Fu)
@@ -4747,6 +4879,7 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         else
             Print(L"[50HX] PLM closed — no booter effect observed\n");
     }
+    if (warm_attempted) {
     /* v89: SEC2 Sanitize（cyridd kgspCmp40SanitizeSec2AfterExploit 简版——
      * unlock后 SEC2 回冷态：engine reset + MB 清——verify黑屏=非冷态，sanitize 解） */
     Print(L"[40HX v89] SEC2 sanitize (engine reset + MB clear)...\n");
@@ -4777,6 +4910,7 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     mmio_write32(SEC2_ENGINE, 0x0);
     for (i = 0; i < 16; i++) mmio_read32(SEC2_ENGINE);
 
+    }
     /* ---------- [10.5] PCIe Gen2 - OS-side only (removed in v1.1.8,
      * re-tested and re-confirmed dead 2026-09-17) -----------------------
      * The pre-OS Gen2 attempt never trained on any host (X79: LNKCTL2

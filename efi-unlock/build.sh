@@ -23,12 +23,15 @@ OUT=unlock50x_v1.so
 EFIOUT=50HXUNLK.EFI
 
 echo "=== 1. compile $SRC ==="
+# EXTRA_CFLAGS lets the bench pipeline (tools/50hx-build.sh) inject the
+# build stamp -DU40X_BUILD_STAMP="..."; empty by default = stock compile.
 gcc -c -O2 -fno-stack-protector -fpic -ffreestanding \
     -fno-asynchronous-unwind-tables -fno-unwind-tables \
     -fshort-wchar -mno-red-zone -maccumulate-outgoing-args \
     -fno-builtin -fno-strict-aliasing -Wno-unused-function \
     -I "$EFI_INC" -I "$EFI_INC/x86_64" \
     -DGNU_EFI_USE_MS_ABI -DDIRECT_SEC2 -DRELEASE_BUILD -DVBIOS_DUMP \
+    ${EXTRA_CFLAGS:-} \
     -o "$OBJ" "$SRC"
 
 echo "=== 2. embed blobs ==="
@@ -79,7 +82,16 @@ if [ ! -f "$OUT" ]; then
 fi
 
 echo "=== 4. convert ==="
-objcopy -j .text -j .sdata -j .data -j .rodata -j .dynamic -j .dynsym \
+# Upstream spells the output format `--target=efi-app-x86_64`, but in
+# binutils >= 2.4x `--target` resolves to the -F long option ("set BOTH
+# input and output"), so objcopy tries to READ the ELF as efi-app and
+# fails with "file format not recognized". The correct spelling is -O
+# with the input format stated explicitly. (This resolves the old
+# "objcopy deviation" suspicion from 2026-10-25: it was a necessary
+# toolchain fix, not a poisoned build. Verified on the bench,
+# binutils 2.46, 2026-10-26.)
+objcopy -I elf64-x86-64 \
+    -j .text -j .sdata -j .data -j .rodata -j .dynamic -j .dynsym \
     -j .reloc -j .rel -j .rela -j .rel.* -j .rela.* \
-    --target=efi-app-x86_64 "$OUT" "$EFIOUT" 2>&1 | tail -4
+    -O efi-app-x86_64 "$OUT" "$EFIOUT" 2>&1 | tail -4
 ls -la "$EFIOUT" && sha256sum "$EFIOUT" && echo BUILD_OK
