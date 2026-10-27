@@ -1,0 +1,14 @@
+[Unit]
+Description=50HX boot health: re-roll warm boots with locked CMPs
+DefaultDependencies=no
+After=boot-efi.mount local-fs.target
+Before=docker.service multi-user.target
+Wants=boot-efi.mount
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/50hx-boothealth
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
