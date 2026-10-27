@@ -11,8 +11,8 @@ LOG=/run/50hx-boothealth.log
 mkdir -p "$STATE"
 exec >"$LOG" 2>&1
 
-count_installed() {
-    local n=0 d
+count_50hx() {   # ONLY 1e09 cards are roll-gated: the 90HX unlock is
+    local n=0 d   # driver-side stockflow with no per-boot ESP verdict line
     for d in /sys/bus/pci/devices/*/; do
         [ "$(cat "$d/vendor" 2>/dev/null)" = "0x10de" ] || continue
         [ "$(cat "$d/device" 2>/dev/null)" = "0x1e09" ] || continue
@@ -20,15 +20,27 @@ count_installed() {
     done
     echo "$n"
 }
+has_90hx() {
+    local d
+    for d in /sys/bus/pci/devices/*/; do
+        [ "$(cat "$d/vendor" 2>/dev/null)" = "0x10de" ] || continue
+        [ "$(cat "$d/device" 2>/dev/null)" = "0x220d" ] || continue
+        [ -e "$d/driver" ] && echo "bound" || echo "unbound"
+        return 0
+    done
+    echo "absent"
+}
 
-installed=$(count_installed)
+installed=$(count_50hx)
+c90=$(has_90hx)
+[ "$c90" = absent ] || echo "cmp90hx present: $c90 (driver-side unlock, never roll-gated)"
 won=0
 for u in u1 u3 u4; do
     grep -q "UNLOCKED (SS0" "/boot/efi/50hx_log_$u.txt" 2>/dev/null && won=$((won+1))
 done
 echo "installed=$installed unlocked_by_efi=$won"
 
-if [ "$installed" = 0 ]; then exit 0; fi
+if [ "$installed" = 0 ]; then exit 0; fi   # 90HX-only box: nothing to roll for
 
 if [ "$won" -ge "$installed" ]; then
     rm -f "$STATE/rolls" "$STATE/accepted"
