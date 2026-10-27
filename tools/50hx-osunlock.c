@@ -321,9 +321,10 @@ static int unlock_one(const char *bdf, const uint8_t *img, int wait_s,
                                   MAP_SHARED, fd, 0)) == MAP_FAILED) {
             fprintf(stderr, "%s: re-mmap after FLR failed\n", bdf); return 1; }
         close(fd); g_bar = bar;
-        {   /* wait for VBIOS re-POST to raise WPR2 (FWSEC/crypto chain) */
-            int w;
-            for (w = 0; w < 90; w++) {
+        {   /* VBIOS never raises WPR2 on locked SKUs (ticket 10) — only
+             * wait long for it if we have no FWSEC blob to do it ourselves */
+            int w, maxw = g_fwsec_virt ? 5 : 90;
+            for (w = 0; w < maxw; w++) {
                 sleep(1);
                 if (rd(0x001FA828) != 0u) break;
             }
