@@ -13,7 +13,7 @@ per OS, one command to unlock:
 
 | OS | Download | Install (one command) |
 |---|---|---|
-| **Linux** | `cmp50hx-unlock-linux.run` | `chmod +x cmp50hx-unlock-linux.run && sudo ./cmp50hx-unlock-linux.run` |
+| **Linux (Ubuntu 24.04/26.04, amd64)** | `cmp50hx-unlock_*_amd64.deb` | `sudo apt install ./cmp50hx-unlock_*_amd64.deb` |
 | **Windows** | `cmp50hx-unlock-windows.zip` | unzip, right-click `50HXInstaller.exe` → *Run as administrator* → *Install* |
 
 Both bundles ship the same UEFI compute unlock (proven live, FP32 31.7×
@@ -24,10 +24,14 @@ boards and never trained on other hosts); it is applied OS-side — on
 Windows by the installer's BYOVD logon task, on Linux by the patched
 kernel module / `cmp50hx-gen2.service`. On Windows the
 installer also enables `EnableGpuFirmware=1` so the EFI state survives
-into the OS driver. On Linux the one-click `.run` builds and installs the
-patched kernel module automatically; it is the equivalent path but
-required only if you want the patched kernel module too (the UEFI unlock
-itself works with the stock module).
+into the OS driver. The Linux `.deb` is fully self-contained: it embeds
+the official NVIDIA 610.43.03 driver (userland from the `.run`), installs
+the patched open kernel module as a **DKMS** tree that rebuilds on every
+kernel update, deploys the UEFI ESP unlock and the `cmp50hx-gen2`
+service, and seeds `cmp-tune`. Reboot afterwards. `sudo apt remove
+cmp50hx-unlock` uninstalls the driver again. The `.deb` replaces the old
+one-click `.run` (the UEFI unlock alone also works with the stock
+module).
 
 **AGESA / AMD Ryzen APU hosts (issue #24):** the EFI detects an AMD CPU
 via CPUID and uses the CF8-only path for the GPU find, skipping the
