@@ -12,10 +12,10 @@ index 86af3dd..ff779b9 100644
      NvU32 regTableSize;
      PACKED_REGISTRY_TABLE *pRegTable;
 diff --git a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
-index 4602e6d..961a06c 100644
+index 4602e6d..ebfa437 100644
 --- a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
 +++ b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
-@@ -25,14 +25,209 @@
+@@ -25,13 +25,206 @@
  
  #include "nv.h"
  #include "os-interface.h"
@@ -64,7 +64,9 @@ index 4602e6d..961a06c 100644
 +    return (pGpu->idInfo.PCIDeviceID == 0x1E0910DEU) &&
 +           ((pGpu->idInfo.PCISubDeviceID == 0x155410DEU) || (pGpu->idInfo.PCISubDeviceID == 0x371F1462U));
 +}
-+
+ 
+-#include "published/turing/tu102/dev_falcon_v4.h"
+-#include "published/turing/tu102/dev_fb.h"
 +static NvBool
 +s_isCmp50NativeBooterProbe
 +(
@@ -98,15 +100,13 @@ index 4602e6d..961a06c 100644
 +        kflcnRegWrite_HAL(
 +            pGpu, pKernelFlcn, NV_PFALCON_FALCON_DMEMD(0), 0U);
 +    }
- 
--#include "published/turing/tu102/dev_falcon_v4.h"
--#include "published/turing/tu102/dev_fb.h"
++
 +    NV_PRINTF(LEVEL_ERROR,
 +              "CMP50_COMPUTE_UNLOCK_V526: FULL_DMEM_ZERO_PASS "
 +              "[0x%08x,0x%08x)\n",
 +              CMP50_SEC2_DMEM_CLEAR_START, CMP50_SEC2_DMEM_CLEAR_END);
 +}
- 
++
 +NV_STATUS
 +kgspCmp50SanitizeSec2AfterExploit
 +(
@@ -224,13 +224,10 @@ index 4602e6d..961a06c 100644
 +              imem[0], imem[1], imem[2], imem[3],
 +              imem[4], imem[5], imem[6], imem[7]);
 +}
-+
-+static NV_STATUS
-+s_executeBooterUcode_TU102
+ 
  #define CMP90_PC_EXACT_PCI_DEVICE_ID             0x220DU
  #define CMP90_PC_EXACT_PCI_SUBDEVICE_ID          0x155510DEU
- #define CMP90_PC_EXACT_FEAT_OVR_PLM              0x00823804U
-@@ -185,6 +380,9 @@ kgspExecuteBooterLoad_TU102
+@@ -185,6 +378,9 @@ kgspExecuteBooterLoad_TU102
              CMP90_PC_EXACT_PCI_SUBDEVICE_ID));
      NvU32 cmp90PcGpuSlot = bCmp90PcCanary ?
          _kgspCmp90Rejoin14GpuSlot(pGpu) : 0U;
@@ -240,7 +237,7 @@ index 4602e6d..961a06c 100644
  
      KernelSec2 *pKernelSec2 = GPU_GET_KERNEL_SEC2(pGpu);
  
-@@ -247,8 +445,121 @@ kgspExecuteBooterLoad_TU102
+@@ -247,8 +443,121 @@ kgspExecuteBooterLoad_TU102
              pGpu, CMP90_PC_EXACT_FEAT_OVR_PLM);
      }
  
@@ -362,7 +359,7 @@ index 4602e6d..961a06c 100644
      status = s_executeBooterUcode_TU102(pGpu, pKernelGsp,
                                          pKernelGsp->pBooterLoadUcode,
                                          staticCast(pKernelSec2, KernelFalcon),
-@@ -376,6 +687,11 @@ kgspExecuteBooterLoad_TU102
+@@ -376,6 +685,11 @@ kgspExecuteBooterLoad_TU102
      }
      if (status != NV_OK)
      {
