@@ -12,6 +12,7 @@ readonly artifact_dir="${CMP_UNLOCK_ARTIFACT_DIR:-${CMP50_ALL_ARTIFACT_DIR:-${sc
 card="${CARD:-cmp50hx}"
 source_dir_input=''
 source_tarball=''
+prepare_source=''
 
 usage() {
     cat <<'EOF'
@@ -23,6 +24,10 @@ WildFlash1st series), or both (mixed fleet). CARD env also honored.
 With no source option, the exact NVIDIA 610.43.03 source archive is downloaded
 and checked by SHA-256. The script builds artifacts only.
 It does not install, load, unload, or reset a GPU.
+
+--prepare-source DIR skips the module build: it downloads, verifies, patches
+and validates the source tree, then stores it under DIR (which must not
+exist). This is the DKMS payload recipe used by tools/build-deb.sh.
 EOF
 }
 
@@ -38,6 +43,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --source-tarball)
             source_tarball="${2:?--source-tarball needs a file}"
+            shift 2
+            ;;
+        --prepare-source)
+            prepare_source="${2:?--prepare-source needs a directory}"
             shift 2
             ;;
         -h|--help)
@@ -128,10 +137,12 @@ for command in awk cat cc cp curl find grep install make mkdir mktemp modinfo mv
     }
 done
 
+if [[ -z "${prepare_source}" ]]; then
 [[ -d "/lib/modules/${kernel_release}/build" ]] || {
     printf 'kernel headers not found for %s\n' "${kernel_release}" >&2
     exit 4
 }
+fi
 [[ -f "${script_dir}/verify/rm_issue_rate.c" ]]
 if [[ "${card}" != both ]]; then
 patch_files=()
@@ -150,10 +161,12 @@ common_patch_file="${script_dir}/patches/common/01-nvidia-kernel-string-api.patc
     exit 5
 }
 patch_files+=("${common_patch_file}")
+if [[ -z "${prepare_source}" ]]; then
 [[ ! -e "${artifact_dir}" ]] || {
     printf 'artifact directory already exists: %s\n' "${artifact_dir}" >&2
     exit 10
 }
+fi
 
 mkdir -p "${cache_dir}" "${work_dir}" "$(dirname "${artifact_dir}")"
 readonly build_dir="$(mktemp -d "${work_dir}/build.XXXXXX")"
@@ -212,6 +225,20 @@ grep -q 'CMP90_PC_EXACT_PCI_DEVICE_ID' \
     "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c"
 fi
 
+grep -q 'NV2080_CTRL_GR_INFO_INDEX_RT_CORE_COUNT' "${source_dir}/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c"
+grep -q 'data = 56U' "${source_dir}/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c"
+
+if [[ -n "${prepare_source}" ]]; then
+    [[ ! -e "${prepare_source}" ]] || {
+        printf 'prepare target already exists: %s\n' "${prepare_source}" >&2
+        exit 10
+    }
+    mkdir -p "$(dirname "${prepare_source}")"
+    cp -a "${source_dir}" "${prepare_source}"
+    printf 'PASS_CMP50HX_PREPARE\n%s\n' "${prepare_source}"
+    exit 0
+fi
+
 make -C "${source_dir}" modules -j"${jobs}" KERNEL_UNAME="${kernel_release}"
 
 mkdir "${artifact_dir}"
@@ -236,8 +263,6 @@ fi
 if [[ "${card}" == cmp90hx || "${card}" == both ]]; then
 grep -a -q 'CMP90_STOCKFLOW_' "${artifact_dir}/nvidia.ko"
 fi
-grep -q 'NV2080_CTRL_GR_INFO_INDEX_RT_CORE_COUNT' "${source_dir}/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c"
-grep -q 'data = 56U' "${source_dir}/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c"
 
 (cd "${artifact_dir}" && sha256sum ./* > checksums.sha256)
 printf 'PASS_CMP50HX_ALL_BUILD\n%s\n' "${artifact_dir}"
