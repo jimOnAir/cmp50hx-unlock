@@ -1,0 +1,76 @@
+#!/bin/bash
+# postrm — safety net after prerm did the heavy teardown: cleans any
+# leftovers (prerm may have been skipped for a half-installed package)
+# and removes state on purge.
+set -u
+
+readonly state_dir="/var/lib/cmp50hx-unlock"
+readonly log_file="/var/log/cmp50hx-unlock-install.log"
+krel="$(uname -r)"
+readonly krel
+readonly module_list="nvidia nvidia-uvm nvidia-modeset nvidia-drm nvidia-peermem"
+
+log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
+warn() { log "WARNING: $*"; }
+run_cmd() { "$@" || warn "command failed (ignored): $*"; }
+
+case "${1:-remove}" in
+    remove|purge)
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+
+command -v logger >/dev/null 2>&1 && logger -t cmp50hx-unlock "postrm: $*" || true
+
+# --- leftover NVIDIA userland (only if prerm never ran) ---------------------
+if [[ -x /usr/bin/nvidia-uninstall ]]; then
+    log "uninstalling leftover NVIDIA userland via /usr/bin/nvidia-uninstall"
+    run_cmd sh /usr/bin/nvidia-uninstall --silent
+fi
+
+# --- leftover DKMS state (only if the tree was gone before prerm ran) -------
+# postrm runs after dpkg deleted /opt, so the build stamp is no longer
+# visible here: the driver version comes from the DKMS state directory.
+if [[ -d /var/lib/dkms/cmp50hx ]]; then
+    log "sweeping leftover DKMS build state for cmp50hx"
+    for ver_dir in /var/lib/dkms/cmp50hx/*/; do
+        [[ -d "${ver_dir}" ]] || continue
+        dkms_ver="${ver_dir#/var/lib/dkms/cmp50hx/}"
+        dkms_ver="${dkms_ver%/}"
+        if command -v dkms >/dev/null 2>&1; then
+            run_cmd dkms remove -m cmp50hx -v "${dkms_ver}" --all
+        fi
+        for kernel_dir in "${ver_dir}"*/; do
+            kernel="$(basename "${kernel_dir}")"
+            [[ "${kernel}" =~ ^[0-9] ]] || continue
+            for mod in ${module_list}; do
+                rm -f "/lib/modules/${kernel}/updates/dkms/${mod}.ko" \
+                      "/lib/modules/${kernel}/updates/dkms/${mod}.ko.xz" \
+                      "/lib/modules/${kernel}/updates/dkms/${mod}.ko.zst"
+            done
+            command -v depmod >/dev/null 2>&1 && run_cmd depmod -a "${kernel}"
+        done
+    done
+    rm -rf /var/lib/dkms/cmp50hx
+fi
+
+# --- initramfs without the patched modules ----------------------------------
+if command -v update-initramfs >/dev/null 2>&1 \
+        && { [[ -e "/boot/initrd.img-${krel}" ]] || [[ -e "/boot/initramfs.img-${krel}" ]]; }; then
+    log "rebuilding the initramfs without the patched modules"
+    run_cmd update-initramfs -u -k "${krel}"
+fi
+
+if [[ "${1:-remove}" == "purge" ]]; then
+    rm -rf "${state_dir}"
+    rm -f "${log_file}"
+    log "purged ${state_dir} and ${log_file}"
+fi
+
+# Note: /etc/modprobe.d/cmp-unlock.conf and /etc/modprobe.d/cmp50hx-unlock.conf
+# are dpkg conffiles: kept on "remove", deleted on "purge" (standard policy).
+
+log "cmp50hx-unlock removal complete; reboot to finish reverting to a driverless state"
+exit 0

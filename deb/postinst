@@ -1,0 +1,228 @@
+#!/bin/bash
+# postinst — configure cmp50hx-unlock: NVIDIA userland (from the embedded
+# .run), the patched DKMS module tree, services, initramfs, UEFI unlock.
+#
+# Thin wrapper: every piece of logic here mirrors the repo's install.sh so
+# the .deb and the curl path stay behaviorally identical on Ubuntu.
+#
+# Debug hook (CI containers only): CMP_DEB_KREL=<kernel> builds and wires
+# the module for that kernel instead of the running one. Never set it on a
+# production host.
+#
+# Bench hook: CMP_ESP_SKIP=1 skips the UEFI ESP deploy step entirely —
+# hosts with a curated multi-entry unlock boot chain (llm2: U1->U4->U3)
+# must not let a package reinstall rewrite BootOrder/BootNext; redeploy
+# the ESP manually with /opt/cmp50hx-unlock/efi/install-linux.sh when
+# actually intended.
+set -Eeuo pipefail
+
+readonly install_dir="/opt/cmp50hx-unlock"
+readonly state_dir="/var/lib/cmp50hx-unlock"
+readonly log_file="/var/log/cmp50hx-unlock-install.log"
+krel="${CMP_DEB_KREL:-$(uname -r)}"
+readonly krel
+readonly dkms_module="cmp50hx"
+
+log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+warn() { log "WARNING: $*"; }
+trap 'die "postinst failed at line ${LINENO}; full log: ${log_file}"' ERR
+
+# The build stamps the driver version into ${install_dir}/VERSION
+# (tools/build-deb.sh); maintainer scripts derive it, never hardcode it.
+[[ -s "${install_dir}/VERSION" ]] || die "broken package: ${install_dir}/VERSION missing"
+driver_version="$(cut -d- -f1 < "${install_dir}/VERSION")"
+readonly driver_version
+[[ -n "${driver_version}" ]] || die "broken package: cannot parse the driver version from ${install_dir}/VERSION"
+readonly dkms_version="${driver_version}"
+readonly run_file="${install_dir}/cache/NVIDIA-Linux-x86_64-${driver_version}.run"
+
+# reconfigure/abort-upgrade/failed-upgrade all (re)run the full configure;
+# dpkg may also call us with "triggered" — nothing to do then.
+case "${1:-configure}" in
+    triggered) exit 0 ;;
+esac
+
+mkdir -p "${install_dir}/logs" "${state_dir}"
+exec > >(tee -a "${log_file}") 2>&1
+log "cmp50hx-unlock configure start: kernel ${krel}"
+
+# --- card presence (warn only: fleet images may install before plugging) ---
+card_present=0
+for dev in /sys/bus/pci/devices/*/; do
+    [[ -r "${dev}vendor" && -r "${dev}device" ]] || continue
+    read -r vendor < "${dev}vendor"
+    read -r device < "${dev}device"
+    [[ "${vendor}" == "0x10de" && "${device}" == "0x1e09" ]] && card_present=1 && break
+done
+if [[ ${card_present} -eq 1 ]]; then
+    log "CMP 50HX (10de:1e09) found on the PCI bus"
+else
+    warn "no CMP 50HX (10de:1e09) on this PCI bus; continuing (the unlock stays inert until the card is present)"
+fi
+
+# --- Secure Boot (warn only, same policy as install.sh) --------------------
+if [[ -d /sys/firmware/efi ]] && command -v mokutil >/dev/null 2>&1 \
+        && mokutil --sb-state 2>/dev/null | grep -q 'Secure Boot enabled'; then
+    warn "Secure Boot is enabled; the unsigned patched module will most likely not load."
+    warn "Disable Secure Boot in firmware setup, or sign the module with your own MOK."
+fi
+
+# --- kernel headers ---------------------------------------------------------
+# Kernel headers arrive through apt's own dependency resolution
+# (Depends: linux-headers-generic | linux-headers-cloud-amd64 |
+# linux-headers-amd64). A postinst can never call apt itself: dpkg holds
+# the frontend lock while maintainer scripts run. We build for every
+# installed kernel header set; the DKMS kernel hook covers every kernel
+# installed later.
+build_kernels=()
+if [[ -n "${CMP_DEB_KREL:-}" ]]; then
+    build_kernels=("${CMP_DEB_KREL}")
+else
+    while IFS= read -r k; do
+        [[ -d "/lib/modules/${k}/build" ]] && build_kernels+=("${k}")
+    done < <(ls -1 /usr/src 2>/dev/null | sed -n 's/^linux-headers-\(.*\)$/\1/p')
+fi
+[[ ${#build_kernels[@]} -gt 0 ]] || die \
+    "no kernel headers installed (need linux-headers-generic; it is a Depends of this package). Try: sudo apt --fix-broken install && sudo dpkg --configure cmp50hx-unlock"
+log "will build patched modules for: ${build_kernels[*]}"
+
+# --- embedded NVIDIA .run: integrity, then userland ------------------------
+[[ -f "${run_file}" ]] || die "embedded NVIDIA .run missing at ${run_file} (broken package?)"
+if [[ -f "${install_dir}/deb/nvidia-run.sha256" ]]; then
+    (cd "$(dirname "${run_file}")" && sha256sum -c "${install_dir}/deb/nvidia-run.sha256") \
+        || die "embedded NVIDIA .run SHA-256 mismatch"
+fi
+
+log "installing NVIDIA ${driver_version} userland from the embedded .run (kernel modules come from DKMS, not the .run)"
+sh "${run_file}" --silent --no-kernel-modules --no-dkms --no-backup \
+    --no-rebuild-initramfs --no-x-check --no-nouveau-check --skip-module-unload
+
+if ! find /lib/firmware/nvidia -name 'gsp*.bin' -print -quit 2>/dev/null | grep -q .; then
+    log "GSP firmware not present; extracting it from the .run package"
+    fw_dir="$(mktemp -d)"
+    sh "${run_file}" -x --target "${fw_dir}" >/dev/null
+    if [[ -d "${fw_dir}/firmware" ]]; then
+        cp -a "${fw_dir}/firmware/." /lib/firmware/
+    else
+        warn "no firmware directory inside the .run package"
+    fi
+    rm -rf "${fw_dir}"
+fi
+
+# --- keep the uninstaller + EFI deployer beyond package file removal -------
+log "staging the .run and EFI tools in ${state_dir} (used by postrm)"
+if ! cp -al "${run_file}" "${state_dir}/" 2>/dev/null; then
+    install -m 0644 "${run_file}" "${state_dir}/NVIDIA-Linux-x86_64-${driver_version}.run"
+fi
+mkdir -p "${state_dir}/efi"
+cp -a "${install_dir}/efi/." "${state_dir}/efi/"
+
+# --- patched kernel modules via DKMS ---------------------------------------
+src_tree="/usr/src/${dkms_module}-${dkms_version}"
+[[ -f "${src_tree}/dkms.conf" ]] || die "broken package: ${src_tree}/dkms.conf missing"
+log "registering the patched module tree with DKMS (${dkms_module}/${dkms_version})"
+dkms remove -m "${dkms_module}" -v "${dkms_version}" --all >/dev/null 2>&1 || true
+dkms add -m "${dkms_module}" -v "${dkms_version}"
+for kernel in "${build_kernels[@]}"; do
+    log "building the patched modules for kernel ${kernel} (this takes a while)"
+    dkms build -m "${dkms_module}" -v "${dkms_version}" -k "${kernel}" --force
+    dkms install -m "${dkms_module}" -v "${dkms_version}" -k "${kernel}" --force
+    depmod -a "${kernel}"
+done
+
+running_has_module=0
+if modinfo -n -k "${krel}" nvidia >/dev/null 2>&1; then
+    ko="$(modinfo -n -k "${krel}" nvidia)"
+    [[ "${ko}" == /lib/modules/${krel}/updates/* ]] && running_has_module=1
+fi
+for kernel in "${build_kernels[@]}"; do
+    ko="$(modinfo -n -k "${kernel}" nvidia 2>/dev/null || true)"
+    [[ "${ko}" == /lib/modules/${kernel}/updates/* ]] \
+        || die "the patched nvidia.ko is not first for kernel ${kernel} (found: ${ko:-none})"
+    [[ "$(modinfo -F version -k "${kernel}" nvidia)" == "${driver_version}" ]] \
+        || die "installed nvidia.ko has the wrong version for kernel ${kernel}"
+    log "patched modules in place for ${kernel}: ${ko}"
+done
+
+# --- nouveau blacklist + ReBAR option are dpkg conffiles (/etc/modprobe.d) ----
+
+# --- services ---------------------------------------------------------------
+ln -sf "${install_dir}/bin/rm-issue-rate" /usr/local/bin/rm-issue-rate
+if command -v deb-systemd-helper >/dev/null 2>&1; then
+    deb-systemd-helper enable cmp50hx-gen2.service >/dev/null || true
+fi
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+log "cmp50hx-gen2.service enabled (runs at boot, NOT started now)"
+log "cmp-idle-governor.service installed but NOT enabled (enable: sudo systemctl enable --now cmp-idle-governor)"
+
+# --- boot persistence of the patched module in the initramfs ---------------
+if [[ ${running_has_module} -eq 0 ]]; then
+    initramfs_state="SKIPPED (no patched module for the running kernel ${krel}; built for: ${build_kernels[*]} — reboot into one of them)"
+    warn "running kernel ${krel} has no patched module; build set was: ${build_kernels[*]}"
+elif [[ ! -e "/boot/initrd.img-${krel}" && ! -e "/boot/initramfs.img-${krel}" ]]; then
+    initramfs_state="SKIPPED (no initramfs image for kernel ${krel})"
+    warn "no initramfs image for kernel ${krel}; skipping boot persistence"
+else
+    initramfs_state="PASS_CMP_INITRAMFS"
+    log "making the patched modules boot-persistent"
+    bash "${install_dir}/install-initramfs.sh" || die "initramfs setup failed (see ${log_file})"
+fi
+
+# --- UEFI ESP unlock (replaces the old cmp50hx-unlock-linux.run) -----------
+# Best effort: BIOS-only hosts (no EFI runtime) must not fail the package;
+# the kernel-module unlock is independent and already installed. A failed
+# ESP deploy is loud: the package is only PARTIAL until it lands.
+esp_state="PASS"
+if [[ "${CMP_ESP_SKIP:-0}" == "1" ]]; then
+    esp_state="SKIPPED (CMP_ESP_SKIP=1; boot entries untouched)"
+    log "ESP deploy skipped (CMP_ESP_SKIP=1); run ${install_dir}/efi/install-linux.sh manually to deploy"
+elif [[ -d /sys/firmware/efi ]]; then
+    log "deploying the UEFI unlock to the ESP (replaces cmp50hx-unlock-linux.run)"
+    if ! bash "${install_dir}/efi/install-linux.sh"; then
+        esp_state="PARTIAL (ESP deploy failed; see the errors above)"
+        printf '\n!!! PARTIAL: the UEFI ESP unlock was NOT deployed — see the errors above.\n' >&2
+        printf '!!! The NVIDIA driver and patched modules ARE installed; once the root\n' >&2
+        printf '!!! cause is fixed deploy it with: sudo bash %s/efi/install-linux.sh\n\n' "${install_dir}" >&2
+    fi
+else
+    esp_state="SKIPPED (no EFI runtime: BIOS boot)"
+    warn "no EFI runtime (BIOS boot?): UEFI unlock skipped; the OS-side module unlock is still installed"
+fi
+
+# --- best-effort live check (never fatal) ----------------------------------
+live_check="SKIPPED (no patched module for the running kernel, or nvidia already loaded; reboot to test)"
+if [[ ${running_has_module} -eq 1 ]] && ! lsmod | grep -q '^nvidia '; then
+    if lsmod | grep -q '^nouveau ' && ! rmmod nouveau 2>/dev/null; then
+        log "could not unload nouveau; reboot to test"
+    fi
+    if ! lsmod | grep -q '^nvidia ' && modprobe nvidia 2>/dev/null; then
+        log "loaded the patched nvidia module; live probe:"
+        nvidia-smi -L 2>/dev/null || log "nvidia-smi found no device (expected without the card)"
+        live_check="PROBED (see output above; run /usr/local/bin/rm-issue-rate after reboot for the deep check)"
+    fi
+fi
+
+cat <<EOF
+
+PASS_CMP50HX_UNLOCK_DEB
+Driver     : NVIDIA ${driver_version} userland (embedded .run) + patched DKMS modules
+Modules    : built for: ${build_kernels[*]} (auto-rebuild on every kernel update)
+Repository : ${install_dir}
+Log        : ${log_file}
+Live check : ${live_check}
+Initramfs  : ${initramfs_state}
+ESP unlock : ${esp_state}
+Idle governor: installed, NOT enabled (sudo systemctl enable --now cmp-idle-governor)
+ReBAR      : default 16 GiB; for 32 GiB edit /etc/modprobe.d/cmp50hx-unlock.conf (cmp50_rebar_size=9)
+Tuning     : cmp-tune list | cmp-tune status | sudo cmp-tune apply PROFILE
+
+Next step:
+  1. Reboot to load the patched module and run the UEFI unlock.
+
+Rollback:
+  sudo apt remove cmp50hx-unlock   # uninstalls the NVIDIA driver again
+EOF
+exit 0

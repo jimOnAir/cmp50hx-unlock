@@ -1,0 +1,22 @@
+Package: cmp50hx-unlock
+Version: @VERSION@
+Architecture: amd64
+Maintainer: xrip <xrip@users.noreply.github.com>
+Homepage: https://github.com/xrip/cmp50hx-unlock
+Section: kernel
+Priority: optional
+Depends: dkms, build-essential, patch, kmod, pciutils, python3, mokutil, efibootmgr, initramfs-tools, linux-headers-generic | linux-headers-cloud-amd64 | linux-headers-amd64
+Conflicts: nvidia-driver, nvidia-settings
+Description: CMP 50HX compute unlock for Ubuntu (NVIDIA 610.43.03 + patched open modules)
+ One-click unlock for the NVIDIA CMP 50HX (TU102, 10de:1e09). The package
+ embeds the official NVIDIA 610.43.03 .run and installs its userland,
+ ships the patched open kernel modules as a DKMS tree (stock-flow GSP
+ compute unlock, ReBAR, PCIe Gen2, profiling counters) that rebuilds
+ automatically on every kernel update, deploys the UEFI ESP unlock
+ binary, and installs the cmp50hx-gen2 retrain service, the optional
+ idle P-state governor (disabled by default) and the cmp-tune utility.
+ .
+ Removing this package uninstalls the NVIDIA driver it embedded.
+ Supported: Ubuntu 24.04 / 26.04 amd64 (the 26.04 install path is
+ gated in CI by an ubuntu:26.04 container that installs the published
+ .deb and builds the DKMS tree against the 26.04 kernel headers).

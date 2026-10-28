@@ -1,0 +1,55 @@
+#!/bin/bash
+# preinst — conflict gate for cmp50hx-unlock.
+#
+# dpkg's Conflicts: field already blocks the apt-managed NVIDIA driver
+# families. This script covers what dpkg cannot see: a driver installed
+# by NVIDIA's own .run installer (its files are outside the dpkg db).
+set -u
+
+command -v logger >/dev/null 2>&1 && logger -t cmp50hx-unlock "preinst: $*" || true
+
+# Curated NVIDIA driver family check. dpkg's Conflicts: field accepts no
+# globs, and Ubuntu names every driver generation differently
+# (nvidia-driver-535-server, libnvidia-compute-570, ...), so we scan the
+# dpkg database instead. Deliberately spared: nvidia-container-* and
+# libnvidia-container* (the Docker GPU runtime stack — no file overlap).
+family_re='^(nvidia-(driver|dkms|kernel|utils)-|xserver-xorg-video-nvidia-|libnvidia-cfg1-|nvidia-settings$)'
+if command -v dpkg-query >/dev/null 2>&1; then
+    offenders="$(dpkg-query -W -f='${Package} ${db:Status-Abbrev}\n' 2>/dev/null \
+        | awk '$2 ~ /^i/ {print $1}' | grep -E "${family_re}" || true)"
+    if [[ -n "${offenders}" ]]; then
+        {
+            echo "ERROR: cmp50hx-unlock conflicts with installed NVIDIA driver packages:"
+            echo "${offenders}" | sed 's/^/    /'
+            echo
+            echo "Remedy — remove the stock driver first, then retry:"
+            echo "    sudo apt remove --purge $(echo "${offenders}" | tr '\n' ' ')"
+            echo "    sudo apt install ./cmp50hx-unlock_*_amd64.deb"
+        } >&2
+        exit 1
+    fi
+fi
+
+# Fresh install only: dpkg passes "install"; upgrades/reinstalls pass
+# "upgrade <version>" and our own postinst may legitimately have created
+# the marker already.
+case "${1:-install}" in
+    install) ;;
+    *) exit 0 ;;
+esac
+
+if [[ -e /usr/bin/nvidia-uninstall ]]; then
+    cat >&2 <<'EOF'
+ERROR: cmp50hx-unlock conflicts with an NVIDIA driver installed by the
+official .run installer (found /usr/bin/nvidia-uninstall).
+
+Remedy — remove the foreign driver first, then retry:
+    sudo /usr/bin/nvidia-uninstall
+    sudo apt install ./cmp50hx-unlock_*_amd64.deb
+
+If the nvidia kernel module is still loaded, reboot after the uninstall.
+EOF
+    exit 1
+fi
+
+exit 0

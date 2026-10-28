@@ -1,0 +1,80 @@
+#!/bin/bash
+# prerm — do the heavy teardown while the package's files still exist:
+# dpkg deletes /usr/src and /opt before postrm runs, and both the DKMS
+# tree and the staged .run are needed for a clean removal.
+set -u
+
+readonly install_dir="/opt/cmp50hx-unlock"
+readonly state_dir="/var/lib/cmp50hx-unlock"
+
+log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
+warn() { log "WARNING: $*"; }
+run_cmd() { "$@" || warn "command failed (ignored): $*"; }
+
+# The build stamps the driver version into ${install_dir}/VERSION (dpkg
+# keeps package files until after prerm). If the stamp is gone, fall back
+# to globbing the staged .run files — never hardcode the version here.
+driver_version="$(cut -d- -f1 < "${install_dir}/VERSION" 2>/dev/null || true)"
+if [[ -n "${driver_version}" ]]; then
+    run_candidates=(
+        "${install_dir}/cache/NVIDIA-Linux-x86_64-${driver_version}.run"
+        "${state_dir}/NVIDIA-Linux-x86_64-${driver_version}.run"
+    )
+else
+    warn "${install_dir}/VERSION missing; globbing for staged NVIDIA .run files"
+    run_candidates=(
+        "${install_dir}"/cache/NVIDIA-Linux-x86_64-*.run
+        "${state_dir}"/NVIDIA-Linux-x86_64-*.run
+    )
+fi
+
+command -v logger >/dev/null 2>&1 && logger -t cmp50hx-unlock "prerm: $*" || true
+
+case "${1:-remove}" in
+    remove|deconfigure|failed-upgrade)
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop cmp-idle-governor.service 2>/dev/null || true
+fi
+
+# --- NVIDIA userland uninstall (while the .run is still on disk) ------------
+for candidate in "${run_candidates[@]}"; do
+    [[ -f "${candidate}" ]] || continue
+    log "uninstalling the NVIDIA userland via ${candidate}"
+    run_cmd sh "${candidate}" --uninstall --silent
+    break
+done
+
+# --- DKMS tree and modules for every kernel (tree still present) -----------
+if command -v dkms >/dev/null 2>&1; then
+    for ver_dir in /usr/src/cmp50hx-*/; do
+        [[ -d "${ver_dir}" ]] || continue
+        dkms_ver="${ver_dir#/usr/src/cmp50hx-}"
+        dkms_ver="${dkms_ver%/}"
+        log "removing the patched module tree cmp50hx/${dkms_ver} from DKMS"
+        run_cmd dkms remove -m cmp50hx -v "${dkms_ver}" --all
+    done
+fi
+
+# --- services ----------------------------------------------------------------
+if command -v systemctl >/dev/null 2>&1; then
+    if command -v deb-systemd-helper >/dev/null 2>&1; then
+        deb-systemd-helper disable cmp50hx-gen2.service cmp-idle-governor.service >/dev/null 2>&1 || true
+        deb-systemd-helper purge cmp50hx-gen2.service cmp-idle-governor.service >/dev/null 2>&1 || true
+    fi
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+[[ -L /usr/local/bin/rm-issue-rate ]] && rm -f /usr/local/bin/rm-issue-rate
+
+# --- UEFI boot entry + ESP files ---------------------------------------------
+if [[ -d /sys/firmware/efi && -f "${install_dir}/efi/install-linux.sh" ]]; then
+    log "removing the 50HX Unlock boot entry"
+    run_cmd bash "${install_dir}/efi/install-linux.sh" --remove
+fi
+
+exit 0
