@@ -33,8 +33,9 @@ fi
 
 [[ -n "${image}" ]] || die "no initramfs image found for kernel ${krel}"
 command -v update-initramfs >/dev/null || die "update-initramfs not found; only Ubuntu/Debian are supported"
-ours="/lib/modules/${krel}/updates/nvidia.ko"
-[[ -f "${ours}" ]] || die "patched module ${ours} not found; run install.sh first"
+ours="$(modinfo -n nvidia 2>/dev/null || true)"
+[[ "${ours}" == /lib/modules/${krel}/updates/* ]] \
+    || die "patched nvidia module not found under /lib/modules/${krel}/updates/; run install.sh first"
 
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
 backup="${image}.cmp50-bak-${ts}"
@@ -71,7 +72,11 @@ if command -v unmkinitramfs >/dev/null 2>&1; then
         for ext in zst xz gz; do
             [[ "${name}" == *.${ext} ]] && name="${name%.${ext}}"
         done
-        installed="/lib/modules/${krel}/updates/${name}"
+        installed="$(modinfo -n "${name%.ko}" 2>/dev/null || true)"
+        case "${installed}" in
+            /lib/modules/${krel}/updates/*) ;;
+            *) continue ;;
+        esac
         [[ -f "${installed}" ]] || continue
         a="$(module_srcversion "${mod}")"
         b="$(module_srcversion "${installed}")"
@@ -104,7 +109,7 @@ cat <<EOF
 PASS_CMP_INITRAMFS
 Reboot now. After reboot, verify every card (indices per nvidia-smi -L):
   cmp50hx: for i in 0 1 2; do
-             /opt/cmp50hx-unlock/artifacts/610.43.03-${krel}/rm-issue-rate \$i > /tmp/cmp50-probe-\$i.json
+             /usr/local/bin/rm-issue-rate \$i > /tmp/cmp50-probe-\$i.json
              python3 /opt/cmp50hx-unlock/verify/verify.py /tmp/cmp50-probe-\$i.json
            done
 Rollback:

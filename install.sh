@@ -247,6 +247,10 @@ for mod in nvidia nvidia-uvm nvidia-modeset nvidia-drm nvidia-peermem; do
     install -m 0644 "${src}" "/lib/modules/${krel}/updates/${mod}.ko"
     log "installed /lib/modules/${krel}/updates/${mod}.ko"
 done
+if [[ -f "${artifact_dir}/rm-issue-rate" ]]; then
+    ln -sf "${artifact_dir}/rm-issue-rate" /usr/local/bin/rm-issue-rate
+    log "linked /usr/local/bin/rm-issue-rate"
+fi
 
 # nouveau must not claim the card before the patched module at boot
 printf 'blacklist nouveau\n' > /etc/modprobe.d/cmp-unlock.conf
