@@ -18,7 +18,9 @@
 #   3. installs the NVIDIA 610.43.03 userland from the official .run package
 #   4. builds the patched kernel modules for the running kernel (build.sh)
 #   5. installs the modules with a backup of any previous ones, runs depmod
-#   6. installs and enables the idle governor unit (--no-idle-governor skips)
+#   6. installs the cmp50hx-boot boot-flow unit (unlock verdict + PCIe Gen2
+#      readiness gate) and enables the idle governor unit
+#      (--no-idle-governor skips the governor)
 #   7. installs the cmp-tune profile tuning utility
 #   8. best-effort live check of the card
 #   9. rebuilds and verifies the initramfs for the running kernel
@@ -278,16 +280,29 @@ else
     die "initramfs setup failed"
 fi
 
-# --- 6b. cmp50hx: PCIe Gen2 boot service --------------------------------------
+# --- 6b. cmp50hx: merged userland + boot-flow unit (verdict/Gen2 gate) ------
 
 if [[ "${card}" == cmp50hx ]]; then
     runtime_dir="${install_dir}/cmp50hx"
-    [[ -f "${runtime_dir}/cmp50hx-gen2.sh" ]] || die "repository layout broken: cmp50hx/cmp50hx-gen2.sh missing"
-    install -m 0755 "${runtime_dir}/cmp50hx-gen2.sh" /usr/local/sbin/cmp50hx-gen2
-    install -m 0644 "${runtime_dir}/cmp50hx-gen2.service" /etc/systemd/system/cmp50hx-gen2.service
-    systemctl daemon-reload
-    systemctl enable cmp50hx-gen2.service >/dev/null
-    log "installed and enabled cmp50hx-gen2.service (the card unlocks its PCIe speed registers a few minutes after boot; the service retrains to Gen2 then; NOT started now)"
+    for script in cmp50hx-boot.sh cmp50hx-collect.sh; do
+        [[ -f "${runtime_dir}/${script}" ]] \
+            || die "repository layout broken: cmp50hx/${script} missing"
+        install -m 0755 "${runtime_dir}/${script}" "/usr/local/sbin/${script}"
+    done
+    log "building the merged cmp50hx userland (governor|gen2|tune|verify)"
+    make -C "${install_dir}/native" || die "could not build native/cmp50hx"
+    install -m 0755 "${install_dir}/native/cmp50hx" /usr/local/bin/cmp50hx
+    ln -sf /usr/local/bin/cmp50hx /usr/local/bin/cmp-tune
+    ln -sf /usr/local/bin/cmp50hx /usr/local/bin/rm-issue-rate
+    install -m 0644 "${runtime_dir}/cmp50hx-boot.service" \
+        /etc/systemd/system/cmp50hx-boot.service
+    if [[ ! -f /etc/cmp50hx/boot.conf ]]; then
+        install -D -m 0644 "${install_dir}/deb/boot.conf" /etc/cmp50hx/boot.conf
+        log "seeded /etc/cmp50hx/boot.conf (bench ledger archival is opt-in)"
+    else
+        log "kept the existing /etc/cmp50hx/boot.conf"
+    fi
+    log "installed cmp50hx-boot.service (unlock verdict + Gen2 at boot; NOT started now)"
 fi
 
 # --- 6c. idle P-state governor (enabled by default) -------------------------
@@ -295,56 +310,29 @@ fi
 # CMP cards do not lower their own P-state request, so this supervisor forces
 # P8 while idle and returns to P16 on load. Independent of the unlock: the
 # unit is always installed, and enabled unless --no-idle-governor is given.
+# The governor is the `governor` subcommand of the merged cmp50hx binary
+# (built in step 6b); the actual enable/disable decision runs once in 6e via
+# deb/enable-services.sh so the .deb and this script share one service-set
+# definition.
 governor_state="installed, NOT enabled (--no-idle-governor given)"
 governor_dir="${install_dir}/idle-governor"
-if [[ -f "${governor_dir}/cmp-governor.c" ]]; then
-    log "building the single-process C idle governor"
-    cc -O2 -Wall -Wextra -Werror -std=c11 \
-        "${governor_dir}/cmp-governor.c" -ldl \
-        -o "${governor_dir}/cmp-governor" \
-        || die "could not build the C idle governor"
-    chmod 0755 "${governor_dir}/cmp-governor"
+governor_installed=0
+if [[ -f "${install_dir}/native/cmp50hx" && -f "${governor_dir}/cmp-idle-governor.service" ]]; then
     install -m 0644 "${governor_dir}/cmp-idle-governor.service" \
         /etc/systemd/system/cmp-idle-governor.service
-    install -m 0644 "${governor_dir}/cmp-governor-check.service" \
-        /etc/systemd/system/cmp-governor-check.service
-    install -m 0644 "${governor_dir}/cmp-governor-check.timer" \
-        /etc/systemd/system/cmp-governor-check.timer
-    chmod 0755 "${install_dir}/verify/verify-governor.sh" 2>/dev/null || true
     systemctl daemon-reload
-    if [[ "${idle_governor}" -eq 1 ]]; then
-        systemctl enable cmp-governor-check.timer >/dev/null 2>&1 || true
-        if systemctl enable cmp-idle-governor.service >/dev/null 2>&1 \
-                && systemctl restart cmp-idle-governor.service >/dev/null 2>&1; then
-            governor_state="ENABLED and running (idle power should drop within ~30s)"
-            log "idle governor enabled and started"
-        else
-            governor_state="install ok, but enable failed (see: journalctl -u cmp-idle-governor)"
-            log "WARNING: could not enable the idle governor"
-        fi
-    else
-        if systemctl is-enabled cmp-idle-governor.service >/dev/null 2>&1; then
-            systemctl disable cmp-governor-check.timer >/dev/null 2>&1 || true
-            if systemctl disable --now cmp-idle-governor.service >/dev/null 2>&1; then
-                log "idle governor disabled (--no-idle-governor); clock state released"
-            else
-                log "WARNING: could not disable the idle governor (--no-idle-governor)"
-            fi
-        fi
-        log "idle governor installed but not enabled (--no-idle-governor given)"
-    fi
+    governor_installed=1
 else
     governor_state="not present in this repository copy"
 fi
 
-# --- 6d. tuning utility -----------------------------------------------------
+# --- 6d. tuning configuration -----------------------------------------------
 
-# Profile-driven power/clock/offset tuning. Ships a default profile file and
-# seeds /etc/cmp-tune.conf once, so later upgrades never clobber local edits.
+# Profile-driven power/clock/offset tuning ships inside cmp50hx (`cmp-tune`
+# is a symlink to it). Seed /etc/cmp-tune.conf once, so later upgrades never
+# clobber local edits.
 tuning_dir="${install_dir}/tuning"
-if [[ -f "${tuning_dir}/cmp-tune" ]]; then
-    chmod 0755 "${tuning_dir}/cmp-tune"
-    ln -sf "${tuning_dir}/cmp-tune" /usr/local/bin/cmp-tune
+if [[ -f "${tuning_dir}/profiles.conf" ]]; then
     if [[ ! -f /etc/cmp-tune.conf ]]; then
         install -m 0644 "${tuning_dir}/profiles.conf" /etc/cmp-tune.conf
         log "seeded /etc/cmp-tune.conf with the default tuning profiles"
@@ -352,6 +340,37 @@ if [[ -f "${tuning_dir}/cmp-tune" ]]; then
         log "kept the existing /etc/cmp-tune.conf"
     fi
     log "installed cmp-tune (try: cmp-tune list, cmp-tune status)"
+fi
+
+# --- 6e. enable the service set (single source of truth: enable-services.sh) --
+
+# Retires every legacy unit name (cmp50hx-gen2, cmp-governor-check, the old
+# bench boot stack, the cmp-tune boot units) and enables the current set:
+# cmp50hx-boot + cmp-idle-governor (unless --no-idle-governor).
+enable_services="${install_dir}/deb/enable-services.sh"
+[[ -f "${enable_services}" ]] || die "repository layout broken: deb/enable-services.sh missing"
+if [[ "${idle_governor}" -eq 1 && "${governor_installed}" -eq 1 ]]; then
+    CMP_ENABLE_GOVERNOR=1 bash "${enable_services}" install
+    if systemctl restart cmp-idle-governor.service >/dev/null 2>&1; then
+        governor_state="ENABLED and running (idle power should drop within ~30s)"
+        log "idle governor enabled and started"
+    else
+        governor_state="install ok, but start failed (see: journalctl -u cmp-idle-governor)"
+        log "WARNING: could not start the idle governor"
+    fi
+else
+    CMP_ENABLE_GOVERNOR=0 bash "${enable_services}" install
+    if [[ "${idle_governor}" -eq 0 ]] && \
+            systemctl is-enabled cmp-idle-governor.service >/dev/null 2>&1; then
+        if systemctl disable --now cmp-idle-governor.service >/dev/null 2>&1; then
+            log "idle governor disabled (--no-idle-governor); clock state released"
+        else
+            log "WARNING: could not disable the idle governor (--no-idle-governor)"
+        fi
+    fi
+    if [[ "${governor_installed}" -eq 1 && "${idle_governor}" -eq 0 ]]; then
+        log "idle governor installed but not enabled (--no-idle-governor given)"
+    fi
 fi
 
 # --- 7. best-effort live check (never fatal) --------------------------------

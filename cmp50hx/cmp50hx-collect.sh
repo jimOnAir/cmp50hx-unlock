@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 50hx-collect.sh — ONE BOOT -> ONE LEDGER ROW + archived ESP unlocker log.
-# Runs on the bench (systemd oneshot, as root) after multi-user.
+# cmp50hx-collect.sh — ONE BOOT -> ONE LEDGER ROW + archived ESP unlocker log.
+# Bench-only phase of cmp50hx-boot.sh, run only with CMP_BOOT_COLLECT=1 in
+# /etc/cmp50hx/boot.conf (the ledger paths below are bench paths).
 # Best-effort by design: it must never break a boot.
 #
 # Ledger (CSV, header created on first run):

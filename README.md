@@ -8,45 +8,38 @@ status.
 
 ## One-click install
 
-Grab the latest from [GitHub Releases](../../releases/latest) — one file
-per OS, one command to unlock:
+Grab the latest from [GitHub Releases](../../releases/latest) and run one
+command to unlock:
 
 | OS | Download | Install (one command) |
 |---|---|---|
 | **Linux (Ubuntu 24.04/26.04, amd64)** | `cmp50hx-unlock_*_amd64.deb` | `sudo apt install ./cmp50hx-unlock_*_amd64.deb` |
-| **Windows** | `cmp50hx-unlock-windows.zip` | unzip, right-click `50HXInstaller.exe` → *Run as administrator* → *Install* |
 
-Both bundles ship the same UEFI compute unlock (proven live, FP32 31.7×
+The `.deb` ships the same UEFI compute unlock (proven live, FP32 31.7×
 and DP4A 28.4× over the locked stock driver — see [A/B matrix](efi-unlock/runs/20260910-ab-stock-vs-efi.md)).
 **No kernel patches required** for the compute unlock. PCIe Gen2 is not
 attempted pre-OS (issue #25: the pre-OS retrain hung some Intel X99/X299
-boards and never trained on other hosts); it is applied OS-side — on
-Windows by the installer's BYOVD logon task, on Linux by the patched
-kernel module / `cmp50hx-gen2.service`. On Windows the
-installer also enables `EnableGpuFirmware=1` so the EFI state survives
-into the OS driver. The Linux `.deb` is fully self-contained: it embeds
-the official NVIDIA 610.43.03 driver (userland from the `.run`), installs
-the patched open kernel module as a **DKMS** tree that rebuilds on every
-kernel update, deploys the UEFI ESP unlock and the `cmp50hx-gen2`
-service, and seeds `cmp-tune`. Reboot afterwards. `sudo apt remove
-cmp50hx-unlock` uninstalls the driver again. The `.deb` replaces the old
-one-click `.run` (the UEFI unlock alone also works with the stock
-module).
+boards and never trained on other hosts); it is applied OS-side by the
+patched kernel module / `cmp50hx-boot.service`. The `.deb` is fully
+self-contained: it embeds the official NVIDIA 610.43.03 driver (userland
+from the `.run`), installs the patched open kernel module as a **DKMS**
+tree that rebuilds on every kernel update, deploys the UEFI ESP unlock
+and the `cmp50hx-boot` boot-flow service, and seeds `cmp-tune`. Reboot
+afterwards. `sudo apt remove cmp50hx-unlock` uninstalls the driver again.
+The `.deb` replaces the old one-click `.run` (the UEFI unlock alone also
+works with the stock module).
 
 **AGESA / AMD Ryzen APU hosts (issue #24):** the EFI detects an AMD CPU
 via CPUID and uses the CF8-only path for the GPU find, skipping the
 AGESA-unsafe RootBridgeIo paths. The compute unlock still
 runs to completion. Gen2 is never attempted pre-OS on any host (issue
-#25); the OS brings it up via the Windows BYOVD logon task
-or the Linux `cmp50hx-gen2.service`.
+#25); the OS brings it up via the Linux `cmp50hx-boot.service`.
 
-To build the bundles yourself: `make release` (Linux + Windows
-toolchain needed — see `Makefile`). CI ships them automatically: GitHub
-Actions on every `v*` tag (`.github/workflows/release.yml`), and
-`.gitlab-ci.yml` does the same on GitLab — including the Release with
-downloadable artifacts. The GitLab pipeline needs only ordinary Linux
-docker runners (the Windows Go tools are cross-compiled with
-`GOOS=windows`).
+To build the bundle yourself: `make release` (Linux toolchain needed —
+see `Makefile`). CI ships it automatically: GitHub Actions on every `v*`
+tag (`.github/workflows/release.yml`), and `.gitlab-ci.yml` does the same
+on GitLab — including the Release with downloadable artifacts, on
+ordinary Linux docker runners.
 
 
 
@@ -190,12 +183,17 @@ The patched driver now applies the PCIe unlock policy itself at first
 device open and kicks the one-shot capability adoption (GSP reverts the
 policy registers right after the driver's boot window, which is why the
 old value-checking gate never fired; re-applying after that one-shot
-revert is stable). The `cmp50hx-gen2` boot service remains as the safety
+revert is stable). The Gen2 phase of `cmp50hx-boot.service` remains as the safety
 net: the driver's own Retrain Link can fail while GSP link management is
 still settling in the first seconds after boot, so the service watches for
 the card's target speed and retrains until the link is at Gen2 x4. Watch
-it with `journalctl -u cmp50hx-gen2 -b`; a `PASS` line means the link is
+it with `journalctl -u cmp50hx-boot -b`; a `PASS` line means the link is
 at 5.0 GT/s.
+
+Something looks wrong after a boot? **`cmp50hx explain`** translates the
+unlocker's ESP logs, the per-card PCI/NVML state, and the driver's hex
+dmesg lines into a plain-English verdict (add `sudo` for the full kernel
+log view).
 
 **Stuck at Gen1 (2.5 GT/s) after every cold boot?** Check the BIOS first:
 set the GPU slot's **PCIe link speed to Gen2** (not Auto/Gen1). The card
@@ -264,7 +262,8 @@ maximum. The private NVAPI P-state control can force the card to P8 at about
 [`idle-governor/`](idle-governor/README.md) supplies that P-state request
 automatically — force P8 when idle, release to P16 when work appears:
 
-The active service is a single C ELF, `cmp-governor`. It calls NVML and the
+The active service is the `governor` subcommand of the merged `cmp50hx`
+binary (`native/`), installed as `cmp-governor`. It calls NVML and the
 private NVAPI entry point directly; Bash, Python, and `nvidia-smi` are not in
 the runtime path.
 
@@ -299,16 +298,15 @@ llama server after a >30 s gap: first prefill 143 vs steady 2872 tok/s,
 first decode 9.5 vs steady 93 tok/s, then full speed until the next clamp.
 The governor now adapts to exactly that pattern: after such a flap the card's
 idle window doubles (up to a 10-minute cap) and returns to base on sustained
-load. A periodic gate reports `PASS_CMP_GOVERNOR` in the journal
-(`cmp-governor-check.timer`). Details, measurements, and
+load. The governor reports `PASS_CMP_GOVERNOR` in the journal at startup. Details, measurements, and
 tuning: [`idle-governor/README.md`](idle-governor/README.md).
 
 ## Tuning: optional profiles
 
 [`tuning/`](tuning/README.md) adds `cmp-tune`, a profile-driven utility for
-power limit, core/memory VF offsets and the locked core-clock range. It uses
-NVML directly (via `ctypes`, no build step) because `nvidia-smi` cannot set VF
-offsets.
+power limit, core/memory VF offsets and the locked core-clock range. It is the
+`tune` subcommand of the merged `cmp50hx` binary (`cmp-tune` is a symlink),
+talking to NVML directly because `nvidia-smi` cannot set VF offsets.
 
 ```bash
 cmp-tune list                    # profiles

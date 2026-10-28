@@ -19,7 +19,7 @@ stock driver** (2026-09-10). See "Proof" below.
   AGESA-unsafe RootBridgeIo paths (CF8-only GPU find). The unlock
   itself still runs
   end-to-end; OS brings Gen2 up via the Windows BYOVD logon task or
-  the Linux `cmp50hx-gen2.service`. See
+  the Linux `cmp50hx-boot.service`. See
   [`../efi-unlock-windows/README.md`](../efi-unlock-windows/README.md)
   for the Windows-side path.
 
@@ -69,7 +69,7 @@ pre-OS retrain never trained on any host (X79: `LNKCTL2` reads back
 read-only; AGESA: the retrain relinks the root port that also serves
 the iGPU) and on Intel X99/X299 boards it hung the boot entirely.
 Gen2 is applied OS-side: Windows installer BYOVD logon task, Linux
-`cmp50hx-gen2.service` / kernel patch 04.
+`cmp50hx-boot.service` / kernel patch 04.
 
 On AGESA / AMD Ryzen APU hosts the EFI also **skips** the
 spec/compact RootBridgeIo paths: AGESA hides unmodelled Type-0 devices
@@ -262,7 +262,7 @@ resort), which remains the default for BootNext and BootOrder installations.
 > the earlier `--no-gen2` load option is obsolete: Gen2 is never attempted
 > pre-OS on any host. An entry that still passes `--no-gen2` boots fine —
 > unknown load-option text is ignored. Gen2 comes from the OS side (Windows
-> BYOVD logon task, Linux `cmp50hx-gen2.service` / kernel patch 04); the log
+> BYOVD logon task, Linux `cmp50hx-boot.service` / kernel patch 04); the log
 > prints `[gen2] not attempted pre-OS - OS-side Gen2 only (issue #25)`.
 
 ### Rollback
@@ -324,7 +324,7 @@ itself never survives a GPU reset anyway).
   that makes `PL_LINK_RATE` come up `0x00240032` so the post-booter
   adoption sticks and GSP keeps it (verified on an X79 host: 2.5→5.0
   GT/s, H2D 0.80→1.59 GB/s). The unlock itself is kernel patch 04 +
-  `cmp50hx-gen2.service` (Linux) or the Windows logon task.
+  `cmp50hx-boot.service` (Linux) or the Windows logon task.
 - One card per run: the application unlocks the first `10de:1e09` it
   finds; multi-GPU hosts need an iteration loop (not yet ported).
 - Windows: covered by [`../efi-unlock-windows/`](../efi-unlock-windows/README.md),

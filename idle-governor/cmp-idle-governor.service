@@ -12,17 +12,17 @@ After=systemd-modules-load.service
 [Service]
 Type=simple
 # The governor owns NVML and the private NVAPI calls directly. The service
-# starts one ELF process: no shell, Python, or nvidia-smi helper is needed.
-# Tuning reaches the governor through cmp-tune drop-ins
-# (/etc/systemd/system/cmp-idle-governor.service.d/10-cmp-tune.conf), which
-# cmp-tune apply writes and cmp-tune reset removes; on every idle transition
-# the governor clears the GPU clock lock and can only restore it if it knows
-# the load profile. Do not bake a bench profile into the shipped unit:
+# starts the `governor` subcommand of the merged cmp50hx binary: no shell,
+# Python, or nvidia-smi helper is needed. Tuning reaches the governor through
+# cmp-tune drop-ins (/etc/systemd/system/cmp-idle-governor.service.d/10-cmp-tune.conf),
+# which cmp-tune apply writes and cmp-tune reset removes; on every idle
+# transition the governor clears the GPU clock lock and can only restore it if
+# it knows the load profile. Do not bake a bench profile into the shipped unit:
 # uncomment in a `systemctl edit` drop-in only to pin a profile by hand.
 # Environment=CMP_LOAD_CLOCK=2000,2000
 # Environment=CMP_LOAD_CORE_OFFSET=175
 # Environment=CMP_LOAD_POWER_W=170
-ExecStart=/opt/cmp50hx-unlock/idle-governor/cmp-governor
+ExecStart=/usr/local/bin/cmp50hx governor
 Restart=on-failure
 RestartSec=10
 

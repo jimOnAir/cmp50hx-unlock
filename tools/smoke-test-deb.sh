@@ -43,14 +43,24 @@ for path in \
         ./opt/cmp50hx-unlock/VERSION \
         ./usr/src/cmp50hx-610.43.03/dkms.conf \
         ./opt/cmp50hx-unlock/efi/50HXUNLK.EFI \
-        ./lib/systemd/system/cmp50hx-gen2.service \
+        ./lib/systemd/system/cmp50hx-boot.service \
         ./lib/systemd/system/cmp-idle-governor.service \
-        ./lib/systemd/system/cmp-governor-check.service \
-        ./lib/systemd/system/cmp-governor-check.timer \
-        ./opt/cmp50hx-unlock/verify/verify-governor.sh \
-        ./usr/lib/cmp50hx-unlock/cmp-governor; do
+        ./usr/lib/cmp50hx-unlock/cmp50hx \
+        ./usr/lib/cmp50hx-unlock/cmp50hx-boot.sh \
+        ./usr/lib/cmp50hx-unlock/cmp50hx-collect.sh \
+        ./opt/cmp50hx-unlock/deb/enable-services.sh \
+        ./etc/cmp50hx/boot.conf; do
     grep -qx "${path}" <<<"${fsys}" \
         || { printf 'missing package path: %s\n' "${path}" >&2; exit 1; }
+done
+
+# the argv[0] symlinks must point at TARGET-system paths, never staging
+# leftovers (a build that moves libdir/ must update this contract too)
+for link in cmp50hx cmp-tune rm-issue-rate; do
+    target="$(dpkg-deb -c "${deb}" |
+        awk -v name="./usr/bin/${link}" 'index($0, name" -> ") {sub(/.* -> /,""); print; exit}')"
+    [[ "${target}" == "/usr/lib/cmp50hx-unlock/cmp50hx" ]] \
+        || { printf 'bad /usr/bin/%s symlink target: %s\n' "${link}" "${target:-none}" >&2; exit 1; }
 done
 
 # --- the embedded .run must be byte-identical to the official one ---------------

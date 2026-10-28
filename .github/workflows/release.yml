@@ -51,12 +51,6 @@ jobs:
             cmp50hx-unlock_*_amd64.deb
             cmp50hx-unlock_*_amd64.deb.sha256
 
-      - name: Upload the EFI binary for the Windows job
-        uses: actions/upload-artifact@v4
-        with:
-          name: cmp50hx-efi
-          path: efi-unlock/50HXUNLK.EFI
-
   # -------------------------------------------------------------------
   # Ubuntu 26.04 install smoke: the single published .deb is built on
   # 24.04; this job installs that same artifact inside an ubuntu:26.04
@@ -108,142 +102,10 @@ jobs:
         run: cat /var/log/cmp50hx-unlock-install.log || true
 
   # -------------------------------------------------------------------
-  # Windows: build the three Go tools (they embed the EFI binary from
-  # efi-unlock-windows/tools/inst50hx/embed/) and bundle the BYOVD
-  # Gen2 runtime into a ZIP.
-  # -------------------------------------------------------------------
-  windows:
-    needs: linux
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-
-      # Single source of truth: the EFI binary is built by the Linux
-      # job from efi-unlock/unlock50x_v1.c. We download it here and
-      # overwrite the pre-committed embed *before* the Go build so the
-      # Windows installer ships the same EFI as the Linux release.
-      # The embed copy in the repo is only used for local Windows
-      # builds outside this workflow.
-      #
-      # NOTE: download path must be a *directory*, not a file path.
-      # actions/upload-artifact@v4 with a single file strips the
-      # directory prefix from the path, so the ZIP contains just
-      # 50HXUNLK.EFI at its root and `download-artifact` extracts it
-      # to efi-artifact\50HXUNLK.EFI.
-      - name: Download the EFI binary built by the Linux job
-        uses: actions/download-artifact@v4
-        with:
-          name: cmp50hx-efi
-          path: efi-artifact
-
-      - name: Sync EFI and BYOVD drivers into the Go embed path
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $W = $env:GITHUB_WORKSPACE
-          $Tools = Join-Path $W 'efi-unlock-windows\tools'
-          $EmbedDir = Join-Path $Tools 'inst50hx\embed'
-          $Downloaded = Join-Path $W 'efi-artifact\50HXUNLK.EFI'
-          if (-not (Test-Path $Downloaded)) {
-              throw "downloaded EFI missing at $Downloaded"
-          }
-          # The embed binary is not tracked in the repo (single source of
-          # truth lives at efi-unlock/50HXUNLK.EFI); create the dir if
-          # actions/checkout left it empty.
-          New-Item -ItemType Directory -Force -Path $EmbedDir | Out-Null
-          Copy-Item -Force $Downloaded (Join-Path $EmbedDir '50HXUNLK.EFI')
-          $hash = (Get-FileHash (Join-Path $EmbedDir '50HXUNLK.EFI') -Algorithm SHA256).Hash
-          Write-Host "synced embed EFI sha256: $hash"
-
-          # Sync BYOVD drivers (ThrottleStop.sys + WinRing0x64.sys). They
-          # live in efi-unlock-windows/gen2/drivers/ in source and need to
-          # be at the top level of inst50hx/embed/ for `//go:embed embed/*`
-          # to match — Go's `embed/*` does not recurse into subdirs by
-          # default, and the Go code reads them as "embed/<filename>".
-          # Without this, the resulting installer ships with no embedded
-          # driver payload and falls back to "Copy ThrottleStop.sys failed:
-          # open embed/ThrottleStop.sys: file does not exist" at runtime
-          # (the long-standing issue #24 driver copy failures).
-          $DrvSrc = Join-Path $W 'efi-unlock-windows\gen2\drivers'
-          if (-not (Test-Path $DrvSrc)) {
-              throw "missing efi-unlock-windows/gen2/drivers/ (BYOVD runtime)"
-          }
-          foreach ($drv in 'ThrottleStop.sys', 'WinRing0x64.sys') {
-              $src = Join-Path $DrvSrc $drv
-              if (-not (Test-Path $src)) {
-                  throw "missing $src (BYOVD runtime)"
-              }
-              Copy-Item -Force $src (Join-Path $EmbedDir $drv)
-            $drvHash = (Get-FileHash $src -Algorithm SHA256).Hash
-              Write-Host "synced embed $drv sha256: $drvHash"
-          }
-
-      - name: Build the Go tools
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          # Note: the checkout lives at $env:GITHUB_WORKSPACE, whose path
-          # ends in \<repo>\<repo> — that is the standard Actions layout.
-          $W = $env:GITHUB_WORKSPACE
-          $Tools = Join-Path $W 'efi-unlock-windows\tools'
-          $Stage = Join-Path $W 'artifacts\windows-stage'
-          New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-          foreach ($d in @('winres_gen','inst50hx','uninstall50x','check50x')) {
-              if (-not (Test-Path (Join-Path $Tools $d))) {
-                  throw "missing tool dir: $(Join-Path $Tools $d)"
-              }
-          }
-          # winres_gen generates the .syso once (skipped if already present)
-          if (-not (Test-Path (Join-Path $Tools 'inst50hx\rsrc_windows_amd64.syso'))) {
-              Push-Location (Join-Path $Tools 'winres_gen')
-              try { go build -o (Join-Path $Stage 'winres_gen.exe') . }
-              finally { Pop-Location }
-              & (Join-Path $Stage 'winres_gen.exe') -o (Join-Path $Tools 'inst50hx\rsrc_windows_amd64.syso')
-          }
-          foreach ($t in @(
-              @{ Name = '50HXInstaller.exe';   Dir = 'inst50hx' },
-              @{ Name = '50HXUninstaller.exe'; Dir = 'uninstall50x' },
-              @{ Name = '50HXCheck.exe';       Dir = 'check50x' }
-          )) {
-              Push-Location (Join-Path $Tools $t.Dir)
-              try { go build -a -trimpath -ldflags='-H=windowsgui -s -w' -o (Join-Path $Stage $t.Name) . }
-              finally { Pop-Location }
-          }
-          # payload pieces
-          Copy-Item -Recurse -Force (Join-Path $W 'efi-unlock-windows\gen2\*') $Stage
-          Copy-Item -Force (Join-Path $W 'efi-unlock-windows\README.md') (Join-Path $Stage 'README.md')
-          Copy-Item -Force (Join-Path $Tools 'inst50hx\embed\50HXUNLK.EFI') (Join-Path $Stage '50HXUNLK.EFI')
-          Copy-Item -Force (Join-Path $W 'efi-unlock\sign-efi.sh') (Join-Path $Stage 'sign-efi.sh')
-          Get-ChildItem $Stage | Format-Table Name,Length
-          (Get-FileHash (Join-Path $Stage '50HXInstaller.exe') -Algorithm SHA256).Hash
-
-      - name: Compose the Windows ZIP
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $Zip = Join-Path $env:GITHUB_WORKSPACE 'cmp50hx-unlock-windows.zip'
-          if (Test-Path $Zip) { Remove-Item $Zip }
-          Compress-Archive -Path (Join-Path $env:GITHUB_WORKSPACE 'artifacts\windows-stage\*') `
-                           -DestinationPath $Zip -CompressionLevel Optimal
-          "$((Get-FileHash $Zip -Algorithm SHA256).Hash)  cmp50hx-unlock-windows.zip" |
-            Set-Content -NoNewline (Join-Path $env:GITHUB_WORKSPACE 'cmp50hx-unlock-windows.zip.sha256')
-
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: cmp50hx-unlock-windows
-          path: |
-            cmp50hx-unlock-windows.zip
-            cmp50hx-unlock-windows.zip.sha256
-
-  # -------------------------------------------------------------------
   # Publish the release (tag pushes only)
   # -------------------------------------------------------------------
   release:
-    needs: [linux, linux-2604-install, windows]
+    needs: [linux, linux-2604-install]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
@@ -251,10 +113,6 @@ jobs:
         with:
           name: cmp50hx-unlock-linux
           path: dist/linux
-      - uses: actions/download-artifact@v4
-        with:
-          name: cmp50hx-unlock-windows
-          path: dist/windows
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -271,13 +129,10 @@ jobs:
             The package embeds the NVIDIA 610.43.03 driver (userland from the
             official .run), the patched open kernel modules as a DKMS tree
             (auto-rebuild on every kernel update), the UEFI ESP unlock, the
-            cmp50hx-gen2 service, the optional idle governor and cmp-tune.
+            cmp50hx-boot boot-flow service, the optional idle governor and cmp-tune.
             Remove with `sudo apt remove cmp50hx-unlock` (uninstalls the driver).
 
-            **Windows** — download `cmp50hx-unlock-windows.zip`, unzip, then:
-            right-click `50HXInstaller.exe` → *Run as administrator* → *Install*
-
-            Both ship the same UEFI compute unlock (FP32 31.7x / DP4A 28.4x
+            The package ships the UEFI compute unlock (FP32 31.7x / DP4A 28.4x
             over the locked stock driver, zero Xid; A/B matrix:
             efi-unlock/runs/20260910-ab-stock-vs-efi.md). Requires UEFI boot
             with Above 4G Decoding on. Secure Boot can stay on: sign the EFI
@@ -288,6 +143,4 @@ jobs:
           files: |
             dist/linux/cmp50hx-unlock_*_amd64.deb
             dist/linux/cmp50hx-unlock_*_amd64.deb.sha256
-            dist/windows/cmp50hx-unlock-windows.zip
-            dist/windows/cmp50hx-unlock-windows.zip.sha256
           fail_on_unmatched_files: true

@@ -11,10 +11,11 @@ Description: CMP 50HX compute unlock for Ubuntu (NVIDIA 610.43.03 + patched open
  One-click unlock for the NVIDIA CMP 50HX (TU102, 10de:1e09). The package
  embeds the official NVIDIA 610.43.03 .run and installs its userland,
  ships the patched open kernel modules as a DKMS tree (stock-flow GSP
- compute unlock, ReBAR, PCIe Gen2, profiling counters) that rebuilds
- automatically on every kernel update, deploys the UEFI ESP unlock
- binary, and installs the cmp50hx-gen2 retrain service, the idle P-state
- governor (enabled by default) and the cmp-tune utility.
+  compute unlock, ReBAR, PCIe Gen2, profiling counters) that rebuilds
+  automatically on every kernel update, deploys the UEFI ESP unlock
+  binary, and installs the cmp50hx-boot boot-flow service (unlock
+  verdict, PCIe Gen2 retrain as a GPU readiness gate), the idle
+  P-state governor (enabled by default) and the cmp-tune utility.
  .
  Removing this package uninstalls the NVIDIA driver it embedded.
  Supported: Ubuntu 24.04 / 26.04 amd64 (the 26.04 install path is

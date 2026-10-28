@@ -1,0 +1,31 @@
+[Unit]
+# The single CMP 50HX boot-flow unit (merged 2026-10-28 from cmp50hx-gen2,
+# 50hx-boot/50hx-collect/50hx-boothealth, and the cmp-tune boot units):
+# evidence archival (opt-in), unlock verdict, PCIe Gen2 retrain as a GPU
+# readiness gate, boot tuning profile. The unit never reboots the host
+# (warm re-roll ladder retired 2026-10-28, docs/adr/0001).
+Description=CMP 50HX boot flow: unlock verdict, Gen2 readiness gate
+Documentation=https://github.com/xrip/cmp50hx-unlock
+# DefaultDependencies=no + Before=multi-user.target (never After= it: the
+# pair forms an ordering cycle and systemd breaks it by deleting jobs).
+# Before=docker.service: dependents must not allocate on GPUs that are not
+# fully initialized; the readiness gate (phase 3) proves the ESP-promised
+# cards reached Gen2 PASS before this unit exits.
+DefaultDependencies=no
+After=boot-efi.mount local-fs.target
+Before=docker.service multi-user.target
+Wants=boot-efi.mount
+
+[Service]
+Type=oneshot
+# Worst legitimate start: collect(30)+verdict(~15)+readiness gate(180 max,
+# only when cards are ESP-promised)+profile(120) ~= 5.5 min; 7 min is the
+# hard backstop. A promised card that never reaches PASS FAILS the unit
+# loudly (exit 1) — docker still starts (ordering is not a requirement edge),
+# the red flag is the point (deterministic-boot policy, ADR-0001).
+TimeoutStartSec=7min
+ExecStart=/usr/local/sbin/cmp50hx-boot.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

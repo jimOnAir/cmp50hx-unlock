@@ -3,9 +3,10 @@
 Sets power limit, core/memory VF offsets and the locked core-clock range from
 named profiles, per card. Optional; nothing in the unlock depends on it.
 
-`nvidia-smi` cannot set VF offsets, so this talks to NVML directly through
-`ctypes`. No headers, no build step — it loads `libnvidia-ml.so.1`, which the
-driver already installs.
+`nvidia-smi` cannot set VF offsets, so this talks to NVML directly. It is the
+`tune` subcommand of the merged `cmp50hx` binary (`native/`); the `cmp-tune`
+command name is an argv[0] symlink. No NVML headers are needed at runtime: the
+binary dlopens `libnvidia-ml.so.1`, which the driver already installs.
 
 ## Commands
 
@@ -102,25 +103,26 @@ Pass `--no-sync-governor` to leave the drop-in alone.
 
 Tuning is runtime state, so after a reboot the card is back at stock and the
 governor releases to the stock boost clock rather than your tuned one. To make
-a profile stick, enable the shipped unit:
+a profile stick, name it in the boot-flow policy:
 
 ```sh
-sudo cp cmp-tune-profile.service /etc/systemd/system/
-sudoedit /etc/systemd/system/cmp-tune-profile.service   # pick the profile
-sudo systemctl enable --now cmp-tune-profile
+sudoedit /etc/cmp50hx/boot.conf     # CMP_BOOT_PROFILE=efficient
 ```
 
-It is ordered `Before=cmp-idle-governor.service`, so the `CMP_LOAD_CLOCK`
-drop-in is in place before the governor starts and the governor releases to
-the tuned clock. Nothing depends on the unit, so a failure does not block
-boot — but see the warning below before enabling it.
+`cmp50hx-boot.service` applies the profile at the end of its boot sequence —
+after the PCIe Gen2 phase (the driver is up, so NVML works) and before the
+idle governor starts — so the `CMP_LOAD_CLOCK` drop-in is in place when the
+governor comes up and it releases to the tuned clock. The apply is
+best-effort: a failing profile only logs a `WARN` line to the journal, it
+never blocks boot. See the warning below before enabling it.
 
 ## Notes and limits
 
 - Auto-apply at boot is **opt-in on purpose**: an unstable overclock that
   re-applies on every boot is awkward to recover from. Validate a profile
-  interactively first, and keep in mind that `systemctl disable
-  cmp-tune-profile` plus a reboot always gets you back to stock.
+  interactively first, and keep in mind that setting `CMP_BOOT_PROFILE=` back
+  to empty in `/etc/cmp50hx/boot.conf` plus a reboot always gets you back to
+  stock.
 - VF offsets shift the whole curve, so the effective clock under load can end
   up above `clock_max` unless a lock is in force. That is why a tuned profile
   should normally set a clock bound too.

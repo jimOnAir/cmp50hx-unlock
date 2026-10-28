@@ -148,16 +148,20 @@ done
 # --- nouveau blacklist + ReBAR option are dpkg conffiles (/etc/modprobe.d) ----
 
 # --- services ---------------------------------------------------------------
-ln -sf "${install_dir}/bin/rm-issue-rate" /usr/local/bin/rm-issue-rate
-if command -v deb-systemd-helper >/dev/null 2>&1; then
-    deb-systemd-helper enable cmp50hx-gen2.service >/dev/null || true
-    deb-systemd-helper enable cmp-idle-governor.service >/dev/null || true
-    deb-systemd-helper enable cmp-governor-check.timer >/dev/null || true
+# The enable/disable list lives in exactly one place: deb/enable-services.sh
+# (shared with install.sh). It retires every legacy unit name and enables
+# cmp50hx-boot.service + cmp-idle-governor.service. The merged cmp50hx
+# binary (native/) is installed under /usr/lib/cmp50hx-unlock with /usr/bin
+# symlinks (cmp-tune, rm-issue-rate) shipped by the package itself.
+bash "${install_dir}/deb/enable-services.sh" deb
+# A previous install.sh run linked /usr/local/bin/rm-issue-rate at the
+# build-time artifact; an upgrade deletes that artifact and leaves a dangling
+# link shadowing the package's /usr/bin one. Replace it if broken.
+if [[ -L /usr/local/bin/rm-issue-rate && ! -e /usr/local/bin/rm-issue-rate ]]; then
+    ln -sfn /usr/lib/cmp50hx-unlock/cmp50hx /usr/local/bin/rm-issue-rate
+    log "repaired dangling /usr/local/bin/rm-issue-rate -> merged cmp50hx"
 fi
-if command -v systemctl >/dev/null 2>&1; then
-    systemctl daemon-reload >/dev/null 2>&1 || true
-fi
-log "cmp50hx-gen2.service enabled (runs at boot, NOT started now)"
+log "cmp50hx-boot.service enabled (boot flow: unlock verdict + Gen2 readiness gate; policy in /etc/cmp50hx/boot.conf)"
 log "cmp-idle-governor.service enabled (idle power drops within ~30s of load ending; starts at boot; disable: sudo systemctl disable --now cmp-idle-governor)"
 
 # --- boot persistence of the patched module in the initramfs ---------------
@@ -203,7 +207,7 @@ if [[ ${running_has_module} -eq 1 ]] && ! lsmod | grep -q '^nvidia '; then
     if ! lsmod | grep -q '^nvidia ' && modprobe nvidia 2>/dev/null; then
         log "loaded the patched nvidia module; live probe:"
         nvidia-smi -L 2>/dev/null || log "nvidia-smi found no device (expected without the card)"
-        live_check="PROBED (see output above; run /usr/local/bin/rm-issue-rate after reboot for the deep check)"
+        live_check="PROBED (see output above; run rm-issue-rate after reboot for the deep check)"
     fi
 fi
 
@@ -217,6 +221,7 @@ Log        : ${log_file}
 Live check : ${live_check}
 Initramfs  : ${initramfs_state}
 ESP unlock : ${esp_state}
+Boot flow  : cmp50hx-boot.service enabled (verdict + Gen2 readiness gate)
 Idle governor: enabled (starts at boot; disable: sudo systemctl disable --now cmp-idle-governor)
 ReBAR      : default 16 GiB; for 32 GiB edit /etc/modprobe.d/cmp50hx-unlock.conf (cmp50_rebar_size=9)
 Tuning     : cmp-tune list | cmp-tune status | sudo cmp-tune apply PROFILE

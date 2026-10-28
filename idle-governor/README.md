@@ -3,9 +3,9 @@
 Enabled by default at install. Cuts idle power roughly in half. It is **not**
 part of the unlock and nothing else depends on it.
 
-The active service is one C ELF: `cmp-governor`. It loads NVML and the private
-NVAPI entry point directly. The runtime path has no Bash, Python, or
-`nvidia-smi` helper.
+The active service is the `governor` subcommand of the merged `cmp50hx`
+binary (`cmp50hx governor`). It loads NVML and the private NVAPI entry point
+directly. The runtime path has no Bash, Python, or `nvidia-smi` helper.
 
 ## Why it is needed
 
@@ -198,15 +198,16 @@ the lock is restored on load.
 
 ## Verification
 
-`verify/verify-governor.sh` runs as a periodic fleet gate
-(`cmp-governor-check.timer`, 2 min after boot, then every 6 h). The verdict
-stays in the journal and never gates a boot:
+The governor logs its own startup verdict. (The old periodic fleet gate
+`cmp-governor-check.timer` was folded into the daemon on 2026-10-28; the
+verdict still stays in the journal and never gates a boot.)
 
 ```sh
-journalctl -u cmp-governor-check -b --no-pager | grep CMP_GOVERNOR
+journalctl -u cmp-idle-governor -b --no-pager | grep CMP_GOVERNOR
 ```
 
-`PASS_CMP_GOVERNOR` requires the unit enabled, active, and running the
-`cmp-governor` ELF; the line carries opportunistic P8 proof (journal entry
-this boot, or a supported card currently at P8). `WARN_CMP_GOVERNOR_DISABLED`
-marks an opted-out host; `FAIL_CMP_GOVERNOR` means enabled but not running.
+`PASS_CMP_GOVERNOR running managed=N ...` means the daemon reached its manage
+loop; the first `forced P8` line is the live proof. `WARN_CMP_GOVERNOR_NO_CARD`
+marks a host without a supported card; `FAIL_CMP_GOVERNOR` (driver libraries or
+config unavailable) means the unit exited at startup. A crashed or
+never-started unit shows up as the absence of a `PASS` line this boot.

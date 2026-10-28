@@ -8,8 +8,10 @@ LOG(){ logger -t 50hx-gate -- "$*"; echo "gate: $*" >&2; }
 
 exec 9>/run/lock/50hx-gate.lock 2>/dev/null; flock -w 120 9 || { LOG "lock timeout"; }
 
-TOOL=/usr/local/bin/50hx-osunlock
-[ -x "$TOOL" ] || { exec /sbin/modprobe --ignore-install "$@"; }
+MERGED=/usr/local/bin/cmp50hx
+if [ -x "$MERGED" ]; then TOOL=( "$MERGED" osunlock )
+elif [ -x /usr/local/bin/50hx-osunlock ]; then TOOL=( /usr/local/bin/50hx-osunlock )
+else exec /sbin/modprobe --ignore-install "$@"; fi
 
 mkdir -p /run/50hx-gate
 for dev in /sys/bus/pci/devices/*/; do
@@ -20,7 +22,7 @@ for dev in /sys/bus/pci/devices/*/; do
     # driver must not own it; it must be a locked card
     if [ -e "$dev/driver" ]; then touch "/run/50hx-gate/$bdf.done"; continue; fi
     LOG "unlocking $bdf"
-    if timeout 90 "$TOOL" --bdf "$bdf" --flr --wait 20 >"/run/50hx-gate/$bdf.log" 2>&1; then
+    if timeout 90 "${TOOL[@]}" --bdf "$bdf" --flr --wait 20 >"/run/50hx-gate/$bdf.log" 2>&1; then
         LOG "$bdf: tool success"
     else
         LOG "$bdf: tool rc=$? (see /run/50hx-gate/$bdf.log)"

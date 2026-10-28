@@ -6,8 +6,9 @@
 #   - embedded official NVIDIA 610.43.03 .run (userland, no kernel modules)
 #   - patched open kernel module source as a DKMS tree (auto-rebuild on
 #     every kernel update)
-#   - UEFI ESP unlock (50HXUNLK.EFI + install-linux.sh), the cmp50hx-gen2
-#     service, the idle governor (enabled by default) and cmp-tune
+#   - UEFI ESP unlock (50HXUNLK.EFI + install-linux.sh), the cmp50hx-boot
+#     boot-flow service (unlock verdict + Gen2 readiness gate), the
+#     idle governor (enabled by default) and cmp-tune
 #
 # Build requirements: Ubuntu/Debian host (or ubuntu:24.04 container) with
 # dpkg-deb, build-essential, curl, patch, kmod, binutils. Needs network on
@@ -142,30 +143,35 @@ libdir="${stage}/usr/lib/cmp50hx-unlock"
 mkdir -p "${libdir}" "${stage}/usr/bin" "${stage}/lib/systemd/system"
 mkdir -p "${stage}/etc/modprobe.d"
 
-cc -O2 -Wall -Wextra -Werror -std=c11 "${root}/idle-governor/cmp-governor.c" \
-    -ldl -o "${libdir}/cmp-governor"
-cc -O2 -Wall -Wextra -Werror -std=c11 "${root}/verify/rm_issue_rate.c" \
-    -o "${opt}/bin/rm-issue-rate"
-install -m 0755 "${root}/cmp50hx/cmp50hx-gen2.sh" "${libdir}/cmp50hx-gen2.sh"
-install -m 0755 "${root}/tuning/cmp-tune" "${stage}/usr/bin/cmp-tune"
+# merged multi-call userland (governor|gen2|osunlock|tune|verify, see
+# native/main.c); the legacy names live on as argv[0] symlinks. The symlink
+# targets are the TARGET-system paths, not the staging paths.
+make -C "${root}/native" CC="${CC:-cc}"
+install -m 0755 "${root}/native/cmp50hx" "${libdir}/cmp50hx"
+ln -sfn /usr/lib/cmp50hx-unlock/cmp50hx "${stage}/usr/bin/cmp50hx"
+ln -sfn /usr/lib/cmp50hx-unlock/cmp50hx "${stage}/usr/bin/cmp-tune"
+ln -sfn /usr/lib/cmp50hx-unlock/cmp50hx "${stage}/usr/bin/rm-issue-rate"
+install -m 0755 "${root}/cmp50hx/cmp50hx-boot.sh" "${libdir}/cmp50hx-boot.sh"
+install -m 0755 "${root}/cmp50hx/cmp50hx-collect.sh" "${libdir}/cmp50hx-collect.sh"
+install -m 0755 "${root}/deb/enable-services.sh" "${opt}/deb/enable-services.sh"
 
 # systemd units with the package's own paths (the repo originals target the
 # install.sh layout under /usr/local and /opt).
-sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp50hx-gen2.sh#' \
-    "${root}/cmp50hx/cmp50hx-gen2.service" \
-    > "${stage}/lib/systemd/system/cmp50hx-gen2.service"
-sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp-governor#' \
+sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp50hx-boot.sh#' \
+    "${root}/cmp50hx/cmp50hx-boot.service" \
+    > "${stage}/lib/systemd/system/cmp50hx-boot.service"
+sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp50hx governor#' \
     "${root}/idle-governor/cmp-idle-governor.service" \
     > "${stage}/lib/systemd/system/cmp-idle-governor.service"
-install -m 0644 "${root}/idle-governor/cmp-governor-check.service" \
-    "${root}/idle-governor/cmp-governor-check.timer" \
-    "${stage}/lib/systemd/system/"
 
 # dpkg conffiles: nouveau blacklist, BAR1 selector (8 = 16 GiB, 9 = 32 GiB;
-# edit to switch, mirrors install.sh --rebar-32g), tuning profiles seed.
+# edit to switch, mirrors install.sh --rebar-32g), boot-flow policy, tuning
+# profiles seed.
 printf 'blacklist nouveau\n' > "${stage}/etc/modprobe.d/cmp-unlock.conf"
 printf 'options nvidia cmp50_rebar_size=8\n' > "${stage}/etc/modprobe.d/cmp50hx-unlock.conf"
 install -m 0644 "${root}/tuning/profiles.conf" "${stage}/etc/cmp-tune.conf"
+mkdir -p "${stage}/etc/cmp50hx"
+install -m 0644 "${root}/deb/boot.conf" "${stage}/etc/cmp50hx/boot.conf"
 
 # --- 5. DEBIAN metadata and maintainer scripts -------------------------------
 sed "s/@VERSION@/${version}/" "${root}/deb/control.in" > "${stage}/DEBIAN/control"

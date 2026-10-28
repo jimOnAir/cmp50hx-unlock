@@ -21,7 +21,7 @@ DIRTY=""
 STAMP="git-${SHA}${DIRTY}-$(date -u +%Y%m%dT%H%M%SZ)"
 
 echo "==> sync working tree -> ${BENCH}:${BDIR}"
-rsync -a --delete --exclude .git --exclude '*.o' --exclude '*.so' \
+rsync -a --delete --exclude .git --exclude work --exclude dist-llm2 --exclude '*.o' --exclude '*.so' \
       --exclude '*.EFI' "${SRC_ROOT}/" "${BENCH}:${BDIR}/"
 
 echo "==> build on bench (stamp: ${STAMP})"

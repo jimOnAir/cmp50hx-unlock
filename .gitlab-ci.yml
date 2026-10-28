@@ -1,19 +1,15 @@
 # GitLab CI — mirrors .github/workflows/release.yml.
 #
-# Produces the same two one-click artifacts on tag pipelines:
+# Produces the one-click Linux artifact on tag pipelines:
 #   - cmp50hx-unlock_<ver>_amd64.deb (self-contained: NVIDIA 610.43.03
 #     userland + patched DKMS modules + UEFI ESP unlock + services)
-#   - cmp50hx-unlock-windows.zip (Go installer tools + EFI + Gen2 runtime)
-# and publishes them as a GitLab Release. The release is gated on the
+# and publishes it as a GitLab Release. The release is gated on the
 # Ubuntu 26.04 install smoke below (test:linux-2604-install).
 #
-# Runner requirements: ordinary Linux docker runners only. The Windows Go
-# tools are cross-compiled from Linux (GOOS=windows); the EFI binary they
-# embed is committed at efi-unlock-windows/tools/inst50hx/embed/, and the
-# windows manifest .syso is committed beside the sources, so no Windows
-# runner is needed. On tag pipelines the binaries are uploaded to the
-# project's Generic Package Registry (permanent URLs) and linked from a
-# Release — see the release job.
+# Runner requirements: ordinary Linux docker runners only. On tag
+# pipelines the binaries are uploaded to the project's Generic Package
+# Registry (permanent URLs) and linked from a Release — see the release
+# job.
 
 stages: [build, package, release]
 
@@ -72,40 +68,6 @@ package:linux:
     expire_in: 1 week
 
 # -------------------------------------------------------------------
-# package: Windows ZIP (Go tools cross-compiled from Linux)
-# -------------------------------------------------------------------
-package:windows:
-  stage: package
-  image: golang:1.23-bookworm
-  before_script:
-    - apt-get update -qq
-    - apt-get install -y --no-install-recommends zip
-  script:
-    - |
-      set -eux
-      export GOOS=windows GOARCH=amd64 CGO_ENABLED=0
-      TOOLS=efi-unlock-windows/tools
-      STAGE="$PWD/.stage-windows"
-      mkdir -p "$STAGE"
-      # the committed manifest .syso is picked up automatically next to
-      # the sources; no winres_gen step is needed on CI
-      ( cd "$TOOLS/winres_gen"     && go build -trimpath -o "$STAGE/winres_gen.exe" . )
-      ( cd "$TOOLS/inst50hx"       && go build -trimpath -ldflags='-H=windowsgui -s -w' -o "$STAGE/50HXInstaller.exe" . )
-      ( cd "$TOOLS/uninstall50x"   && go build -trimpath -ldflags='-H=windowsgui -s -w' -o "$STAGE/50HXUninstaller.exe" . )
-      ( cd "$TOOLS/check50x"       && go build -trimpath -ldflags='-H=windowsgui -s -w' -o "$STAGE/50HXCheck.exe" . )
-      cp "$TOOLS/inst50hx/embed/50HXUNLK.EFI" "$STAGE/50HXUNLK.EFI"
-      cp efi-unlock-windows/README.md "$STAGE/README.md"
-      cp -r efi-unlock-windows/gen2/. "$STAGE/"
-      ( cd "$STAGE" && zip -q -r "$PWD/cmp50hx-unlock-windows.zip" . )
-      sha256sum cmp50hx-unlock-windows.zip > cmp50hx-unlock-windows.zip.sha256
-      ( cd "$STAGE" && unzip -l "$PWD/cmp50hx-unlock-windows.zip" | tail -20 )
-  artifacts:
-    paths:
-      - cmp50hx-unlock-windows.zip
-      - cmp50hx-unlock-windows.zip.sha256
-    expire_in: 1 week
-
-# -------------------------------------------------------------------
 # package: Ubuntu 26.04 install smoke — installs the published .deb
 # (built on 24.04) inside ubuntu:26.04: dependency resolution, postinst
 # configure and the DKMS build against 26.04 kernel headers must pass,
@@ -146,15 +108,13 @@ release:gitlab:
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   rules:
     - if: $CI_COMMIT_TAG
-  needs: [package:linux, package:windows, test:linux-2604-install]
+  needs: [package:linux, test:linux-2604-install]
   script:
     - |
       set -eux
       PKG_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/cmp50hx-unlock/${CI_COMMIT_TAG}"
       DEB="$(ls cmp50hx-unlock_*_amd64.deb)"
-      for f in "$DEB" "$DEB.sha256" \
-               cmp50hx-unlock-windows.zip \
-               cmp50hx-unlock-windows.zip.sha256; do
+      for f in "$DEB" "$DEB.sha256"; do
         curl --fail --show-error --retry 3 \
              --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
              --upload-file "$f" "${PKG_URL}/$f"
@@ -172,18 +132,13 @@ release:gitlab:
       The package embeds the NVIDIA 610.43.03 driver (userland from the
       official .run), the patched open kernel modules as a DKMS tree
       (auto-rebuild on every kernel update), the UEFI ESP unlock, the
-      cmp50hx-gen2 service, the optional idle governor and cmp-tune.
+      cmp50hx-boot boot-flow service, the optional idle governor and cmp-tune.
       Remove with 'sudo apt remove cmp50hx-unlock' (uninstalls the driver).
 
-      Windows — download cmp50hx-unlock-windows.zip, unzip, then:
-          right-click 50HXInstaller.exe -> Run as administrator -> Install
-
-      Both ship the same UEFI compute unlock (FP32 31.7x / DP4A 28.4x over
+      The package ships the UEFI compute unlock (FP32 31.7x / DP4A 28.4x over
       the locked stock driver, zero Xid; A/B matrix:
       efi-unlock/runs/20260910-ab-stock-vs-efi.md). Requires UEFI boot with
       Above 4G Decoding on. The DKMS kernel modules are not signed: disable
       Secure Boot or sign them with your own MOK." \
         --assets-link "{\"name\":\"${DEB}\",\"url\":\"${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/cmp50hx-unlock/${CI_COMMIT_TAG}/${DEB}\"}" \
-        --assets-link "{\"name\":\"${DEB}.sha256\",\"url\":\"${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/cmp50hx-unlock/${CI_COMMIT_TAG}/${DEB}.sha256\"}" \
-        --assets-link "{\"name\":\"cmp50hx-unlock-windows.zip\",\"url\":\"${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/cmp50hx-unlock/${CI_COMMIT_TAG}/cmp50hx-unlock-windows.zip\"}" \
-        --assets-link "{\"name\":\"cmp50hx-unlock-windows.zip.sha256\",\"url\":\"${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/cmp50hx-unlock/${CI_COMMIT_TAG}/cmp50hx-unlock-windows.zip.sha256\"}"
+        --assets-link "{\"name\":\"${DEB}.sha256\",\"url\":\"${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/cmp50hx-unlock/${CI_COMMIT_TAG}/${DEB}.sha256\"}"

@@ -1,3 +1,4 @@
 /etc/modprobe.d/cmp-unlock.conf
 /etc/modprobe.d/cmp50hx-unlock.conf
 /etc/cmp-tune.conf
+/etc/cmp50hx/boot.conf
