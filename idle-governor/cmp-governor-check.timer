@@ -1,0 +1,9 @@
+[Unit]
+Description=Periodic CMP idle governor verification
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=6h
+
+[Install]
+WantedBy=timers.target

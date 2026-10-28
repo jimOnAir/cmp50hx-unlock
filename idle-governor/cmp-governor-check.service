@@ -1,0 +1,9 @@
+[Unit]
+# Fleet verification gate for the idle governor (presence + opportunistic
+# P8 proof; verdict in the journal, never disruptive, exit status ignored).
+Description=CMP idle governor verification gate
+After=cmp-idle-governor.service
+
+[Service]
+Type=oneshot
+ExecStart=-/opt/cmp50hx-unlock/verify/verify-governor.sh

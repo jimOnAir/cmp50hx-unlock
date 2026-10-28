@@ -1,7 +1,7 @@
-# Idle P-state governor (optional)
+# Idle P-state governor
 
-Cuts idle power roughly in half. It is **not** part of the unlock and nothing
-else depends on it.
+Enabled by default at install. Cuts idle power roughly in half. It is **not**
+part of the unlock and nothing else depends on it.
 
 The active service is one C ELF: `cmp-governor`. It loads NVML and the private
 NVAPI entry point directly. The runtime path has no Bash, Python, or
@@ -44,9 +44,20 @@ About **−61 W per idle card**. Verified live end to end: 30 s idle → forced 
 P8/1.8 W; a load released it within one poll to P0/full clocks; the load
 ending forced P8 again; stopping the unit released it to P16 cleanly.
 
+Fleet re-verification 2026-10-28 (three CMP 50HX in one chassis, same driver,
+load profile restored by a drop-in): idle **73–78 W per card** without the
+governor → **17–20 W per card at P8** with it; load release at 2010 MHz,
+64–69 W. NVML power on a multi-card board reads above the single-card 1.8 W
+floor (shared rails); the P8 clock state is identical (645/405 MHz). A
+resident llama server quantified the trade-off: after a gap >30 s the first
+prefill ran at 143 tok/s (steady 2872) and the first decode at 9.5 tok/s
+(steady 93) before the release landed; `verify/pstate-trace` captured the
+cycle.
+
 ## Install
 
-Either pass `--idle-governor` to `install.sh`, or enable it later:
+Enabled by default: both `install.sh` and the `.deb` enable the unit. Opt out
+at install time with `--no-idle-governor`, or enable a host that skipped it:
 
 ```sh
 sudo systemctl enable --now cmp-idle-governor
@@ -66,7 +77,8 @@ sudo systemctl disable --now cmp-idle-governor
 ```
 
 The unit releases the clamp on stop, and clock locks are runtime state that a
-reboot clears anyway.
+reboot clears anyway. A later installer run re-enables the unit unless it gets
+`--no-idle-governor`.
 
 ## Tuning
 
@@ -78,6 +90,9 @@ Defaults are conservative. Override with a systemd drop-in
 | `CMP_POLL` | `5` | seconds between samples; also the worst-case delay before a new job gets full clocks |
 | `CMP_IDLE_AFTER` | `6` | consecutive idle polls before clamping (6 × 5 s = 30 s) |
 | `CMP_UTIL` | `5` | utilisation percent still treated as idle |
+| `CMP_FLAP_WINDOW` | `60` | a clamp released within this many seconds of being forced counts as a flap and doubles that card's idle window |
+| `CMP_IDLE_AFTER_MAX` | `600` | the maximum idle window (seconds) flap adaptation may reach |
+| `CMP_BUSY_RESET` | `300` | sustained busy seconds after which the idle window returns to `CMP_IDLE_AFTER` (0 disables reset) |
 | `CMP_LOAD_CORE_OFFSET` | unset | core VF offset to restore on load; while idle the offset is set to 0 so the card can reach P8. Written by `cmp-tune apply` |
 | `CMP_LOAD_MEM_OFFSET` | unset | memory VF offset applied by the C governor at start |
 | `CMP_LOAD_POWER_W` | unset | power limit in watts applied by the C governor at start |
@@ -170,8 +185,28 @@ the lock is restored on load.
 - A job that starts while the card is in P8 runs at the idle clock for up to
   one poll interval (5 s by default). Lower `CMP_POLL` if that matters.
 - Utilisation-based, so a workload that leaves the GPU at 0 % between bursts
-  (very short, widely spaced kernels) will clamp and release repeatedly. Raise
-  `CMP_IDLE_AFTER` for that pattern.
+  (short, widely spaced kernels — measured on a resident llama server: the
+  first request after a >30 s gap ran entirely at P8, prefill 143 vs steady
+  2872 tok/s) used to clamp and release repeatedly. The governor now adapts:
+  a clamp released within `CMP_FLAP_WINDOW` (60 s) doubles that card's idle
+  window (30 → 60 → 120 s …, capped at `CMP_IDLE_AFTER_MAX`, 10 min), and
+  `CMP_BUSY_RESET` (5 min) of sustained busy returns it to the base. The log
+  prints every change (`flap in 60s, idle-after now 60s`).
 - Multi-GPU aware: each card is tracked and forced independently by PCI bus ID.
 - Measured on CMP 50HX only. The private NVAPI entry point is shared by the
   50HX and 90HX driver path, but CMP 90HX still needs a separate live check.
+
+## Verification
+
+`verify/verify-governor.sh` runs as a periodic fleet gate
+(`cmp-governor-check.timer`, 2 min after boot, then every 6 h). The verdict
+stays in the journal and never gates a boot:
+
+```sh
+journalctl -u cmp-governor-check -b --no-pager | grep CMP_GOVERNOR
+```
+
+`PASS_CMP_GOVERNOR` requires the unit enabled, active, and running the
+`cmp-governor` ELF; the line carries opportunistic P8 proof (journal entry
+this boot, or a supported card currently at P8). `WARN_CMP_GOVERNOR_DISABLED`
+marks an opted-out host; `FAIL_CMP_GOVERNOR` means enabled but not running.

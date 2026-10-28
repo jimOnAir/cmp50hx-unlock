@@ -1,7 +1,8 @@
 [Unit]
-# Optional. The card never lowers its own P-state request, so this supervisor
-# forces P8 while the GPU is idle and requests P16 as soon as work appears.
-# Runtime state only: stopping the unit releases the forced state.
+# The card never lowers its own P-state request, so this supervisor forces P8
+# while the GPU is idle and requests P16 as soon as work appears. Enabled by
+# default at install. Runtime state only: stopping the unit releases the
+# forced state.
 Description=CMP idle P-state governor (automatic idle/full state switching)
 # After must not name multi-user.target: this unit is WantedBy it, and the
 # cycle would freeze the whole multi-user transaction (observed 2026-09-13:
@@ -12,13 +13,15 @@ After=systemd-modules-load.service
 Type=simple
 # The governor owns NVML and the private NVAPI calls directly. The service
 # starts one ELF process: no shell, Python, or nvidia-smi helper is needed.
-# The load profile must be given to the governor, not only to cmp-tune-boot:
-# on every idle transition the governor clears the GPU clock lock, and it can
-# only put it back if it knows what to restore. Keep these in step with the
-# cmp-tune profile applied by cmp-tune-boot.service.
-Environment=CMP_LOAD_CLOCK=2000,2000
-Environment=CMP_LOAD_CORE_OFFSET=175
-Environment=CMP_LOAD_POWER_W=170
+# Tuning reaches the governor through cmp-tune drop-ins
+# (/etc/systemd/system/cmp-idle-governor.service.d/10-cmp-tune.conf), which
+# cmp-tune apply writes and cmp-tune reset removes; on every idle transition
+# the governor clears the GPU clock lock and can only restore it if it knows
+# the load profile. Do not bake a bench profile into the shipped unit:
+# uncomment in a `systemctl edit` drop-in only to pin a profile by hand.
+# Environment=CMP_LOAD_CLOCK=2000,2000
+# Environment=CMP_LOAD_CORE_OFFSET=175
+# Environment=CMP_LOAD_POWER_W=170
 ExecStart=/opt/cmp50hx-unlock/idle-governor/cmp-governor
 Restart=on-failure
 RestartSec=10

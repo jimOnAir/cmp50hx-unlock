@@ -6,8 +6,9 @@
 #
 # Options:
 #   --card cmp50hx           force the card instead of auto-detecting
-#   --idle-governor          also enable the optional idle P-state governor,
-#                            which drops idle power to about 2 W (see idle-governor/)
+#   --no-idle-governor       do not enable the idle P-state governor (enabled
+#                            by default; it drops idle power to about 2 W, see
+#                            idle-governor/)
 #   --rebar-32g              ask for a 32 GiB BAR1 instead of the default 16 GiB
 #                            (selector 9; needs a host that can place the window)
 #
@@ -17,8 +18,7 @@
 #   3. installs the NVIDIA 610.43.03 userland from the official .run package
 #   4. builds the patched kernel modules for the running kernel (build.sh)
 #   5. installs the modules with a backup of any previous ones, runs depmod
-#   6. installs the optional idle governor unit, enabled only with
-#      --idle-governor
+#   6. installs and enables the idle governor unit (--no-idle-governor skips)
 #   7. installs the cmp-tune profile tuning utility
 #   8. best-effort live check of the card
 #   9. rebuilds and verifies the initramfs for the running kernel
@@ -40,7 +40,7 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 trap 'die "install failed at line ${LINENO}; see output above"' ERR
 
 card=''
-idle_governor=0
+idle_governor=1
 rebar_selector=8
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -51,7 +51,12 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --idle-governor)
+            # deprecated no-op: the governor is enabled by default now
             idle_governor=1
+            shift
+            ;;
+        --no-idle-governor)
+            idle_governor=0
             shift
             ;;
         --rebar-32g)
@@ -64,7 +69,7 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         *)
-            die "unknown argument: $1 (supported: --card, --idle-governor, --rebar-32g)"
+            die "unknown argument: $1 (supported: --card, --no-idle-governor, --rebar-32g)"
             ;;
     esac
 done
@@ -285,12 +290,12 @@ if [[ "${card}" == cmp50hx ]]; then
     log "installed and enabled cmp50hx-gen2.service (the card unlocks its PCIe speed registers a few minutes after boot; the service retrains to Gen2 then; NOT started now)"
 fi
 
-# --- 6c. optional idle P-state governor -------------------------------------
+# --- 6c. idle P-state governor (enabled by default) -------------------------
 
 # CMP cards do not lower their own P-state request, so this supervisor forces
-# P8 while idle and returns to P16 on load. Optional and independent of the
-# unlock: the unit is always installed, but only enabled on request.
-governor_state="installed, NOT enabled (enable: systemctl enable --now cmp-idle-governor)"
+# P8 while idle and returns to P16 on load. Independent of the unlock: the
+# unit is always installed, and enabled unless --no-idle-governor is given.
+governor_state="installed, NOT enabled (--no-idle-governor given)"
 governor_dir="${install_dir}/idle-governor"
 if [[ -f "${governor_dir}/cmp-governor.c" ]]; then
     log "building the single-process C idle governor"
@@ -301,8 +306,14 @@ if [[ -f "${governor_dir}/cmp-governor.c" ]]; then
     chmod 0755 "${governor_dir}/cmp-governor"
     install -m 0644 "${governor_dir}/cmp-idle-governor.service" \
         /etc/systemd/system/cmp-idle-governor.service
+    install -m 0644 "${governor_dir}/cmp-governor-check.service" \
+        /etc/systemd/system/cmp-governor-check.service
+    install -m 0644 "${governor_dir}/cmp-governor-check.timer" \
+        /etc/systemd/system/cmp-governor-check.timer
+    chmod 0755 "${install_dir}/verify/verify-governor.sh" 2>/dev/null || true
     systemctl daemon-reload
     if [[ "${idle_governor}" -eq 1 ]]; then
+        systemctl enable cmp-governor-check.timer >/dev/null 2>&1 || true
         if systemctl enable cmp-idle-governor.service >/dev/null 2>&1 \
                 && systemctl restart cmp-idle-governor.service >/dev/null 2>&1; then
             governor_state="ENABLED and running (idle power should drop within ~30s)"
@@ -313,10 +324,14 @@ if [[ -f "${governor_dir}/cmp-governor.c" ]]; then
         fi
     else
         if systemctl is-enabled cmp-idle-governor.service >/dev/null 2>&1; then
-            systemctl restart cmp-idle-governor.service >/dev/null 2>&1 || \
-                log "WARNING: could not restart the enabled idle governor"
+            systemctl disable cmp-governor-check.timer >/dev/null 2>&1 || true
+            if systemctl disable --now cmp-idle-governor.service >/dev/null 2>&1; then
+                log "idle governor disabled (--no-idle-governor); clock state released"
+            else
+                log "WARNING: could not disable the idle governor (--no-idle-governor)"
+            fi
         fi
-        log "idle governor installed but not enabled (pass --idle-governor to enable)"
+        log "idle governor installed but not enabled (--no-idle-governor given)"
     fi
 else
     governor_state="not present in this repository copy"

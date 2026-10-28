@@ -151,12 +151,14 @@ done
 ln -sf "${install_dir}/bin/rm-issue-rate" /usr/local/bin/rm-issue-rate
 if command -v deb-systemd-helper >/dev/null 2>&1; then
     deb-systemd-helper enable cmp50hx-gen2.service >/dev/null || true
+    deb-systemd-helper enable cmp-idle-governor.service >/dev/null || true
+    deb-systemd-helper enable cmp-governor-check.timer >/dev/null || true
 fi
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
 fi
 log "cmp50hx-gen2.service enabled (runs at boot, NOT started now)"
-log "cmp-idle-governor.service installed but NOT enabled (enable: sudo systemctl enable --now cmp-idle-governor)"
+log "cmp-idle-governor.service enabled (idle power drops within ~30s of load ending; starts at boot; disable: sudo systemctl disable --now cmp-idle-governor)"
 
 # --- boot persistence of the patched module in the initramfs ---------------
 if [[ ${running_has_module} -eq 0 ]]; then
@@ -215,7 +217,7 @@ Log        : ${log_file}
 Live check : ${live_check}
 Initramfs  : ${initramfs_state}
 ESP unlock : ${esp_state}
-Idle governor: installed, NOT enabled (sudo systemctl enable --now cmp-idle-governor)
+Idle governor: enabled (starts at boot; disable: sudo systemctl disable --now cmp-idle-governor)
 ReBAR      : default 16 GiB; for 32 GiB edit /etc/modprobe.d/cmp50hx-unlock.conf (cmp50_rebar_size=9)
 Tuning     : cmp-tune list | cmp-tune status | sudo cmp-tune apply PROFILE
 

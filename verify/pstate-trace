@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# pstate-trace — 1 Hz per-GPU P-state/clock/power CSV for native-DVFS
+# experiments (.scratch/cmp50hx-native-pstate). Every GPU is sampled, not
+# just CMP cards: the RTX 2080 Ti golden reference rides in the same trace.
+#
+# Usage: pstate-trace [seconds]     0 or omitted = until Ctrl-C
+#   pstate-trace 120 > run.csv      120 s capture to run.csv
+set -u
+
+duration="${1:-0}"
+# 610.x renamed the query field: performance_state fails there, pstate works.
+# Probe once; keep working on older drivers too.
+pstate_field=performance_state
+nvidia-smi --query-gpu="$pstate_field" --format=csv,noheader >/dev/null 2>&1 \
+    || pstate_field=pstate
+fields="index,${pstate_field},utilization.gpu,utilization.memory,clocks.current.sm,clocks.current.memory,power.draw"
+
+command -v nvidia-smi >/dev/null || { echo "pstate-trace: nvidia-smi not found" >&2; exit 1; }
+
+echo "ts,gpu,pstate,util_gpu,util_mem,clocks_sm,clocks_mem,power_w"
+end=$(( $(date +%s) + duration ))
+while :; do
+    ts="$(date -Is)"
+    while IFS=', ' read -r idx pstate ug um csm cmem pw; do
+        [[ -n "${idx:-}" ]] || continue
+        printf '%s,%s,%s,%s,%s,%s,%s,%s\n' \
+            "$ts" "$idx" "$pstate" "$ug" "$um" "$csm" "$cmem" "$pw"
+    done < <(nvidia-smi --query-gpu="$fields" --format=csv,noheader,nounits 2>/dev/null)
+    (( duration > 0 && $(date +%s) >= end )) && exit 0
+    sleep 1
+done

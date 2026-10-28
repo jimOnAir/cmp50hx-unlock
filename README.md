@@ -158,7 +158,7 @@ memory bandwidth, 2.9x less compute) and breaks the idle governor, because
 with it the P16 release no longer restores clocks. The file is kept on disk
 for research only. Native automatic P-State selection was investigated to
 completion and is not host-reachable — the enable sits behind a readiness
-barrier inside signed GSP-RM — so the optional idle governor below is the
+barrier inside signed GSP-RM — so the idle governor below is the
 idle-power solution.
 
 ## Linux P2P support
@@ -254,7 +254,7 @@ priority defaults, and the read-only live enumeration. These userspace paths
 are already open on the tested card except for extensions with additional
 class/state conditions; none makes the SM accept the faulting ray instruction.
 
-## Idle power: optional governor
+## Idle power: governor enabled by default
 
 The card idles at **62–64 W** doing nothing, and it never lowers its own
 P-state request: even an explicit `min,max` range lock is resolved to the
@@ -273,16 +273,34 @@ the runtime path.
 | without | 62–64 W | full clocks |
 | with | **1.8 W (P8)** | full clocks, restored within one poll |
 
-About **−61 W per idle card**. It is optional, independent of the unlock, and
-keeps runtime state only (stopping it releases the forced state). Enable during
-install with `--idle-governor`, or later:
+Re-measured 2026-10-28 on a three-card fleet host (identical clocks and
+driver, bench load profile via drop-in):
+
+| | Idle | Under load |
+|---|---|---|
+| without | 73–78 W per card | full clocks |
+| with | **17–20 W per card (P8)** | 2010 MHz, 64–69 W per card |
+
+(About **−56 to −61 W per idle card**; multi-card chassis report higher P8
+draw than the single-card 1.8 W floor — shared rails, same 645/405 MHz state.)
+
+It is independent of the unlock, keeps runtime
+state only (stopping it releases the forced state), and is **enabled by
+default**; pass `--no-idle-governor` to the installer to opt out, or disable
+it later:
 
 ```bash
-sudo systemctl enable --now cmp-idle-governor
+sudo systemctl disable --now cmp-idle-governor
 ```
 
 Trade-off: a job starting while the card is in P8 runs at the idle clock for
-up to one poll interval (5 s by default, tunable). Details, measurements, and
+up to one poll interval (5 s by default, tunable). Measured with a resident
+llama server after a >30 s gap: first prefill 143 vs steady 2872 tok/s,
+first decode 9.5 vs steady 93 tok/s, then full speed until the next clamp.
+The governor now adapts to exactly that pattern: after such a flap the card's
+idle window doubles (up to a 10-minute cap) and returns to base on sustained
+load. A periodic gate reports `PASS_CMP_GOVERNOR` in the journal
+(`cmp-governor-check.timer`). Details, measurements, and
 tuning: [`idle-governor/README.md`](idle-governor/README.md).
 
 ## Tuning: optional profiles

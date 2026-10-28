@@ -43,7 +43,12 @@ for path in \
         ./opt/cmp50hx-unlock/VERSION \
         ./usr/src/cmp50hx-610.43.03/dkms.conf \
         ./opt/cmp50hx-unlock/efi/50HXUNLK.EFI \
-        ./lib/systemd/system/cmp50hx-gen2.service; do
+        ./lib/systemd/system/cmp50hx-gen2.service \
+        ./lib/systemd/system/cmp-idle-governor.service \
+        ./lib/systemd/system/cmp-governor-check.service \
+        ./lib/systemd/system/cmp-governor-check.timer \
+        ./opt/cmp50hx-unlock/verify/verify-governor.sh \
+        ./usr/lib/cmp50hx-unlock/cmp-governor; do
     grep -qx "${path}" <<<"${fsys}" \
         || { printf 'missing package path: %s\n' "${path}" >&2; exit 1; }
 done

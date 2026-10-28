@@ -7,7 +7,7 @@
 #   - patched open kernel module source as a DKMS tree (auto-rebuild on
 #     every kernel update)
 #   - UEFI ESP unlock (50HXUNLK.EFI + install-linux.sh), the cmp50hx-gen2
-#     service, the optional idle governor and cmp-tune
+#     service, the idle governor (enabled by default) and cmp-tune
 #
 # Build requirements: Ubuntu/Debian host (or ubuntu:24.04 container) with
 # dpkg-deb, build-essential, curl, patch, kmod, binutils. Needs network on
@@ -157,6 +157,9 @@ sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp50hx-gen2.sh#' \
 sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp-governor#' \
     "${root}/idle-governor/cmp-idle-governor.service" \
     > "${stage}/lib/systemd/system/cmp-idle-governor.service"
+install -m 0644 "${root}/idle-governor/cmp-governor-check.service" \
+    "${root}/idle-governor/cmp-governor-check.timer" \
+    "${stage}/lib/systemd/system/"
 
 # dpkg conffiles: nouveau blacklist, BAR1 selector (8 = 16 GiB, 9 = 32 GiB;
 # edit to switch, mirrors install.sh --rebar-32g), tuning profiles seed.

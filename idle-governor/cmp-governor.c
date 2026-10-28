@@ -117,6 +117,9 @@ typedef struct {
     unsigned int power_w;
     unsigned int poll_seconds;
     unsigned int idle_after;
+    unsigned int idle_after_max_polls;
+    unsigned int flap_window_seconds;
+    unsigned int busy_reset_polls;
     unsigned int utilization_threshold;
 } Config;
 
@@ -132,6 +135,9 @@ typedef struct {
     NvPhysicalGpuHandle nvapi;
     char name[96];
     unsigned int idle_polls;
+    unsigned int idle_after_polls;
+    unsigned int busy_polls;
+    time_t last_force;
     GpuState state;
 } Gpu;
 
@@ -228,6 +234,33 @@ static bool load_config(Config *config) {
         config->utilization_threshold > 100) {
         fprintf(stderr, "cmp-governor: invalid poll, idle, or utilization setting\n");
         return false;
+    }
+
+    config->flap_window_seconds = 60;
+    config->idle_after_max_polls = (600U + config->poll_seconds - 1U) /
+                                   config->poll_seconds;
+    config->busy_reset_polls = (300U + config->poll_seconds - 1U) /
+                               config->poll_seconds;
+    {
+        unsigned int seconds = config->flap_window_seconds;
+        unsigned int max_seconds = 600U;
+        unsigned int reset_seconds = 300U;
+
+        if (!read_unsigned_env("CMP_FLAP_WINDOW", &seconds) ||
+            !read_unsigned_env("CMP_IDLE_AFTER_MAX", &max_seconds) ||
+            !read_unsigned_env("CMP_BUSY_RESET", &reset_seconds)) {
+            return false;
+        }
+        config->flap_window_seconds = seconds;
+        config->idle_after_max_polls = max_seconds == 0
+            ? config->idle_after
+            : (max_seconds + config->poll_seconds - 1U) / config->poll_seconds;
+        config->busy_reset_polls = reset_seconds == 0
+            ? 0U
+            : (reset_seconds + config->poll_seconds - 1U) / config->poll_seconds;
+        if (config->idle_after_max_polls < config->idle_after) {
+            config->idle_after_max_polls = config->idle_after;
+        }
     }
 
     if (clock != NULL && *clock != '\0') {
@@ -605,6 +638,8 @@ static void sleep_seconds(unsigned int seconds) {
 static void print_help(const char *program) {
     printf("Usage: %s [--release]\n", program);
     printf("Reads CMP_POLL, CMP_IDLE_AFTER, CMP_UTIL and CMP_LOAD_* from the environment.\n");
+    printf("Adaptive debounce: CMP_FLAP_WINDOW (s, default 60), CMP_IDLE_AFTER_MAX (s, default 600),\n");
+    printf("CMP_BUSY_RESET (s, default 300; 0 disables reset).\n");
 }
 
 int main(int argc, char **argv) {
@@ -680,12 +715,20 @@ int main(int argc, char **argv) {
     sigaction(SIGTERM, &action, NULL);
     log_message("running as one C executable; no shell, Python, or nvidia-smi calls");
     for (unsigned int i = 0; i < gpu_count; ++i) {
+        gpus[i].idle_after_polls = config.idle_after;
         fprintf(stdout, "cmp-governor: managing GPU %u: %s (PCI bus %02x)\n",
                 gpus[i].index, gpus[i].name, gpus[i].bus);
     }
+    fprintf(stdout,
+            "cmp-governor: flap adaptation: window %us, idle-after %us..%us, busy-reset %us\n",
+            config.flap_window_seconds,
+            config.idle_after * config.poll_seconds,
+            config.idle_after_max_polls * config.poll_seconds,
+            config.busy_reset_polls * config.poll_seconds);
     fflush(stdout);
 
     while (running) {
+        time_t now = time(NULL);
         for (unsigned int i = 0; i < gpu_count; ++i) {
             NvmlUtilization utilization;
             Gpu *gpu = &gpus[i];
@@ -699,10 +742,12 @@ int main(int argc, char **argv) {
                 if (gpu->idle_polls < UINT_MAX) {
                     ++gpu->idle_polls;
                 }
+                gpu->busy_polls = 0;
                 if (gpu->state == GPU_FREE &&
-                    gpu->idle_polls >= config.idle_after) {
+                    gpu->idle_polls >= gpu->idle_after_polls) {
                     if (force_idle(&nvml, &nvapi, &config, gpu)) {
                         gpu->state = GPU_LOW;
+                        gpu->last_force = now;
                         fprintf(stdout,
                                 "cmp-governor: GPU %u idle, forced P8\n",
                                 gpu->index);
@@ -715,18 +760,49 @@ int main(int argc, char **argv) {
                 }
             } else {
                 gpu->idle_polls = 0;
+                if (gpu->busy_polls < UINT_MAX) {
+                    ++gpu->busy_polls;
+                }
                 if (gpu->state == GPU_LOW) {
                     if (release_gpu(&nvml, &nvapi, &config, gpu)) {
                         gpu->state = GPU_FREE;
                         fprintf(stdout,
                                 "cmp-governor: GPU %u busy (%u%%), restored load profile\n",
                                 gpu->index, utilization.gpu);
+                        if (gpu->last_force != 0 &&
+                            now - gpu->last_force <=
+                                (time_t)config.flap_window_seconds &&
+                            gpu->idle_after_polls <
+                                config.idle_after_max_polls) {
+                            unsigned int doubled =
+                                gpu->idle_after_polls * 2U;
+                            if (doubled > config.idle_after_max_polls) {
+                                doubled = config.idle_after_max_polls;
+                            }
+                            gpu->idle_after_polls = doubled;
+                            fprintf(stdout,
+                                    "cmp-governor: GPU %u flap in %us, idle-after now %us\n",
+                                    gpu->index, config.flap_window_seconds,
+                                    gpu->idle_after_polls *
+                                        config.poll_seconds);
+                        }
+                        gpu->last_force = 0;
                         fflush(stdout);
                     } else {
                         fprintf(stderr,
                                 "cmp-governor: GPU %u profile restore failed\n",
                                 gpu->index);
                     }
+                }
+                if (config.busy_reset_polls != 0 &&
+                    gpu->idle_after_polls != config.idle_after &&
+                    gpu->busy_polls >= config.busy_reset_polls) {
+                    gpu->idle_after_polls = config.idle_after;
+                    fprintf(stdout,
+                            "cmp-governor: GPU %u sustained busy, idle-after reset to %us\n",
+                            gpu->index,
+                            config.idle_after * config.poll_seconds);
+                    fflush(stdout);
                 }
             }
         }
