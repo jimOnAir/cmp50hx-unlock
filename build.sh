@@ -143,7 +143,7 @@ if [[ -z "${prepare_source}" ]]; then
     exit 4
 }
 fi
-[[ -f "${script_dir}/verify/rm_issue_rate.c" ]]
+[[ -f "${script_dir}/native/verify.c" ]]
 if [[ "${card}" != both ]]; then
 patch_files=()
 for patch_name in "${patch_order[@]}"; do
@@ -248,8 +248,8 @@ for module in nvidia nvidia-uvm nvidia-modeset nvidia-drm nvidia-peermem; do
     fi
 done
 
-cc -O2 -Wall -Wextra -Werror -std=c11 "${script_dir}/verify/rm_issue_rate.c" \
-    -o "${artifact_dir}/rm-issue-rate"
+cc -O2 -Wall -Wextra -Werror -std=c11 -DCMP50HX_VERIFY_STANDALONE \
+    "${script_dir}/native/verify.c" -o "${artifact_dir}/rm-issue-rate"
 
 [[ -f "${artifact_dir}/nvidia.ko" ]]
 [[ "$(modinfo -F version "${artifact_dir}/nvidia.ko")" == "${driver_version}" ]]

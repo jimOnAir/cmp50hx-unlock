@@ -817,7 +817,7 @@ static int run_probe(int nvidiactl_fd, NvHandle client, NvHandle subdevice,
     return rm_ok(v1_result) || rm_ok(v2_result) ? 0 : 1;
 }
 
-int main(int argc, char **argv)
+int verify_main(int argc, char **argv)
 {
     int device_index;
     int nvidiactl_fd = -1;
@@ -863,3 +863,7 @@ cleanup:
         close(nvidiactl_fd);
     return result;
 }
+
+#ifdef CMP50HX_VERIFY_STANDALONE
+int main(int argc, char **argv) { return verify_main(argc, argv); }
+#endif

@@ -1,5 +1,7 @@
 #define _GNU_SOURCE
 
+#include "nvml.h"
+
 #include <dlfcn.h>
 #include <errno.h>
 #include <limits.h>
@@ -12,8 +14,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#define MAX_GPUS 64U
-#define NVML_SUCCESS 0
 #define NVAPI_OK 0
 
 #define CMP_50HX_PCI_ID 0x1e0910deU
@@ -28,64 +28,8 @@
 #define PSTATE_LOW 8U
 #define PSTATE_AUTO 16U
 
-typedef int nvmlReturn_t;
-typedef void *nvmlDevice_t;
 typedef int32_t NvAPI_Status;
 typedef void *NvPhysicalGpuHandle;
-
-typedef struct {
-    unsigned int gpu;
-    unsigned int memory;
-} NvmlUtilization;
-
-typedef struct {
-    char bus_id_legacy[16];
-    unsigned int domain;
-    unsigned int bus;
-    unsigned int device;
-    unsigned int pci_device_id;
-    unsigned int pci_subsystem_id;
-    char bus_id[32];
-} NvmlPciInfo;
-
-typedef nvmlReturn_t (*NvmlInitFn)(void);
-typedef nvmlReturn_t (*NvmlShutdownFn)(void);
-typedef nvmlReturn_t (*NvmlDeviceGetCountFn)(unsigned int *);
-typedef nvmlReturn_t (*NvmlDeviceGetHandleByIndexFn)(unsigned int,
-                                                      nvmlDevice_t *);
-typedef nvmlReturn_t (*NvmlDeviceGetNameFn)(nvmlDevice_t, char *, unsigned int);
-typedef nvmlReturn_t (*NvmlDeviceGetPciInfoFn)(nvmlDevice_t, NvmlPciInfo *);
-typedef nvmlReturn_t (*NvmlDeviceGetUtilizationRatesFn)(nvmlDevice_t,
-                                                         NvmlUtilization *);
-typedef nvmlReturn_t (*NvmlDeviceSetPersistenceModeFn)(nvmlDevice_t,
-                                                        unsigned int);
-typedef nvmlReturn_t (*NvmlDeviceSetPowerLimitFn)(nvmlDevice_t,
-                                                   unsigned int);
-typedef nvmlReturn_t (*NvmlDeviceSetLockedClocksFn)(nvmlDevice_t,
-                                                     unsigned int,
-                                                     unsigned int);
-typedef nvmlReturn_t (*NvmlDeviceResetLockedClocksFn)(nvmlDevice_t);
-typedef nvmlReturn_t (*NvmlDeviceSetCoreOffsetFn)(nvmlDevice_t, int);
-typedef nvmlReturn_t (*NvmlDeviceSetMemoryOffsetFn)(nvmlDevice_t, int);
-typedef const char *(*NvmlErrorStringFn)(nvmlReturn_t);
-
-typedef struct {
-    void *library;
-    NvmlInitFn init;
-    NvmlShutdownFn shutdown;
-    NvmlDeviceGetCountFn device_get_count;
-    NvmlDeviceGetHandleByIndexFn device_get_handle;
-    NvmlDeviceGetNameFn device_get_name;
-    NvmlDeviceGetPciInfoFn device_get_pci_info;
-    NvmlDeviceGetUtilizationRatesFn device_get_utilization;
-    NvmlDeviceSetPersistenceModeFn device_set_persistence;
-    NvmlDeviceSetPowerLimitFn device_set_power_limit;
-    NvmlDeviceSetLockedClocksFn device_set_locked_clocks;
-    NvmlDeviceResetLockedClocksFn device_reset_locked_clocks;
-    NvmlDeviceSetCoreOffsetFn device_set_core_offset;
-    NvmlDeviceSetMemoryOffsetFn device_set_memory_offset;
-    NvmlErrorStringFn error_string;
-} NvmlApi;
 
 typedef void *(*NvapiQueryInterfaceFn)(uint32_t);
 typedef NvAPI_Status (*NvapiInitializeFn)(void);
@@ -325,89 +269,6 @@ static void *load_symbol(void *library, const char *name) {
     return symbol;
 }
 
-static bool load_nvml(NvmlApi *api) {
-    memset(api, 0, sizeof(*api));
-    api->library = dlopen("libnvidia-ml.so.1", RTLD_LAZY | RTLD_LOCAL);
-    if (api->library == NULL) {
-        api->library = dlopen("libnvidia-ml.so", RTLD_LAZY | RTLD_LOCAL);
-    }
-    if (api->library == NULL) {
-        fprintf(stderr, "cmp-governor: cannot load libnvidia-ml.so.1: %s\n",
-                dlerror());
-        return false;
-    }
-
-    api->init = (NvmlInitFn)load_symbol(api->library, "nvmlInit_v2");
-    if (api->init == NULL) {
-        api->init = (NvmlInitFn)load_symbol(api->library, "nvmlInit");
-    }
-    api->shutdown = (NvmlShutdownFn)load_symbol(api->library, "nvmlShutdown");
-    api->device_get_count = (NvmlDeviceGetCountFn)load_symbol(
-        api->library, "nvmlDeviceGetCount_v2");
-    if (api->device_get_count == NULL) {
-        api->device_get_count = (NvmlDeviceGetCountFn)load_symbol(
-            api->library, "nvmlDeviceGetCount");
-    }
-    api->device_get_handle = (NvmlDeviceGetHandleByIndexFn)load_symbol(
-        api->library, "nvmlDeviceGetHandleByIndex_v2");
-    api->device_get_name = (NvmlDeviceGetNameFn)load_symbol(
-        api->library, "nvmlDeviceGetName");
-    api->device_get_pci_info = (NvmlDeviceGetPciInfoFn)load_symbol(
-        api->library, "nvmlDeviceGetPciInfo_v3");
-    if (api->device_get_pci_info == NULL) {
-        api->device_get_pci_info = (NvmlDeviceGetPciInfoFn)load_symbol(
-            api->library, "nvmlDeviceGetPciInfo_v2");
-    }
-    api->device_get_utilization = (NvmlDeviceGetUtilizationRatesFn)load_symbol(
-        api->library, "nvmlDeviceGetUtilizationRates");
-    api->device_set_persistence = (NvmlDeviceSetPersistenceModeFn)load_symbol(
-        api->library, "nvmlDeviceSetPersistenceMode");
-    api->device_set_power_limit = (NvmlDeviceSetPowerLimitFn)load_symbol(
-        api->library, "nvmlDeviceSetPowerManagementLimit");
-    api->device_set_locked_clocks = (NvmlDeviceSetLockedClocksFn)load_symbol(
-        api->library, "nvmlDeviceSetGpuLockedClocks");
-    api->device_reset_locked_clocks = (NvmlDeviceResetLockedClocksFn)load_symbol(
-        api->library, "nvmlDeviceResetGpuLockedClocks");
-    api->device_set_core_offset = (NvmlDeviceSetCoreOffsetFn)load_symbol(
-        api->library, "nvmlDeviceSetGpcClkVfOffset");
-    api->device_set_memory_offset = (NvmlDeviceSetMemoryOffsetFn)load_symbol(
-        api->library, "nvmlDeviceSetMemClkVfOffset");
-    api->error_string = (NvmlErrorStringFn)dlsym(api->library,
-                                                  "nvmlErrorString");
-
-    return api->init != NULL && api->shutdown != NULL &&
-           api->device_get_count != NULL && api->device_get_handle != NULL &&
-           api->device_get_name != NULL && api->device_get_pci_info != NULL &&
-           api->device_get_utilization != NULL &&
-           api->device_set_persistence != NULL &&
-           api->device_set_power_limit != NULL &&
-           api->device_set_locked_clocks != NULL &&
-           api->device_reset_locked_clocks != NULL &&
-           api->device_set_core_offset != NULL &&
-           api->device_set_memory_offset != NULL;
-}
-
-static bool nvml_ok(const NvmlApi *api, const char *operation,
-                    nvmlReturn_t status) {
-    if (status == NVML_SUCCESS) {
-        return true;
-    }
-    fprintf(stderr, "cmp-governor: %s failed: %s (%d)\n", operation,
-            api->error_string != NULL ? api->error_string(status) : "NVML error",
-            status);
-    return false;
-}
-
-static void unload_nvml(NvmlApi *api, bool initialized) {
-    if (initialized && api->shutdown != NULL) {
-        api->shutdown();
-    }
-    if (api->library != NULL) {
-        dlclose(api->library);
-    }
-    memset(api, 0, sizeof(*api));
-}
-
 static bool load_nvapi(Nvapi *api) {
     NvapiQueryInterfaceFn query;
 
@@ -642,7 +503,7 @@ static void print_help(const char *program) {
     printf("CMP_BUSY_RESET (s, default 300; 0 disables reset).\n");
 }
 
-int main(int argc, char **argv) {
+int governor_main(int argc, char **argv) {
     NvmlApi nvml = {0};
     Nvapi nvapi = {0};
     Config config;
@@ -667,14 +528,17 @@ int main(int argc, char **argv) {
     }
     release_only = argc == 2 && strcmp(argv[1], "--release") == 0;
 
-    if (!load_config(&config) || !load_nvml(&nvml) || !load_nvapi(&nvapi)) {
+    if (!load_config(&config) || !nvml_load(&nvml) || !load_nvapi(&nvapi)) {
+        fprintf(stderr, "cmp-governor: FAIL_CMP_GOVERNOR config or driver "
+                        "libraries unavailable\n");
         unload_nvapi(&nvapi, false);
-        unload_nvml(&nvml, false);
+        nvml_unload(&nvml, false);
         return 1;
     }
     if (!nvml_ok(&nvml, "nvmlInit", nvml.init())) {
+        fprintf(stderr, "cmp-governor: FAIL_CMP_GOVERNOR nvmlInit failed\n");
         unload_nvapi(&nvapi, true);
-        unload_nvml(&nvml, false);
+        nvml_unload(&nvml, false);
         return 1;
     }
     nvml_initialized = true;
@@ -682,7 +546,9 @@ int main(int argc, char **argv) {
 
     gpu_count = discover_gpus(&nvml, &nvapi, gpus);
     if (gpu_count == 0) {
-        log_message("no supported CMP card found; nothing to manage");
+        fprintf(stdout, "cmp-governor: WARN_CMP_GOVERNOR_NO_CARD "
+                        "no supported CMP card found; nothing to manage\n");
+        fflush(stdout);
         result = 0;
         goto cleanup;
     }
@@ -725,6 +591,13 @@ int main(int argc, char **argv) {
             config.idle_after * config.poll_seconds,
             config.idle_after_max_polls * config.poll_seconds,
             config.busy_reset_polls * config.poll_seconds);
+    /* Startup self-verdict — the fleet gate the retired cmp-governor-check
+     * timer used to log (journalctl -u cmp-idle-governor | grep CMP_GOVERNOR).
+     * In-process, so it proves the daemon reached its manage loop; a crashed
+     * unit is visible as the absence of the line this boot. */
+    fprintf(stdout, "cmp-governor: PASS_CMP_GOVERNOR running managed=%u poll=%us idle_after=%us\n",
+            gpu_count, config.poll_seconds,
+            config.idle_after * config.poll_seconds);
     fflush(stdout);
 
     while (running) {
@@ -819,6 +692,6 @@ cleanup:
         }
     }
     unload_nvapi(&nvapi, nvapi_initialized);
-    unload_nvml(&nvml, nvml_initialized);
+    nvml_unload(&nvml, nvml_initialized);
     return result;
 }

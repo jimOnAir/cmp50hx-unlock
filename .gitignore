@@ -5,12 +5,11 @@ artifacts/
 .deb-stage/
 cmp50hx-unlock_*_amd64.deb
 cmp50hx-unlock_*_amd64.deb.sha256
-cmp50hx-unlock-windows.zip
-cmp50hx-unlock-windows.zip.sha256
 .release-stage/
 .stage-linux/
-.stage-windows/
 efi-unlock/*.o
 efi-unlock/*.so
 efi-unlock/50HXUNLK.EFI
 efi-unlock/50HXUNLK.EFI.sha256
+dist-llm2/
+native/cmp50hx
