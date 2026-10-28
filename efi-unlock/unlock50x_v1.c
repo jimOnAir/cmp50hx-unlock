@@ -49,8 +49,10 @@
 #define U40X_LOG_NAME   L"\\50hx_log_u4.txt"
 #define U40X_VBIOS_NAME L"\\50hx_vbios_u4.bin"
 #else
-#define U40X_LOG_NAME   U40X_LOG_NAME
-#define U40X_VBIOS_NAME U40X_VBIOS_NAME
+/* No TARGET_BUS: the one-click/generic build. Scans every bus and keeps the
+ * historic single-module names (efi-unlock/README.md verifies \50hx_log.txt). */
+#define U40X_LOG_NAME   L"\\50hx_log.txt"
+#define U40X_VBIOS_NAME L"\\50hx_vbios.bin"
 #endif
 
 #include <efi.h>
