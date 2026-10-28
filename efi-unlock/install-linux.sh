@@ -84,7 +84,7 @@ find_esp() {
 
 remove_entry() {
     local id
-    for id in $(efibootmgr | grep -E "^Boot[0-9A-F]{4}\*? $ENTRY_LABEL" | sed -E 's/^Boot([0-9A-F]{4}).*/\1/'); do
+    for id in $(efibootmgr | grep -E "^Boot[0-9A-F]{4}\*? " | grep -F "$ENTRY_LABEL	" | sed -E 's/^Boot([0-9A-F]{4}).*/\1/'); do
         say "removing boot entry Boot$id ($ENTRY_LABEL)"
         efibootmgr -q -B -b "$id" || true
     done
@@ -147,7 +147,7 @@ fi
 
 remove_entry_quiet() {
     local id
-    for id in $(efibootmgr | grep -E "^Boot[0-9A-F]{4}\*? $ENTRY_LABEL" | sed -E 's/^Boot([0-9A-F]{4}).*/\1/'); do
+    for id in $(efibootmgr | grep -E "^Boot[0-9A-F]{4}\*? " | grep -F "$ENTRY_LABEL	" | sed -E 's/^Boot([0-9A-F]{4}).*/\1/'); do
         efibootmgr -q -B -b "$id" || true
     done
 }
@@ -161,12 +161,27 @@ NEWID="$(efibootmgr -c -d "$ESP_DISK" -p "$ESP_PARTNUM" \
 
 # order: unlock first, then everything else in current order
 REST="$(efibootmgr | sed -nE 's/^BootOrder: //p' | tr ',' ' ' | tr ' ' '\n' | grep -v "^$NEWID$" | tr '\n' ',' | sed 's/,$//')"
-efibootmgr -q -o "$NEWID,$REST"
-say "boot entry Boot$NEWID '$ENTRY_LABEL' created and placed first in BootOrder"
+efibootmgr -q -o "$NEWID,$REST" || say "WARNING: efibootmgr failed to write BootOrder"
+# Read back: some firmware re-asserts its own order or drops NVRAM writes
+# (observed 2026-10-28: after a package install BootOrder came up with the
+# Ubuntu entry first and BootNext absent despite efibootmgr exit 0).
+ORDER_NOW="$(efibootmgr | sed -nE 's/^BootOrder: //p')"
+if [[ "${ORDER_NOW:-}" == "$NEWID,"* ]]; then
+    say "boot entry Boot$NEWID '$ENTRY_LABEL' created and placed first in BootOrder"
+else
+    say "WARNING: firmware did not keep Boot$NEWID first (order now: ${ORDER_NOW:-unknown})."
+    say "WARNING: fix manually: sudo efibootmgr -o $NEWID,<rest> && sudo efibootmgr -n $NEWID"
+fi
 
 # --- 5. one-shot BootNext for the next boot -----------------------------
-efibootmgr -q -n "$NEWID"
-say "BootNext=$NEWID: the NEXT boot runs the unlock once, then falls back"
+efibootmgr -q -n "$NEWID" || say "WARNING: efibootmgr failed to set BootNext"
+NEXT_NOW="$(efibootmgr | sed -nE 's/^BootNext: //p')"
+if [[ "${NEXT_NOW:-}" == "$NEWID" ]]; then
+    say "BootNext=$NEWID: the NEXT boot runs the unlock once, then falls back"
+else
+    say "WARNING: BootNext not armed (read back: ${NEXT_NOW:-absent});"
+    say "WARNING: arm manually: sudo efibootmgr -n $NEWID"
+fi
 
 say ""
 say "Done. Reboot to activate. After reboot verify with:"
