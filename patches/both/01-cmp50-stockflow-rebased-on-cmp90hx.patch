@@ -237,7 +237,7 @@ index 4602e6d..ebfa437 100644
  
      KernelSec2 *pKernelSec2 = GPU_GET_KERNEL_SEC2(pGpu);
  
-@@ -247,8 +443,121 @@ kgspExecuteBooterLoad_TU102
+@@ -247,8 +443,147 @@ kgspExecuteBooterLoad_TU102
              pGpu, CMP90_PC_EXACT_FEAT_OVR_PLM);
      }
  
@@ -265,8 +265,34 @@ index 4602e6d..ebfa437 100644
 +                      GPU_REG_RD32(pGpu, CMP50_FECS_SPEED_PLM),
 +                      GPU_REG_RD32(pGpu, CMP50_FECS_SPEED0),
 +                      GPU_REG_RD32(pGpu, CMP50_FECS_SPEED1));
++            /* ISSUE-15 re-arm: a failed pre-OS booter attempt burns the
++             * FWSEC latch 0xff->0x8f. Replay the driver-prepared FWSEC
++             * command to re-establish halted+0xff, then fall through to
++             * the normal booter exploit. The command is NOT freed here:
++             * the V524 phase boundary in kgspBootstrap_TU102 replays it
++             * again after the exploit to raise the stock WPR for GSP. */
++            status = NV_ERR_INVALID_STATE;
++            if (pKernelGsp->pPreparedFwsecCmd != NULL)
++            {
++                NV_ASSERT_OK_OR_RETURN(kflcnReset_HAL(
++                    pGpu, staticCast(pKernelSec2, KernelFalcon)));
++                status = kgspExecuteFwsec_HAL(
++                    pGpu, pKernelGsp, pKernelGsp->pPreparedFwsecCmd);
++                NV_PRINTF(LEVEL_ERROR,
++                          "CMP50_STOCKFLOW_V551: REARM_REFWSEC status=0x%x "
++                          "RESET=%08x WPR=%08x:%08x\n",
++                          status,
++                          GPU_REG_RD32(pGpu, CMP50_SEC2_RESET_PLM),
++                          GPU_REG_RD32(pGpu, CMP50_WPR2_ADDR_HI),
++                          GPU_REG_RD32(pGpu, CMP50_WPR2_ADDR_LO));
++                if ((status == NV_OK) &&
++                    (GPU_REG_RD32(pGpu, CMP50_SEC2_RESET_PLM) ==
++                     CMP50_SEC2_RESET_PLM_FWSEC))
++                    goto rearm_ok;
++            }
 +            return NV_ERR_INVALID_STATE;
 +        }
++rearm_ok: ;
 +        NV_ASSERT_OK_OR_RETURN(kflcnWaitForHalt_HAL(
 +            pGpu, staticCast(pKernelSec2, KernelFalcon), 100000U, 0));
 +        NV_PRINTF(LEVEL_ERROR,

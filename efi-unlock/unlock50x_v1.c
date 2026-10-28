@@ -318,20 +318,23 @@ u40x_entry(EFI_HANDLE ImageHandle_, EFI_SYSTEM_TABLE *SystemTable_)
 
 /* ==== CMP 50HX (TU102/TU10x) registers (BAR0 MMIO) ====
  * PLM/SS0/SS1 are the actual lock bits; the rest is referenced by the
- * unlock flow or diagnostics. Values verified against open-gpu-kernel-
- * modules GA102 regmaps. */
-#define REG_FEAT_OVR_PLM       0x00409650UL   /* PLM (TU10x): 0xffffffff = open */
-#define REG_FEAT_OVR_SM_SPD    0x00409664UL   /* SS0 (TU10x): 0x88888888 = full */
-#define REG_FEAT_OVR_SM_SPD_1  0x0040966CUL   /* SS1 (TU10x): 0x00000008 = full */
+ * unlock flow or diagnostics. Shared values live in common/cmp50hx_regs.h
+ * (single source of truth with the OS-side cmp50hx binary); macro-only
+ * header, safe for -ffreestanding. Values verified against
+ * open-gpu-kernel-modules GA102 regmaps. */
+#include "../common/cmp50hx_regs.h"
+#define REG_FEAT_OVR_PLM       CMP50_REG_FEAT_OVR_PLM   /* 0xffffffff = open */
+#define REG_FEAT_OVR_SM_SPD    CMP50_REG_FEAT_SS0       /* 0x88888888 = full */
+#define REG_FEAT_OVR_SM_SPD_1  CMP50_REG_FEAT_SS1       /* 0x00000008 = full */
 #define REG_PCIE_FUSE_OVR       0x00823810UL
-#define REG_PFB_MMU_WPR2_LO     0x001FA824UL
-#define REG_PFB_MMU_WPR2_HI     0x001FA828UL
+#define REG_PFB_MMU_WPR2_LO     CMP50_REG_PFB_MMU_WPR2_LO
+#define REG_PFB_MMU_WPR2_HI     CMP50_REG_PFB_MMU_WPR2_HI
 #define REG_PCIE_LINK_CTRL      0x0008C000UL
 #define REG_GFW_BOOT_OK         0x00118234UL   /* 0xff == GFW booted */
 
-#define VAL_PLM_OPEN            0xFFFFFFFFUL
-#define VAL_SS0_UNLOCKED        0x88888888UL
-#define VAL_SS1_UNLOCKED        0x00000008UL
+#define VAL_PLM_OPEN            CMP50_VAL_PLM_OPEN
+#define VAL_SS0_UNLOCKED        CMP50_VAL_SS0_UNLOCKED
+#define VAL_SS1_UNLOCKED        CMP50_VAL_SS1_UNLOCKED
 
 /* ==== SEC2 Falcon microcontroller — hosts the signed "booter" ucode ====
  * This is where the exploit runs: we craft its IMEM/DMEM via DMA and let
@@ -370,7 +373,7 @@ u40x_entry(EFI_HANDLE ImageHandle_, EFI_SYSTEM_TABLE *SystemTable_)
  * The driver before SEC2 booter load RESETS GSP (kflcnReset in _kgspBootGspRm) -
  * the live GFW from POST holds SEC2 locked (0xBADF5620). ENGINE (0x1103C0)
  * is accessible from EFI -> kill GFW in the same way the driver does. */
-#define GSP_BASE                0x00110000UL
+#define GSP_BASE                CMP50_REG_GSP_BASE
 #define GSP_ENGINE              (GSP_BASE + 0x3C0)
 #define GSP_MAILBOX0            (GSP_BASE + 0x040)
 #define GSP_MAILBOX1            (GSP_BASE + 0x044)
@@ -2353,6 +2356,20 @@ booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys)
               (INTN)attempt + 1, m0,
               (cpu & NV_PFALCON_FALCON_CPUCTL_HALTED_TRUE) ? 1 : 0);
         if (attempt == 0) {
+            /* V551-defer (issue 15): a failed attempt A on a still-ARMED
+             * SEC2 (RESET_PLM=0xff) must NOT fall through to attempt B -
+             * the engine reset latches RESET_PLM to 0x8f for the whole
+             * power cycle, and the kernel CMP50_STOCKFLOW_V551 booter gate
+             * fail-closes on exactly that register, so burning it here is
+             * what made every EFI-missed card unrecoverable without a PSU
+             * cut. Leave the engine halted and armed: the OS-side stock
+             * flow carries the proven exploit and rescues at probe.
+             * Already-burned cards (RESET!=0xff) keep the old behaviour. */
+            if (mmio_read32(SEC2_RESET_PLM_REG) == 0x000000FFu) {
+                Print(L"tu102: V551-DEFER armed SEC2 (RESET_PLM=0xff) - "
+                      L"skipping engine-reset attempt B; deferring to OS stockflow\n");
+                return EFI_DEVICE_ERROR;
+            }
             Print(L"tu102: -> retry with engine reset (attempt B)\n");
             continue;
         }
@@ -4887,6 +4904,18 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     Print(L"[40HX v89] SEC2 sanitize (engine reset + MB clear)...\n");
     {
         UINTN it;
+        /* V551-defer (issue 15): on a FAILED unlock attempt with SEC2 still
+         * armed (RESET_PLM=0xff, SS0 not unlocked), the engine reset here
+         * would burn the very latch the kernel V551 gate reads - MB-clear
+         * only and leave it armed for the OS stockflow. Success path and
+         * already-burned path keep the proven full sequence. */
+        BOOLEAN deferToOs =
+            (mmio_read32(SEC2_RESET_PLM_REG) == 0x000000FFu) &&
+            (mmio_read32(REG_FEAT_OVR_SM_SPD) != VAL_SS0_UNLOCKED);
+        if (deferToOs) {
+            Print(L"[40HX v89] DEFER: SEC2 armed, unlock failed - "
+                  L"MB clear only, no engine reset (OS stockflow rescues)\n");
+        } else {
         /* kflcnWaitForHalt → ksec2ResetHw（engine reset） */
         for (it = 0; it < 100000; it++) {
             if (mmio_read32(SEC2_CPUCTL) & NV_PFALCON_FALCON_CPUCTL_HALTED_TRUE)
@@ -4900,17 +4929,24 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         mmio_write32(SEC2_ENGINE, 0x0);
         for (it = 0; it < 16; it++) mmio_read32(SEC2_ENGINE);
         uefi_call_wrapper(BS->Stall, 1, 100000);
+        }
         /* MB 清（cyridd: MB0=0, MB1=0/1） */
         mmio_write32(SEC2_MAILBOX0, 0);
         mmio_write32(SEC2_MAILBOX1, 0);
         Print(L"[40HX v89] sanitize done cpu=0x%x mbox0=0x%x\n",
               mmio_read32(SEC2_CPUCTL), mmio_read32(SEC2_MAILBOX0));
     }
-    /* 停掉可能的 SEC2 ROP 自旋（写读回；如死无害） */
+    /* 停掉可能的 SEC2 ROP 自旋（写读回；如死无害）— skipped on the defer
+     * path: this toggle is another engine reset and would burn RESET_PLM */
+    if (mmio_read32(SEC2_RESET_PLM_REG) == 0x000000FFu &&
+        mmio_read32(REG_FEAT_OVR_SM_SPD) != VAL_SS0_UNLOCKED) {
+        Print(L"[40HX v89] DEFER: spin-stop engine toggle skipped (arm preserved)\n");
+    } else {
     mmio_write32(SEC2_ENGINE, 0x1);
     for (i = 0; i < 16; i++) mmio_read32(SEC2_ENGINE);
     mmio_write32(SEC2_ENGINE, 0x0);
     for (i = 0; i < 16; i++) mmio_read32(SEC2_ENGINE);
+    }
 
     }
     /* ---------- [10.5] PCIe Gen2 - OS-side only (removed in v1.1.8,
@@ -4924,7 +4960,7 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
      * at the pre-OS stage and refuses writes there - it is opened by
      * GSP-RM in the OS only. Gen2 needs: BIOS PCIe slot link speed =
      * Gen2 (not Auto/Gen1; makes PL_LINK_RATE come up 0x00240032),
-     * kernel patch 04 + cmp50hx-gen2.service / the Windows logon task. */
+     * kernel patch 04 + cmp50hx-boot.service / the Windows logon task. */
     Print(L"[gen2] not attempted pre-OS - OS-side Gen2 only (issue #25)\n");
 
 done:
