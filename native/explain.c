@@ -15,6 +15,7 @@
 
 #include <ctype.h>
 #include <dirent.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -331,7 +332,10 @@ static void explain_cards(void) {
         char drv[64] = "none";
         snprintf(path, sizeof path, "%s/%s/driver", dir, ent->d_name);
         {
-            char resolved[512];
+            /* PATH_MAX, not 512: glibc's FORTIFY realpath aborts the process
+             * ("buffer overflow detected") unless the caller buffer is at
+             * least PATH_MAX — proven on llm2's 20261029.11 binary */
+            char resolved[PATH_MAX];
             if (realpath(path, resolved) != NULL) {
                 char *slash = strrchr(resolved, '/');
                 snprintf(drv, sizeof drv, "%s",
