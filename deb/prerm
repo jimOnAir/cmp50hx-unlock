@@ -38,6 +38,15 @@ case "${1:-remove}" in
         ;;
 esac
 
+# --- release the apt pin file this package set --------------------------------
+# Inline by design: removal must not depend on /opt helper files that a
+# half-finished upgrade may have replaced. deb/apt-pins.sh documents the
+# contract; postrm repeats this removal as the safety net.
+if [[ -e /etc/apt/preferences.d/cmp50hx-unlock ]]; then
+    rm -f /etc/apt/preferences.d/cmp50hx-unlock
+    log "removed the apt pin file /etc/apt/preferences.d/cmp50hx-unlock"
+fi
+
 if command -v systemctl >/dev/null 2>&1; then
     systemctl stop cmp-idle-governor.service 2>/dev/null || true
 fi

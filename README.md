@@ -26,6 +26,13 @@ from the `.run`), installs the patched open kernel module as a **DKMS**
 tree that rebuilds on every kernel update, deploys the UEFI ESP unlock
 and the `cmp50hx-boot` boot-flow service, and seeds `cmp-tune`. Reboot
 afterwards. `sudo apt remove cmp50hx-unlock` uninstalls the driver again.
+On install the package also drops an apt pin file
+(`/etc/apt/preferences.d/cmp50hx-unlock`) that blocks Ubuntu's stock NVIDIA
+driver packages — new installs and upgrades — from ever landing over the
+unlock; removal deletes the pin file again, and the package itself stays
+unpinned so `apt install ./cmp50hx-unlock_<new>.deb` upgrades normally.
+(`apt-mark hold` is not usable from a maintainer script — it needs the dpkg
+database lock; see `deb/apt-pins.sh`.)
 The `.deb` replaces the old one-click `.run` (the UEFI unlock alone also
 works with the stock module).
 

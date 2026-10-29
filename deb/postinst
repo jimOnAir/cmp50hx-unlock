@@ -37,6 +37,11 @@ readonly driver_version
 readonly dkms_version="${driver_version}"
 readonly run_file="${install_dir}/cache/NVIDIA-Linux-x86_64-${driver_version}.run"
 
+# apt pin protection: functions come from the shipped deb/ helper
+# (same staging pattern as enable-services.sh); missing helper degrades to
+# a warning below, never to a failed install.
+[[ -s "${install_dir}/deb/apt-pins.sh" ]] && source "${install_dir}/deb/apt-pins.sh"
+
 # reconfigure/abort-upgrade/failed-upgrade all (re)run the full configure;
 # dpkg may also call us with "triggered" — nothing to do then.
 case "${1:-configure}" in
@@ -198,6 +203,20 @@ else
     warn "no EFI runtime (BIOS boot?): UEFI unlock skipped; the OS-side module unlock is still installed"
 fi
 
+# --- apt pin protection -------------------------------------------------------
+# Freeze the unlock stack against apt drift: /etc/apt/preferences.d gains a
+# pin file blocking Ubuntu's stock NVIDIA driver family (released again by
+# 'apt remove cmp50hx-unlock'). apt-mark is NOT usable here — it needs the
+# dpkg database lock dpkg holds across maintainer scripts (see apt-pins.sh).
+# Best effort by design: a pin failure must never fail the install.
+if declare -f apt_pins_apply >/dev/null 2>&1; then
+    apt_pins_apply || warn "apt pin step failed (ignored)"
+else
+    apt_pins_summary="SKIPPED (deb/apt-pins.sh missing from the package)"
+    warn "apt pin helper missing; stock NVIDIA driver packages are NOT blocked against apt drift"
+fi
+apt_pins_summary="${apt_pins_summary:-FAILED (see log above)}"
+
 # --- best-effort live check (never fatal) ----------------------------------
 live_check="SKIPPED (no patched module for the running kernel, or nvidia already loaded; reboot to test)"
 if [[ ${running_has_module} -eq 1 ]] && ! lsmod | grep -q '^nvidia '; then
@@ -221,6 +240,7 @@ Log        : ${log_file}
 Live check : ${live_check}
 Initramfs  : ${initramfs_state}
 ESP unlock : ${esp_state}
+Apt pins   : ${apt_pins_summary}
 Boot flow  : cmp50hx-boot.service enabled (verdict + Gen2 readiness gate)
 Idle governor: enabled (starts at boot; disable: sudo systemctl disable --now cmp-idle-governor)
 ReBAR      : default 16 GiB; for 32 GiB edit /etc/modprobe.d/cmp50hx-unlock.conf (cmp50_rebar_size=9)
@@ -230,6 +250,7 @@ Next step:
   1. Reboot to load the patched module and run the UEFI unlock.
 
 Rollback:
-  sudo apt remove cmp50hx-unlock   # uninstalls the NVIDIA driver again
+  sudo apt remove cmp50hx-unlock   # uninstalls the NVIDIA driver again,
+                                   # removes the apt pin file it set
 EOF
 exit 0

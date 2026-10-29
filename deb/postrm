@@ -24,6 +24,13 @@ esac
 
 command -v logger >/dev/null 2>&1 && logger -t cmp50hx-unlock "postrm: $*" || true
 
+# --- apt pin file safety net (prerm normally removed it; only a             ---
+# --- half-installed package leaves it behind). deb/apt-pins.sh documents.   ---
+if [[ -e /etc/apt/preferences.d/cmp50hx-unlock ]]; then
+    rm -f /etc/apt/preferences.d/cmp50hx-unlock
+    log "removed leftover apt pin file (prerm never ran)"
+fi
+
 # --- leftover NVIDIA userland (only if prerm never ran) ---------------------
 if [[ -x /usr/bin/nvidia-uninstall ]]; then
     log "uninstalling leftover NVIDIA userland via /usr/bin/nvidia-uninstall"

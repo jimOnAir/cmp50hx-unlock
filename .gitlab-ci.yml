@@ -96,6 +96,36 @@ test:linux-2604-install:
       modinfo -k "${krel}" nvidia | grep -q 'updates/dkms/nvidia'
       apt-get remove -y cmp50hx-unlock
       ! test -e /usr/bin/nvidia-smi
+      # --- apt pin protection lifecycle (the llm2 615-drift regression),
+      # mirrors the GitHub job. apt-mark is NOT an option (dpkg database
+      # lock across maintainer scripts; deb/apt-pins.sh); the mechanism is
+      # /etc/apt/preferences.d. A synthetic stock-shaped libnvidia-compute
+      # (named to pass the preinst gate) must be frozen by postinst, a new
+      # family member must become undrift-inable, the explicit upgrade path
+      # must still work, and apt remove must release the pin file without
+      # ever purging someone else's package.
+      strayd="$(mktemp -d)"
+      mkdir -p "${strayd}/DEBIAN"
+      printf 'Package: libnvidia-compute-595\nVersion: 615.71.10-1ubuntu1\nArchitecture: amd64\nMaintainer: CI <ci@example.com>\nDescription: synthetic stock NVIDIA compute package\n hold-lifecycle test stand-in\n' > "${strayd}/DEBIAN/control"
+      dpkg-deb --root-owner-group -b "${strayd}" /tmp/stray.deb
+      dpkg -i /tmp/stray.deb
+      ! test -e /etc/apt/preferences.d/cmp50hx-unlock
+      # stock family members resolve normally BEFORE our pin exists
+      drift_target="$(apt-cache search --names-only '^nvidia-driver-[0-9]' | head -1 | cut -d' ' -f1)"
+      test -n "${drift_target}"
+      apt-cache policy "${drift_target}" | grep -q 'Candidate: [0-9]'
+      apt-get install -y "${DEB}"
+      test -s /etc/apt/preferences.d/cmp50hx-unlock
+      apt-cache policy libnvidia-compute-595 | grep -q 'Installed: 615.71.10-1ubuntu1'
+      apt-cache policy libnvidia-compute-595 | grep -q 'Candidate: (none)'
+      # the same family member is now undrift-inable (pinned at -1)
+      apt-cache policy "${drift_target}" | grep -q 'Candidate: (none)'
+      ! apt-get install -y "${drift_target}"
+      apt-get install -y --reinstall "${DEB}"
+      test -s /etc/apt/preferences.d/cmp50hx-unlock
+      apt-get remove -y cmp50hx-unlock
+      ! test -e /etc/apt/preferences.d/cmp50hx-unlock
+      dpkg-query -s libnvidia-compute-595 | grep -qx 'Status: install ok installed'
   after_script:
     - cat /var/log/cmp50hx-unlock-install.log 2>/dev/null || true
 

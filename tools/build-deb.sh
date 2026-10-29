@@ -154,6 +154,7 @@ ln -sfn /usr/lib/cmp50hx-unlock/cmp50hx "${stage}/usr/bin/rm-issue-rate"
 install -m 0755 "${root}/cmp50hx/cmp50hx-boot.sh" "${libdir}/cmp50hx-boot.sh"
 install -m 0755 "${root}/cmp50hx/cmp50hx-collect.sh" "${libdir}/cmp50hx-collect.sh"
 install -m 0755 "${root}/deb/enable-services.sh" "${opt}/deb/enable-services.sh"
+install -m 0755 "${root}/deb/apt-pins.sh" "${opt}/deb/apt-pins.sh"
 
 # systemd units with the package's own paths (the repo originals target the
 # install.sh layout under /usr/local and /opt).

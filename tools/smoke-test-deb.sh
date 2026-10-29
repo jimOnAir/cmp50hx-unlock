@@ -49,6 +49,7 @@ for path in \
         ./usr/lib/cmp50hx-unlock/cmp50hx-boot.sh \
         ./usr/lib/cmp50hx-unlock/cmp50hx-collect.sh \
         ./opt/cmp50hx-unlock/deb/enable-services.sh \
+        ./opt/cmp50hx-unlock/deb/apt-pins.sh \
         ./etc/cmp50hx/boot.conf; do
     grep -qx "${path}" <<<"${fsys}" \
         || { printf 'missing package path: %s\n' "${path}" >&2; exit 1; }
@@ -61,6 +62,24 @@ for link in cmp50hx cmp-tune rm-issue-rate; do
         awk -v name="./usr/bin/${link}" 'index($0, name" -> ") {sub(/.* -> /,""); print; exit}')"
     [[ "${target}" == "/usr/lib/cmp50hx-unlock/cmp50hx" ]] \
         || { printf 'bad /usr/bin/%s symlink target: %s\n' "${link}" "${target:-none}" >&2; exit 1; }
+done
+
+# --- apt pin protection wiring --------------------------------------------------
+# The deb blocks stock NVIDIA driver packages from moving over the unlock via
+# /etc/apt/preferences.d/cmp50hx-unlock (deb/apt-pins.sh documents the
+# contract; the live lifecycle runs in the ubuntu:26.04 CI jobs). Static
+# half: maintainer-script wiring. apt-mark must NEVER appear in the scripts:
+# it needs the dpkg database lock that dpkg holds across them (proven to fail
+# from postinst; see findings.md).
+helper_body="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./opt/cmp50hx-unlock/deb/apt-pins.sh)"
+grep -q 'Pin-Priority: -1' <<<"${helper_body}" \
+    || { printf 'apt-pins.sh does not pin the stock driver family at -1\n' >&2; exit 1; }
+for script in postinst prerm postrm; do
+    body="$(dpkg-deb --ctrl-tarfile "${deb}" | tar -xO "./${script}")"
+    grep -q 'preferences\.d/cmp50hx-unlock\|apt_pins_apply' <<<"${body}" \
+        || { printf '%s missing apt-pin wiring\n' "${script}" >&2; exit 1; }
+    ! grep -qE 'apt-mark (hold|unhold|showhold)' <<<"${body}" \
+        || { printf '%s calls apt-mark (needs the dpkg lock maintainer scripts hold)\n' "${script}" >&2; exit 1; }
 done
 
 # --- the embedded .run must be byte-identical to the official one ---------------
