@@ -49,3 +49,35 @@ commands succeeded right after configure finished. `apt-mark` — or any
 plain-file `preferences.d` is the only in-package mechanism, and it is
 strictly stronger (blocks new installs, supports the globs the dpkg
 `Conflicts:` field cannot).
+
+## 170HX Gen3 guide vs our fleet — feasibility verdict + 90HX Gen2 path (2026-10-30)
+
+Investigated `lixiangwuxian/170hx_tips Gen3_unlock_en.md` (GA100/CMP-170HX
+Gen3 enablement) against both our cards. Verdicts and full evidence:
+`docs/cmp90hx/gen-feasibility.md`. Delta worth remembering:
+
+- The guide does not port: its probe/OPT registers are **unmapped on TU102**
+  (proven by our own `20260812T1317Z-170hx-regset` capture) and on GA102
+  `OPT_GEN23 0x82057c` / `VSEC_DEVICE 0x8860c` are **fuse-shadowed** — they
+  ignore writes even through the V67 chain. 90HX Gen3 therefore has no
+  demonstrated path; Gen2 is the proven ceiling. Ledger updated in the doc.
+- **90HX Gen2 is real and upstream-proven** (jdowning100/cmpunlocker
+  rejoin16): the Gen1 cap is PLM-protected registers, not a fuse — this
+  supersedes the "…is fused" record in the vendored rejoin15 README.
+  Mechanism: 34 mask opens at one crafted-Booter write per module load
+  (~7–8 min/cold boot), then kernel-context speed path + bridge retrain.
+  Cold-boot validated upstream 2026-08-16; warm reboots keep XVE/XP3G/FEAT
+  masks (OPTB re-locks; Gen2 trains without it).
+- Open contradiction: lane width **x4** (rejoin16 notes) vs **x16** (our
+  vendored README capture) — decides whether Gen2 doubles ~1.9 or ~7.9 GB/s.
+  Read-only probe `.scratch/90hx-gen2-p2p/probe-llm2.sh` (delivered, static
+  review = zero device writes) settles it on llm2.
+- Work tracked as 10 tickets under `.scratch/90hx-gen2-p2p/issues/`
+  (probe → rejoin16 baseline + timing → fail-closed boot service →
+  unlock-time reduction research incl. three alternate architectures:
+  multi-launch Booter / table-driven signature / pre-OS masks-only) with
+  P2P tickets gated on the probe's topology answer. P2P context mined this
+  session: mixed-gen pairs need the libcuda predicate patch re-located for
+  610.43.03 (upstream signatures pinned to 615.71.09); the 90HX P2P article
+  measured IOMMU Translated 250 MB/s vs identity 3.3 GB/s; layer-split LLM
+  serving sees ~zero P2P gain (pwner issue #5) — only TP placement does.
