@@ -94,10 +94,17 @@ case "${card}" in
         # jdowning100/cmpunlocker — applies on top of the rejoin14/15 series
         # (upstream-proven order); research notes: docs/cmp90hx/
         # rejoin16-RESEARCH-NOTES.md; feature tracking: .scratch/90hx-gen2-p2p/.
+        # 0017 (rejoin17 clean-path refill) is ours: llm2 windows v2-v4 proved
+        # the rejoin16 extra write fires only on status!=NV_OK first loads
+        # where SEC2 is dead (shrunk WPR2); the healthy first attempts
+        # (3/6, no-FLR reloads) never enter that branch. 0017 fires the same
+        # write on the clean path under a WPR2-size guard and hands off via
+        # the proven restore-signature + arm-FLR sequence.
         patch_order=(
             0014-6104303-cmp90hx-stockflow-rejoin14-multigpu-state.patch
             0015-6104303-cmp90hx-stockflow-rejoin15-serialized-start.patch
             0016-6104303-cmp90hx-stockflow-rejoin16-pcie-jtag-plm.patch
+            0017-6104303-cmp90hx-stockflow-rejoin17-clean-path-refill.patch
         )
         patch_dir="${script_dir}/patches/cmp90hx"
         ;;
@@ -113,6 +120,7 @@ case "${card}" in
         for p in "${script_dir}/patches/cmp90hx/0014-6104303-cmp90hx-stockflow-rejoin14-multigpu-state.patch" \
                  "${script_dir}/patches/cmp90hx/0015-6104303-cmp90hx-stockflow-rejoin15-serialized-start.patch" \
                  "${script_dir}/patches/cmp90hx/0016-6104303-cmp90hx-stockflow-rejoin16-pcie-jtag-plm.patch" \
+                 "${script_dir}/patches/cmp90hx/0017-6104303-cmp90hx-stockflow-rejoin17-clean-path-refill.patch" \
                  "${script_dir}/patches/both/01-cmp50-stockflow-rebased-on-cmp90hx.patch" \
                  "${script_dir}/patches/cmp50hx/02-cmp50-rt-core-count.patch" \
                  "${script_dir}/patches/cmp50hx/03-cmp50-rebar.patch" \
@@ -230,6 +238,8 @@ grep -q 'CMP90_STOCKFLOW_REJOIN' \
 grep -q 'CMP90_PC_EXACT_PCI_DEVICE_ID' \
     "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c"
 grep -q 'CMP90_STOCKFLOW_REJOIN16' \
+    "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c"
+grep -q 'CMP90_STOCKFLOW_REJOIN17' \
     "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c"
 grep -q 'nv_cmp90hx_gen2_config' "${source_dir}/kernel-open/nvidia/nv.c"
 fi

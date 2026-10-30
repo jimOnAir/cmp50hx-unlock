@@ -137,3 +137,33 @@ must be started manually after that reboot). The safe live re-fire for the
 50HXes is `cmp50hx gen2` (boot-service phase 3: sysfs/BAR0 only, bounded,
 no NVML) — verified: post-reboot 14:11 the boot unit brought both 50HXes to
 `5GT/s x4` with the full 3-GPU model serving again (health 200).
+
+## 90HX Gen2 window v4: the two Booter-Load paths are disjoint on llm2 →
+## rejoin17 clean-path refill (2026-10-30)
+
+Four-load-variant evidence (24 sample loads, one masked target): the rejoin16
+crafted write fires ONLY inside the `status != NV_OK` (0x55 reset-required)
+selector-handoff branch — and on this host every such load carries a shrunk
+WPR2 (`hi−lo` = 3.5 KB) with a dead SEC2 (`mailbox0=0x11`, `polls=1000`).
+Conversely the loads that boot healthy (`status=0x0`, only on NO-FLR reloads:
+3/6 in variant E) skip the branch entirely. Per-cycle FLR forces the 0x55
+path 100% of the time — it is anti-correlated with success, which is why
+windows v3/v4 (A–D) hit 0/24. The one v2 success (`wpr2_lo=0x0272d000`,
+ack `polls=11`) came from the rare healthy-WPR2 variant of the 0x55 branch.
+
+**Cure (patch 0017 / rejoin17, ours):** fire the crafted refill on the
+CLEAN first attempt too — gated on canary GPU + `!bCmp90PcStockRetry` (the
+retry Load carries the stock 4 KB signature; refill is impossible there) +
+FEAT open + WPR2 span ≥ 256 KB; on landing, hand off through the proven
+failure-path sequence (restore stock signature, stage SS0/SS1, arm official
+PCIe FLR, return reset-required — FLR keeps opened masks open, proven
+v2/v3). NO-EFFECT or small WPR2 → boot continues untouched. Userspace:
+ladder in no-FLR mode expects ≈50% land rate.
+
+Patch-authoring trap recorded once and for all: **series patches must be
+authored against the reconstructed intermediate tree state, not a
+fully-patched checkout** — here 0017 inserts right where `both/01` (applied
+later) adds cmp50 capture context around the same failure return; diffing
+the 977-line final-state file would have produced a patch that fails to
+apply at its own position. Reconstruct via tarball + `patch -p1` 0014→0016
+(`~/cmp50hx-gen2-build/stage-rejoin17` on llm2).
