@@ -219,3 +219,25 @@ Bench (`rejoin16-cycle.sh` / `apply-all.sh`) evidence, now durable:
 5. BAR0 gotcha: plain read() on sysfs resource0 returns EIO while the
    nvidia driver is bound — mmap the resource instead (all census/readback
    tooling must use mmap).
+
+## 90HX llm2 final localization: run #1 of the V67 chain works, run #2 never
+## does (2026-10-30, probe boot)
+
+llm2's boot-time embedded write (FEAT 0x823804, built into the crafted
+signature, Booter run #1) lands EVERY boot. The REFILLED extra write (run #2
+via kgspCmp90V67RefillWrite + SEC2 reset + s_executeBooterUcode re-run — all
+36 controlled trials: reloads v3–v5 AND the boot-context probe with a
+bench-identical healthy WPR2 window) never fires: SEC2 re-run returns
+immediately (early-PLM-handoff poll_count=0) and the BAR0 poll times out.
+The branch's FWSEC re-prime reports FRTS err 0xbe on llm2 — including in the
+reload context where WPR2 exactly matches the meta's frts_offset, so the
+"expansion mismatch" theory is dead; 0xbe is either the re-run auth blocker
+or an innocent bystander (bench success lines were never captured — bench
+may print the same 0xbe and still land at ~147 polls).
+Also corrected: bench-documented warm-reboot XVE persistence did NOT hold on
+llm2 — v2's landed 0x88fe8 opened re-locked by the next window, so even a
+working refill would need per-boot re-apply on this host (boot ladder
+already implements exactly that).
+Host-level divergence (mixed fleet / VBIOS / SEC2 state) is the campaign's
+wall; per-boot Gen2 re-apply for the 90HX is NOT achievable on llm2 with the
+current vendored mechanism.
