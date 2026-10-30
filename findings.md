@@ -313,3 +313,14 @@ Gen2 itself needs only TWO masks (0x823800, 0x88fe8 — Wh1stle05 §1, same VBIO
 0017 retries the retrain 5×4 s against GSP link-management races). Never
 tested on llm2: CPU-write (bar0poke) probe of FEAT-page regs while 0x823804 is
 open; stock-first handoff; old-kernel boot (26.04 ships none).
+
+## CPU writes to the GA102 FEAT page (0x8238xx) are functionally inert but
+## permanently corrupt READBACKS of that page for the rest of the power cycle
+## (window #9, 2026-10-30): write 0xffffffff to 0x823800/0x823b04/0x88fe8
+## latched reads at intermediate values (0xfffffe8e/0xfffffece), froze the gate
+## 0x823804 read at 0xfffffcee, and made SS0/SS1 read 0 — while the card kept
+## serving at full unlocked speed (llama decode 94.5 tok/s, GPU util normal,
+## health 200). Consequences: (1) Gen2 masks cannot be opened from the CPU —
+## CSB/booter path only (L1 lever dead, FWSEC-slot model stands); (2) mask
+## readback probes are only valid BEFORE any CPU write to the page in the same
+## power cycle — verify state functionally thereafter; POST boot restores.
