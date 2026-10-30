@@ -90,9 +90,14 @@ case "${card}" in
         readonly source_sha256="9df87d753cd9c05aa0eedc462af9b35debb549a657136e863282f94c96ee2640"
         # Vendored from WildFlash1st/cmp90hx-unlock (GPL-2.0, commit 76940ae),
         # profile cmp90-rejoin15 — see docs/cmp90hx/VENDORED.md.
+        # 0016 (PCIe Gen2 rejoin16) vendored 2026-10-30 from
+        # jdowning100/cmpunlocker — applies on top of the rejoin14/15 series
+        # (upstream-proven order); research notes: docs/cmp90hx/
+        # rejoin16-RESEARCH-NOTES.md; feature tracking: .scratch/90hx-gen2-p2p/.
         patch_order=(
             0014-6104303-cmp90hx-stockflow-rejoin14-multigpu-state.patch
             0015-6104303-cmp90hx-stockflow-rejoin15-serialized-start.patch
+            0016-6104303-cmp90hx-stockflow-rejoin16-pcie-jtag-plm.patch
         )
         patch_dir="${script_dir}/patches/cmp90hx"
         ;;
@@ -107,6 +112,7 @@ case "${card}" in
         patch_files=()
         for p in "${script_dir}/patches/cmp90hx/0014-6104303-cmp90hx-stockflow-rejoin14-multigpu-state.patch" \
                  "${script_dir}/patches/cmp90hx/0015-6104303-cmp90hx-stockflow-rejoin15-serialized-start.patch" \
+                 "${script_dir}/patches/cmp90hx/0016-6104303-cmp90hx-stockflow-rejoin16-pcie-jtag-plm.patch" \
                  "${script_dir}/patches/both/01-cmp50-stockflow-rebased-on-cmp90hx.patch" \
                  "${script_dir}/patches/cmp50hx/02-cmp50-rt-core-count.patch" \
                  "${script_dir}/patches/cmp50hx/03-cmp50-rebar.patch" \
@@ -223,10 +229,18 @@ grep -q 'CMP90_STOCKFLOW_REJOIN' \
     "${source_dir}/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c"
 grep -q 'CMP90_PC_EXACT_PCI_DEVICE_ID' \
     "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c"
+grep -q 'CMP90_STOCKFLOW_REJOIN16' \
+    "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c"
+grep -q 'nv_cmp90hx_gen2_config' "${source_dir}/kernel-open/nvidia/nv.c"
 fi
 
+if [[ "${card}" != cmp90hx ]]; then
+# Both come from 02-cmp50-rt-core-count.patch; the standalone cmp90hx
+# profile never carried them (greps were latent-broken for that profile
+# until rejoin16 wired it, 2026-10-30).
 grep -q 'NV2080_CTRL_GR_INFO_INDEX_RT_CORE_COUNT' "${source_dir}/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c"
 grep -q 'data = 56U' "${source_dir}/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c"
+fi
 
 if [[ -n "${prepare_source}" ]]; then
     [[ ! -e "${prepare_source}" ]] || {
