@@ -241,3 +241,19 @@ already implements exactly that).
 Host-level divergence (mixed fleet / VBIOS / SEC2 state) is the campaign's
 wall; per-boot Gen2 re-apply for the 90HX is NOT achievable on llm2 with the
 current vendored mechanism.
+
+## 90HX: rejoin18 closes the loop — booter-side refusal, not CPU-side state
+## (2026-10-30, window #7)
+
+With all three rejoin18 knobs verified active in one boot (FWSEC re-prime
+skipped, Booter re-run seeded with fresh 0/0 mailboxes — mailbox0 ended
+0x2a0c7000 ≠ stale 0x11c8e000, proving execution — and a 3 s readback poll),
+the V67 extra write STILL never fires on llm2 (status=0x55 early PLM handoff,
+polls=3000). FRTS err 0xbe is a bystander; mailbox staleness was not the
+poison; poll timing irrelevant. The refusal lives in the GA102 booter/SEC2
+state on this host (prime suspects: VBIOS version difference vs bench, or
+mixed-fleet interference) and is not reachable from the CPU side with the
+current vendored mechanism. Bench-documented persistence does not hold here
+either (landed masks re-lock), so llm2 has no available path to Gen2 with
+the rejoin14-18 code line. Resting state = Gen1 + stock-flow boot (flags
+file absent ⇒ .15 module behaves byte-exactly like .14 rejoin16).
