@@ -89,3 +89,41 @@ Gen3 enablement) against both our cards. Verdicts and full evidence:
   610.43.03 (upstream signatures pinned to 615.71.09); the 90HX P2P article
   measured IOMMU Translated 250 MB/s vs identity 3.3 GB/s; layer-split LLM
   serving sees ~zero P2P gain (pwner issue #5) — only TP placement does.
+
+## 90HX Gen2 live on llm2: window-v2 FAIL → FLR root cause + mixed-host reload hazard (2026-10-30)
+
+First live attempts of the ticket-03 baseline apply, and two durable findings:
+
+**Window record (v2, 14:05–14:07 UTC).** FEAT `0x823804` skip-open (boot
+state confirmed); `0x88fe8` opened try=2 in 13 s (dmesg: `wpr2_lo=0x0272d000
+wpr2_hi=0x027fee00 mailbox0=0x4b2f4000 polls=11 OK`); `0x88fec` NO-EFFECT on
+all 3 tries — `mailbox0=0x00000011 polls=1000` with **`wpr2_lo=0x027fe000`
+(= `wpr2_hi − 0x200`, empty refill region)**; fail-closed STOP per policy,
+card left Gen1, holders auto-restored. Full record: llm2
+`/root/90hx-gen2-baseline/window-chain.log` + partial timing TSV.
+
+**Root cause: the refill lands only on FLR-separated loads.** Upstream
+`rejoin16-cycle.sh` says it verbatim ("fires only once per FLR-separated
+boot cycle"), but the script itself contains no explicit reset — the proven
+bench host is **90HX-only**, where unloading the last driver reference
+dropped the card into the reset path implicitly. On a mixed host the sibling
+50HXes keep the module (and the 90HX's powered context) alive across
+`modprobe -r`, WPR2 stays shrunk, and every crafted Booter write polls out.
+Fix (apply driver v3): explicit `echo 1 > /sys/bus/pci/devices/<bdf>/reset`
+for the 90HX and both 50HXes between unload and load, plus a FLR-relock
+guard — any mask opened earlier in the pass must still read `0xffffffff`
+before the next cycle, else rc=3 and the pivot is boot-service apply, not
+more windows.
+
+**Mixed-host hazard (fleet-relevant, never previously tested):** warm
+`modprobe -r nvidia*` on llm2 made **both 50HXes fail every subsequent
+init** — `RmInitAdapter failed! (0x62:0x40:2119)` on each deferred open —
+until a **reboot** (the 90HX's first-attempt `(0x62:0x62:2119)` is the normal
+rejoin14 FLR retry, not this hazard). Serving degraded to the 90HX alone.
+Consequences adopted into chain v3: post-apply GPU-count check, one FLR-all
+recovery reload, and if still <3/3 → reboot instead of restoring onto a
+1-GPU box (`llama-ornith` is `unless-stopped` and `docker stop`-marked →
+must be started manually after that reboot). The safe live re-fire for the
+50HXes is `cmp50hx gen2` (boot-service phase 3: sysfs/BAR0 only, bounded,
+no NVML) — verified: post-reboot 14:11 the boot unit brought both 50HXes to
+`5GT/s x4` with the full 3-GPU model serving again (health 200).
