@@ -85,3 +85,32 @@ matters on llm2-class hosts.
    (masks re-latch at every POST on this host — the corrected model).
 
 Every step fail-closed; any NO-EFFECT ⇒ stop, stay Gen1, rebind, serve.
+
+## Update 2026-10-30 (night) — after upstream recon + window #9 (L1)
+
+- **L1 (CPU-write masks) is DEAD** (window #9): CPU writes to the FEAT page
+  never open 0x823800/0x88fe8 (readbacks latch at intermediates and freeze —
+  read-path corruption only, card keeps serving unlocked; details
+  `findings.md`). CSB/booter path is the only mask writer from the OS side.
+- **New OS-side lever L2 in flight (window #10)** — NOT #3/#4: stock-first
+  boot + **stock<->patched alternation** per Wh1stle05/iatethelogs known-good
+  recipes (all four vendored under `upstream/` with provenance). Each stock
+  nvidia load executes a healthy FWSEC run, which the FWSEC-slot model says
+  refills the one-crafted-run slot that the 0-be re-prime cannot. Tools
+  staged on llm2 at `/opt/cmp90hx-gen2-l2/` (pristine 610.43.03 .kos built
+  from the verified tarball, `srcversion CF35BFAB…`, 0 REJOIN strings).
+- **#3 reclassified: build+port, not greenfield.** WildFlash1st ships GA102
+  EFI source (`upstream/wildflash-efi/src/unlock_v2.c`, gnu-efi) whose
+  pre-OS FWSEC-re-prime+crafted-pair mini-cycle provably works; gen2 variant
+  (`unlock_v3f.efi`, full table + ECAM TLS phase) exists but is de-scoped
+  upstream pending re-proof. Remaining gate = THIS card's fwsec/sec2 blobs
+  (PROM dump) + Linux ESP integration (chainload GRUB, reuse 50HX BootNext).
+  Items 1-5 above stand; item 2 gains a design candidate: userspace PROM dump
+  via NV_PFLASH over NV0080_CTRL EXEC_REG_OPS under the stock driver.
+- **#4 feeds the slot model:** the booter's chain-consumer is an RV64
+  bytecode interpreter (jump table @0xe00, write handler @0xe4e, single
+  value@0xf948/reg@0xf960 write, terminator 0x81ee — WildFlash ground
+  truths). Multi-write payload OR a re-run-flag read explanation comes from
+  disassembling the bindata booter (extraction route mapped; kernel
+  `s_allocateUcodeFromBinArchive` PROD/DBG image pairs inside
+  `gsp_ga10x.bin` `.fwimage`).
