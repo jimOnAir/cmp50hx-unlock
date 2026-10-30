@@ -275,3 +275,17 @@ GSP boot on our cards. The two SKUs are opposite enforcement classes: GA100
 CMPs keep the software-override door open, GA102 CMPs weld it shut and leave
 only the SEC2-side V67 chain. Final: 90HX Gen2 on llm2 has no known path
 outside rejoin14–18; close-at-Gen1 or upstream question remain.
+
+## 90HX: bench's 90HX-only driver topology replicated on llm2 — still 0/41
+## (window #8, solo-context probe, 2026-10-30)
+
+Stubbing both 50HXes to pci-stub before the stack loads (driver instance saw
+exactly one GPU — the 90HX — at crafted-load time) did not change anything:
+run #2 still returns the early 0x55 handoff without firing, with every
+rejoin18 knob active and a healthy WPR2 window. The last host-architecture
+difference from bench is eliminated; what separates bench from llm2 is now
+only environment (card VBIOS version, platform BIOS, kernel) — none of it
+reachable by code we control. Recovery recipe proven in the same window:
+pci-stub unbind + nvidia sysfs bind restores the mixed fleet WITHOUT module
+reload (serving back in ~40 s), so a solo-context experiment is a ~5-minute
+serving pause, not a re-provisioning event.
