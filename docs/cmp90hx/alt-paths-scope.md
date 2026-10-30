@@ -92,13 +92,16 @@ Every step fail-closed; any NO-EFFECT ⇒ stop, stay Gen1, rebind, serve.
   never open 0x823800/0x88fe8 (readbacks latch at intermediates and freeze —
   read-path corruption only, card keeps serving unlocked; details
   `findings.md`). CSB/booter path is the only mask writer from the OS side.
-- **New OS-side lever L2 in flight (window #10)** — NOT #3/#4: stock-first
-  boot + **stock<->patched alternation** per Wh1stle05/iatethelogs known-good
-  recipes (all four vendored under `upstream/` with provenance). Each stock
-  nvidia load executes a healthy FWSEC run, which the FWSEC-slot model says
-  refills the one-crafted-run slot that the 0-be re-prime cannot. Tools
-  staged on llm2 at `/opt/cmp90hx-gen2-l2/` (pristine 610.43.03 .kos built
-  from the verified tarball, `srcversion CF35BFAB…`, 0 REJOIN strings).
+- **OS-side lever L2 TESTED & CLOSED (window #10, ran 2026-10-30)** —
+  stock-first boot + **stock<->patched alternation** per Wh1stle05/iatethelogs
+  known-good recipes (all four vendored under `upstream/` with provenance):
+  a healthy stock FWSEC gates run #1 (handoff landed 2/2, SS0=0x88888888,
+  V67 status=0x0) but run #2 was still refused 8/8 (`status=0x55`,
+  cumulative 0/49) => the refusal is per-load-internal; the OS-side mask
+  lever is exhausted and **#3 (pre-OS EFI, fresh FWSEC mini-cycle per
+  payload) is now the primary path**. Tools + pristine stock set remain
+  staged at `/opt/cmp90hx-gen2-l2/` — the handoff recipe itself is proven
+  on this host and stays reusable.
 - **#3 reclassified: build+port, not greenfield.** WildFlash1st ships GA102
   EFI source (`upstream/wildflash-efi/src/unlock_v2.c`, gnu-efi) whose
   pre-OS FWSEC-re-prime+crafted-pair mini-cycle provably works; gen2 variant
