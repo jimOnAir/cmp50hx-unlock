@@ -102,18 +102,28 @@ all 3 tries — `mailbox0=0x00000011 polls=1000` with **`wpr2_lo=0x027fe000`
 card left Gen1, holders auto-restored. Full record: llm2
 `/root/90hx-gen2-baseline/window-chain.log` + partial timing TSV.
 
-**Root cause: the refill lands only on FLR-separated loads.** Upstream
-`rejoin16-cycle.sh` says it verbatim ("fires only once per FLR-separated
-boot cycle"), but the script itself contains no explicit reset — the proven
-bench host is **90HX-only**, where unloading the last driver reference
-dropped the card into the reset path implicitly. On a mixed host the sibling
-50HXes keep the module (and the 90HX's powered context) alive across
-`modprobe -r`, WPR2 stays shrunk, and every crafted Booter write polls out.
-Fix (apply driver v3): explicit `echo 1 > /sys/bus/pci/devices/<bdf>/reset`
-for the 90HX and both 50HXes between unload and load, plus a FLR-relock
-guard — any mask opened earlier in the pass must still read `0xffffffff`
-before the next cycle, else rc=3 and the pivot is boot-service apply, not
-more windows.
+**Root cause (v3-corrected): the refill lands only when WPR2 is HEALTHY at
+canary time.** Upstream `rejoin16-cycle.sh` header says the chain "fires only
+once per FLR-separated boot cycle", and the patch confirms the *one-shot*:
+the extra write fires on the FIRST Booter Load of each module load and never
+again that cycle (`!bCmp90PcStockRetry`). On llm2 the first attempt usually
+runs the `status=0x55` (RESET_REQUIRED) selector-handoff path; SEC2 accepts
+the crafted re-exec only with a healthy WPR2 (`wpr2_lo=0x0272d000`, 832 KB —
+the single v2 success, ack in 11 polls). With explicit sysfs FLR of all 3
+cards before every load (v3): **0/3 loads WPR2-healthy** (`wpr2_lo` pinned
+at `hi−0x200`, SEC2 answers `mailbox0=0x11`); without FLR (v2): some loads
+healthy. The driver's own rejoin14 FLR-retry boots the card HEALTHY 7 s
+later, but the one-shot is already consumed. Conclusion: FLR is neither
+sufficient nor clearly the enabler on a mixed host — the next discriminator
+is per-variant WPR2-health rate (userspace matrix A no-FLR / B 90HX-FLR /
+C all-FLR / D all-FLR+settle), and if all fail, rejoin17 (kernel: allow the
+fire on the healthy retry Load under a WPR2-size guard).
+**Masks do persist across module reloads within one boot** (FEAT survived
+even the sysfs FLRs; the window-v2-opened mask stayed open until the next
+reboot) — so a ladder can accumulate progress across several bounded
+windows as long as no reboot lands in between. Warm reboot, however,
+re-locked everything except FEAT on llm2 — the upstream "XVE/XP3G persist
+warm" claim does NOT hold on this board.
 
 **Mixed-host hazard (fleet-relevant, never previously tested):** warm
 `modprobe -r nvidia*` on llm2 made **both 50HXes fail every subsequent
