@@ -70,8 +70,16 @@ Gen3 enablement) against both our cards. Verdicts and full evidence:
   masks (OPTB re-locks; Gen2 trains without it).
 - Open contradiction: lane width **x4** (rejoin16 notes) vs **x16** (our
   vendored README capture) — decides whether Gen2 doubles ~1.9 or ~7.9 GB/s.
-  Read-only probe `.scratch/90hx-gen2-p2p/probe-llm2.sh` (delivered, static
-  review = zero device writes) settles it on llm2.
+  **RESOLVED by the llm2 probe 2026-10-30: negotiated x4** (`LnkSta Speed
+  2.5GT/s, Width x4 (downgraded)` on `LnkCap … Width x16`; BAR0 XVE mirror
+  agrees) — x16-capable silicon on an x4-wired interface, exactly the 50HX
+  pattern; Gen2 payoff is ×2 at ~1.9 GB/s. Both historic claims were
+  descriptions of different layers. Full facts: ticket 01 Comments +
+  `probe-llm2-20261030.txt`. Bonus probe facts: only 2/34 core masks open at
+  boot (baseline ≈ full 34–36 cycles); `iommu=pt` already live on llm2 with
+  healthy GSP on both arches; 90HX BAR1 16 GiB ≥ VRAM; llm2 has 1× 90HX +
+  2× 50HX with llama-server layer-split → both P2P tickets closed/re-triaged
+  per their gates (09 wontfix, 10 needs-triage; reopen conditions recorded).
 - Work tracked as 10 tickets under `.scratch/90hx-gen2-p2p/issues/`
   (probe → rejoin16 baseline + timing → fail-closed boot service →
   unlock-time reduction research incl. three alternate architectures:
