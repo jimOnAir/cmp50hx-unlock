@@ -167,3 +167,26 @@ later) adds cmp50 capture context around the same failure return; diffing
 the 977-line final-state file would have produced a patch that fails to
 apply at its own position. Reconstruct via tarball + `patch -p1` 0014→0016
 (`~/cmp50hx-gen2-build/stage-rejoin17` on llm2).
+
+## 90HX rejoin17 (clean-path refill) disproven by its own first live fire —
+## the crafted signature exists ONLY on failing loads (2026-10-30)
+
+Window v5 (module .14): rejoin17 fired 6× on clean loads and every one
+aborted `refill failed status=0x40 (NOT_SUPPORTED)` — fail-safe exactly as
+designed, boots unaffected. Canary census settled it: every `status=0x0`
+Booter Load carries the **stock 4 KB signature** (memdesc=4096, 61/61);
+the crafted `0x64000` signature appears ONLY on `status=0x55` loads
+(36/36). So "fire on the healthy attempt" was structurally impossible —
+the classes are disjoint by construction, not by branch gating. Patch 0017
+stays in-tree as a documented dead end (harmless, guarded).
+
+Refined WPR2 model (findings from windows v2–v5): a crafted load is healthy
+iff FWSEC/FRTS consumed the CRAFTED meta (WPR2 = 832 KB, SEC2 acks in ≤15
+polls). On llm2 that never happened in 35 consecutive crafted-Load samples
+(v3+v4+v5, any FLR mode); the single v2 sighting was early in a fresh boot.
+The bench host (90HX-only) gets crafted-healthy loads routinely — its
+proven apply flow runs at BOOT context, where FWSEC ordering differs.
+Next lever: boot-time apply probe/apply-service (every probe is real ladder
+progress; doubles as ticket-04 persistence design), or rejoin18 kernel work
+on the FWSEC-meta path. Policy stays fail-closed; Gen1 is a legal resting
+state and the card is healthy there.
