@@ -257,3 +257,21 @@ current vendored mechanism. Bench-documented persistence does not hold here
 either (landed masks re-lock), so llm2 has no available path to Gen2 with
 the rejoin14-18 code line. Resting state = Gen1 + stock-flow boot (flags
 file absent ⇒ .15 module behaves byte-exactly like .14 rejoin16).
+
+## 170HX fuse-override ("disable-the-disables") path is factory-dead on the
+## CMP 90HX — GA102 DISABLE_SW_OVERRIDE is burned (2026-10-30, live read)
+
+Proposed as a bypass of the V67 run-#2 wall, the GA100 guide's stage 1
+(EN_SW_OVERRIDE + clear OPT_DISABLE_GEN3_SPEED/OPT_PCIE_BOOT_GEN3_DIS at
+nv_pci_probe, pre-RM) cannot port: on llm2's 90HX the whole fuse block maps
+at identical GA100 offsets, but DISABLE_SW_OVERRIDE (0x820084) bit0 reads 1
+— the burned fuse that the guide's own guard treats as hard-stop — and
+STATUS_OPT_GPC demonstrably consumes the fused OPT value, not the software
+shadow. Stage 2 (post-GSP PHY block writes) needs CPU write privilege inside
+the PLM-armed XVE region = precisely the run-#2 wall; stage 3 (RM
+SET_PCIE_SPEED) has no advertised capability to adopt (LnkCap2 = 2.5 GT/s,
+fuse-shadowed) and rides the RegistryDwords channel that breaks stockflow
+GSP boot on our cards. The two SKUs are opposite enforcement classes: GA100
+CMPs keep the software-override door open, GA102 CMPs weld it shut and leave
+only the SEC2-side V67 chain. Final: 90HX Gen2 on llm2 has no known path
+outside rejoin14–18; close-at-Gen1 or upstream question remain.

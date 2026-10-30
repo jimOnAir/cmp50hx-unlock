@@ -37,6 +37,34 @@ lost during a Gen3 transition.
   differs — but it was never an impossibility proof for a *native* path; see
   the 90HX Gen2 verdict.
 
+### 170HX disable-path deep dive (2026-10-30, first-party GA102 reads)
+
+Porting the guide's fuse-override to the 90HX was proposed as a possible
+bypass of the V67 run-#2 wall (windows #6–#7 closed that wall host-side).
+Read-only BAR0 capture on llm2's 90HX (`0000:03:00.0`, driver bound, mmap —
+the guide's own access pattern) settles it. The GA100 fuse block **maps at
+identical offsets on GA102**:
+
+| Register | GA102 read | Meaning for the port |
+|---|---|---|
+| `DISABLE_SW_OVERRIDE 0x820084` | `0x00000001` | **bit0 burned** — the guide's own guard (`if (rd & 1) skip: "fuse is burned"`) refuses this card class outright |
+| `EN_SW_OVERRIDE 0x820040` | `0x00000001` | reads 1 yet is not in effect (next row) — not a usable entry point |
+| `STATUS_OPT_GPC 0x820c1c` | `0x0000000c` | tracks **fused** `OPT_GPC_DISABLE 0x820350 = 0xc`, not the `_CP` shadow `0x82022c = 0x8` ⇒ consumer reads fuses, override shadow dead |
+| `OPT_DISABLE_GEN3_SPEED 0x820250` / `OPT_PCIE_BOOT_GEN3_DIS 0x820580` | `1` / `1` | the two Gen3-disable bits the guide clears are burned on GA102 too — and with `DISABLE_SW_OVERRIDE` burned there is no supported clear path |
+| `0x8841c/0x880a8/0x88610/0x8872c/0x8c040/0x8c1c0/0x8c2c0/0x8b8c0` | plausible GA100-consistent values | guide's post-GSP PHY set maps on GA102, but the enclosing 0x88xxxx XVE block is PLM-armed (`0x88fe8 = 0xffffffcf`) — CPU-writing these is exactly the privilege rejoin16 run #2 cannot obtain on llm2; no bypass |
+| cfg space `LnkCap`/`LnkCap2` | 2.5 GT/s only | speed capability fuse-shadowed into config space ⇒ stage 3 (`NV2080_CTRL_CMD_BUS_SET_PCIE_SPEED` + LnkCtl2) has no Gen3 capability for RM to adopt; and the guide's `RmForceEnableGen2`/`RMPcieLinkSpeed` ride `NVreg_RegistryDwords`, which breaks stockflow GSP boot on our cards (documented landmine, findings 2026-08) |
+
+**Verdict: the 170HX disable-fuse path is not applicable and not portable to
+the CMP 90HX.** Stage 1 is factory-fused off by `DISABLE_SW_OVERRIDE`; stage 2
+needs the same PLM privilege our wall lives behind; stage 3 has no capability
+to train to and arrives via a poisoned config channel. The two mechanisms are
+orthogonal SKU-enforcement classes: GA100 CMP ships with software-override
+*fuse disabled* (their path is CPU-side from probe), GA102 CMP ships with it
+*enabled* (our only path is the SEC2-side V67 chain — the thing we are
+already running). One card lost during the GA100 procedure additionally
+bars any experimental "override the override" attempt on a production fleet
+card under our fail-closed policy.
+
 An earlier analysis claiming the 90HX link is immutably eFuse-locked
 (WildFlash1st/cmp90hx-unlock, 2026-08-17; its README — vendored as
 `docs/cmp90hx/rejoin15-README.md` at commit `76940ae` — records "the link
@@ -120,6 +148,9 @@ answer is to be recorded on that ticket.
 | Register(s) | Card | Result | Source |
 |---|---|---|---|
 | `0x820250`, `0x820580`, `0x820040` (170HX probe/OPT) | 50HX/TU102 | unmapped (read as unclaimed) | our capture `20260812T1317Z-170hx-regset` |
+| `DISABLE_SW_OVERRIDE 0x820084` (+ whole 170HX fuse-override class) | 90HX/GA102 | bit0 **burned** (=1); STATUS_OPT consumes fused OPT not `_CP` — guide's own guard refuses; not portable | llm2 live read 2026-10-30 (gen-feasibility.md deep dive) |
+| GA100 post-GSP PHY set `0x8841c/0x880a8/0x88610/0x8872c/0x8c040/0x8c1c0/0x8c2c0/0x8b8c0` | 90HX/GA102 | maps + reads GA100-consistent, but XVE block PLM-armed (`0x88fe8=0xffffffcf`): CPU-write privilege = same V67 run-#2 wall | llm2 live read 2026-10-30 |
+| `RmForceEnableGen2`/`RMPcieLinkSpeed` via `NVreg_RegistryDwords` | 90HX/GA102 | config channel itself breaks stockflow GSP boot (mailbox1=0x6) on our cards | findings 2026-08 (commit 55277f2) |
 | `OPT_GEN23 0x82057c`, `VSEC_DEVICE 0x8860c` | 90HX/GA102 | writes ignored even via V67 chain (fuse-shadow) | rejoin16 notes §Hazards |
 | GA100 PJTAG PLM `0xc840`/`0xc848` | 90HX/GA102 | region returns `0xbadf1xxx` — unmapped | rejoin16 notes §Open questions |
 | pre-OS retrain (any card) | both | host hang (X99/X299); retired | issue #25, README |
