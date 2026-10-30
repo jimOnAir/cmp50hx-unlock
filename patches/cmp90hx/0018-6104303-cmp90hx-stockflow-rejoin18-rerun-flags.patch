@@ -1,0 +1,133 @@
+diff -ruN a18/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c b18/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
+--- a18/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c	2026-10-30 18:43:15.273180261 +0300
++++ b18/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c	2026-10-30 18:43:15.273634513 +0300
+@@ -45,6 +45,7 @@
+ #define CMP90_PC_EXACT_SS1_FULL                  0x00000008U
+ #define CMP90_REJOIN16_WRITE_SPEC_PATH           "/var/lib/cmpunlocker-rs/rejoin16-next-write.bin"
+ #define CMP90_REJOIN17_MIN_WPR2_SPAN             0x00040000U
++#define CMP90_REJOIN18_FLAGS_PATH                "/var/lib/cmpunlocker-rs/rejoin18-flags.bin"
+ 
+ NV_STATUS kgspCmp90RestoreStockSignatureForBooter(OBJGPU *pGpu,
+                                                   KernelGsp *pKernelGsp);
+@@ -332,12 +333,42 @@
+                     NvU32 readBack = 0;
+                     NvU32 pollIdx = 0;
+                     NV_STATUS wrStatus;
++                    NvU8 r18Flags = 0;
+ 
+                     NV_PRINTF(LEVEL_ERROR,
+                         "CMP90_STOCKFLOW_REJOIN16: spec 0x%08x=0x%08x "
+                         "wpr2_lo=0x%08x wpr2_hi=0x%08x\n",
+                         wrAddr, wrValue, wpr2LoSaved, wpr2HiSaved);
+ 
++                    /*
++                     * CMP90_STOCKFLOW_REJOIN18: per-load experiment flags,
++                     * 1 byte at CMP90_REJOIN18_FLAGS_PATH, read only when a
++                     * write spec exists (no spam on normal boots). Missing
++                     * file or unreadable = 0 = byte-exact rejoin16 behavior.
++                     * bit0: skip the FWSEC re-prime (it fails FRTS err 0xbe
++                     *       on llm2 in every context; bench dmesg unknown).
++                     * bit1: re-run the Booter with fresh 0/0 mailbox seeds -
++                     *       kgspExecuteHsFalcon_GA102 writes the provided
++                     *       mailbox values to HW before start, and the stock
++                     *       first run seeds 0/0; the rejoin16 re-run seeds
++                     *       the stale post-run values (0x11c8e000/0x1 on
++                     *       llm2), which the booter binary may treat as
++                     *       error/handoff state (llm2 0/36 vs bench 34/34).
++                     * bit2: poll the readback 3 s instead of 1 s.
++                     */
++                    {
++                        NvU8 fl = 0;
++
++                        if (os_open_and_read_file(CMP90_REJOIN18_FLAGS_PATH,
++                                                  &fl, 1) == NV_OK)
++                        {
++                            r18Flags = fl;
++                        }
++                        NV_PRINTF(LEVEL_ERROR,
++                            "CMP90_STOCKFLOW_REJOIN18: branch=0x55 "
++                            "flags=0x%02x\n", r18Flags);
++                    }
++
+                     wrStatus = kgspCmp90V67RefillWrite(pGpu, pKernelGsp,
+                                                        wrAddr, wrValue);
+                     if (wrStatus != NV_OK)
+@@ -353,7 +384,13 @@
+                         GPU_REG_WR32(pGpu, NV_PFB_PRI_MMU_WPR2_ADDR_HI,
+                                      wpr2HiSaved);
+ 
+-                        if (pKernelGsp->pFwsecUcode != NULL &&
++                        if ((r18Flags & 0x1U) != 0U)
++                        {
++                            NV_PRINTF(LEVEL_ERROR,
++                                "CMP90_STOCKFLOW_REJOIN18: FWSEC re-prime "
++                                "skipped (flags bit0)\n");
++                        }
++                        else if (pKernelGsp->pFwsecUcode != NULL &&
+                             pKernelGsp->pWprMeta != NULL)
+                         {
+                             KernelGspPreparedFwsecCmd *pFwsecCmd =
+@@ -389,7 +426,8 @@
+                             wrStatus = s_executeBooterUcode_TU102(pGpu,
+                                 pKernelGsp, pKernelGsp->pBooterLoadUcode,
+                                 staticCast(pKernelSec2, KernelFalcon),
+-                                mailbox0, mailbox1,
++                                ((r18Flags & 0x2U) != 0U) ? 0U : mailbox0,
++                                ((r18Flags & 0x2U) != 0U) ? 0U : mailbox1,
+                                 &wrMailbox0, NULL, NULL, NULL, NULL, NULL);
+ 
+                             /*
+@@ -399,7 +437,9 @@
+                              */
+                             readBack = GPU_REG_RD32(pGpu, wrAddr);
+                             for (pollIdx = 0;
+-                                 (pollIdx < 1000) && (readBack != wrValue);
++                                 (pollIdx < (((r18Flags & 0x4U) != 0U) ?
++                                             3000U : 1000U)) &&
++                                 (readBack != wrValue);
+                                  pollIdx++)
+                             {
+                                 osDelay(1);
+@@ -571,6 +611,21 @@
+             NvU32 readBack = 0;
+             NvU32 pollIdx = 0;
+             NV_STATUS wrStatus;
++            NvU8 r18Flags = 0;
++
++            /* CMP90_STOCKFLOW_REJOIN18: same flag file; see 0x55 branch. */
++            {
++                NvU8 fl = 0;
++
++                if (os_open_and_read_file(CMP90_REJOIN18_FLAGS_PATH,
++                                          &fl, 1) == NV_OK)
++                {
++                    r18Flags = fl;
++                }
++                NV_PRINTF(LEVEL_ERROR,
++                    "CMP90_STOCKFLOW_REJOIN18: branch=clean "
++                    "flags=0x%02x\n", r18Flags);
++            }
+ 
+             NV_PRINTF(LEVEL_ERROR,
+                 "CMP90_STOCKFLOW_REJOIN16: spec 0x%08x=0x%08x "
+@@ -611,7 +666,8 @@
+                         wrStatus = s_executeBooterUcode_TU102(pGpu,
+                             pKernelGsp, pKernelGsp->pBooterLoadUcode,
+                             staticCast(pKernelSec2, KernelFalcon),
+-                            mailbox0, mailbox1,
++                            ((r18Flags & 0x2U) != 0U) ? 0U : mailbox0,
++                            ((r18Flags & 0x2U) != 0U) ? 0U : mailbox1,
+                             &wrMailbox0, NULL, NULL, NULL, NULL, NULL);
+ 
+                         /*
+@@ -621,7 +677,9 @@
+                          */
+                         readBack = GPU_REG_RD32(pGpu, wrAddr);
+                         for (pollIdx = 0;
+-                             (pollIdx < 1000) && (readBack != wrValue);
++                             (pollIdx < (((r18Flags & 0x4U) != 0U) ?
++                                         3000U : 1000U)) &&
++                             (readBack != wrValue);
+                              pollIdx++)
+                         {
+                             osDelay(1);

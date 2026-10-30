@@ -105,6 +105,7 @@ case "${card}" in
             0015-6104303-cmp90hx-stockflow-rejoin15-serialized-start.patch
             0016-6104303-cmp90hx-stockflow-rejoin16-pcie-jtag-plm.patch
             0017-6104303-cmp90hx-stockflow-rejoin17-clean-path-refill.patch
+            0018-6104303-cmp90hx-stockflow-rejoin18-rerun-flags.patch
         )
         patch_dir="${script_dir}/patches/cmp90hx"
         ;;
@@ -121,6 +122,7 @@ case "${card}" in
                  "${script_dir}/patches/cmp90hx/0015-6104303-cmp90hx-stockflow-rejoin15-serialized-start.patch" \
                  "${script_dir}/patches/cmp90hx/0016-6104303-cmp90hx-stockflow-rejoin16-pcie-jtag-plm.patch" \
                  "${script_dir}/patches/cmp90hx/0017-6104303-cmp90hx-stockflow-rejoin17-clean-path-refill.patch" \
+                 "${script_dir}/patches/cmp90hx/0018-6104303-cmp90hx-stockflow-rejoin18-rerun-flags.patch" \
                  "${script_dir}/patches/both/01-cmp50-stockflow-rebased-on-cmp90hx.patch" \
                  "${script_dir}/patches/cmp50hx/02-cmp50-rt-core-count.patch" \
                  "${script_dir}/patches/cmp50hx/03-cmp50-rebar.patch" \
@@ -240,6 +242,8 @@ grep -q 'CMP90_PC_EXACT_PCI_DEVICE_ID' \
 grep -q 'CMP90_STOCKFLOW_REJOIN16' \
     "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c"
 grep -q 'CMP90_STOCKFLOW_REJOIN17' \
+    "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c"
+grep -q 'CMP90_STOCKFLOW_REJOIN18' \
     "${source_dir}/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c"
 grep -q 'nv_cmp90hx_gen2_config' "${source_dir}/kernel-open/nvidia/nv.c"
 fi
