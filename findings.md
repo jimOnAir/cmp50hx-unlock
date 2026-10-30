@@ -190,3 +190,32 @@ Next lever: boot-time apply probe/apply-service (every probe is real ladder
 progress; doubles as ticket-04 persistence design), or rejoin18 kernel work
 on the FWSEC-meta path. Policy stays fail-closed; Gen1 is a legal resting
 state and the card is healthy there.
+
+## 90HX: boot-context is the only healthy crafted-Load context on llm2 —
+## boot-time ladder design facts (2026-10-30)
+
+Bench (`rejoin16-cycle.sh` / `apply-all.sh`) evidence, now durable:
+1. Reloads CAN be healthy — bench landed 34/34 via rmmod + SS0/SS1 relock
+   (BAR0 0x82381c/0x823820 ← 0, CPU-writable while FEAT open) + insmod per
+   write, NO FLR. llm2 under identical code: 0/35 → host-dependent
+   (mixed-fleet FWSEC/FRTS interference prime suspect), no patchable
+   mechanism found in 0014 (replacement already ordered after GFW_BOOT_OK,
+   before WPR-meta/FWSEC). rejoin18 has no target.
+2. The SS relock matters: `_kgspCmp90ReplaceSignatureMemdescAfterGfw`
+   (REJOIN10 guard) keeps the STOCK signature when full selectors are
+   present — any reload after a selector-staging handoff boots stock unless
+   selectors are re-locked first.
+3. Warm reboot preserves XVE/XP3G/FEAT opens; only the OPTB trio
+   (0x88ff4/0x8e1b0/0x823800 per bench note) re-locks — and Gen2 provably
+   works with OPTB locked. ⇒ masks ACCUMULATE across boots: a boot-time
+   ladder (one write per boot) converges, ~4 min/boot.
+4. llm2 boot ordering (measured): cmp50hx-boot.service starts ~4.6 s and
+   loads the stack itself (nvidia-smi via setuid nvidia-modprobe bypasses
+   the modprobe blacklist); first 90HX crafted Booter Load ~6.0 s. A unit
+   ordered Before=cmp50hx-boot.service (same DefaultDependencies=no
+   recipe) can arm the spec file in-boot. This is `90hx-boot-ladder.sh/.service`
+   in `.scratch/90hx-gen2-p2p/` (installed to /usr/lib/cmp50hx-unlock/ +
+   enabled with inertness marker /var/lib/cmpunlocker-rs/90hx-ladder/enabled).
+5. BAR0 gotcha: plain read() on sysfs resource0 returns EIO while the
+   nvidia driver is bound — mmap the resource instead (all census/readback
+   tooling must use mmap).
