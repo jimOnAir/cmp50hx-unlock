@@ -289,3 +289,27 @@ reachable by code we control. Recovery recipe proven in the same window:
 pci-stub unbind + nvidia sysfs bind restores the mixed fleet WITHOUT module
 reload (serving back in ~40 s), so a solo-context experiment is a ~5-minute
 serving pause, not a re-provisioning event.
+
+## 90HX run #2 wall, modeled: the crafted chain fires only after a HEALTHY
+## FWSEC (FRTS) run — llm2's re-prime errors 0xbe; upstream's working flows all
+## guarantee a healthy FWSEC execution before each crafted booter run (2026-10-30)
+
+Consolidating four upstream sources (Wh1stle05/cmp90hx, iatethelogs/
+cmp90hx_pwner, WildFlash1st/cmp90hx-unlock[-for-windows], jdowning100 bench
+scripts) against all 41 llm2 trials: (1) the V67 chain is exactly ONE
+(value@0xf948, reg@0xf960) write, terminator 0x81ee — WildFlash proved this
+with SS0=5 distinguishing tests, and the booter's chain-consumer is an RV64
+bytecode interpreter (jump table @0xe00, write handler @0xe4e) — the target
+of RE path #4; (2) re-execution requires a fresh healthy FWSEC run (re-prime):
+llm2's re-prime always errors (FRTS 0xbe / status 0xffff), which explains why
+run #2 never fires under ANY of the 41 FLR/fleet/seed/poll/solo variants —
+and why the one 1/40 landing (v2, polls=11) is a transient healthy re-prime;
+(3) every working flow in the wild gets its crafted run following a healthy
+FWSEC by construction: bench = healthy re-prime in-OS (kernel ≤6.12),
+iatethelogs/Wh1stle05 = stock-module-first handoff every boot, WildFlash EFI =
+pre-OS FWSEC mini-cycle per pair (re-prime demonstrably works pre-OS).
+Gen2 itself needs only TWO masks (0x823800, 0x88fe8 — Wh1stle05 §1, same VBIOS
+94.02.74.00.01) plus config-space retrain (TLS=2 both ends + bridge RL; patch
+0017 retries the retrain 5×4 s against GSP link-management races). Never
+tested on llm2: CPU-write (bar0poke) probe of FEAT-page regs while 0x823804 is
+open; stock-first handoff; old-kernel boot (26.04 ships none).
