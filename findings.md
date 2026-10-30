@@ -324,3 +324,25 @@ open; stock-first handoff; old-kernel boot (26.04 ships none).
 ## CSB/booter path only (L1 lever dead, FWSEC-slot model stands); (2) mask
 ## readback probes are only valid BEFORE any CPU write to the page in the same
 ## power cycle — verify state functionally thereafter; POST boot restores.
+
+## A healthy STOCK-module FWSEC refills the crafted-run slot for the NEXT
+## load — run #1 lands 100% on handoff — but a SECOND chain execution inside
+## one load is still refused (0x55) regardless: the re-prime wall is
+## per-load-internal, not a missing-FRTS artifact (window #10, 2026-10-30,
+## L2 stock<->patched alternation, llm2): pristine 610.43.03 modules (0
+## REJOIN strings) insmod'd first every cycle produced healthy FWSEC (FRTS
+## frts_err=0x0, feat_plm=0xffffffff), and the immediately-following patched
+## load's booter run #1 landed both times (SS0 0x88888888, V67 native
+## status=0x0, card serving). Yet all 8 spec-driven REJOIN16 extra writes,
+## each loaded seconds after a verified-healthy stock FWSEC, returned
+## status=0x55 early-handoff — cumulative run-#2 record now 0/49. Note the
+## relock between cycles was CPU-side and thus functionally inert (FEAT-page
+## finding above), so selectors stayed full and REJOIN10 kept the stock
+## signature all window — the extra run fired on that path and was still
+## refused. Consequences: (1) the OS-side mask lever is EXHAUSTED — the only
+## in-OS-crafted execution shape that works is the fixed boot-style run #1
+## (embedded FEAT_OVR write), which cannot carry an arbitrary address;
+## (2) arbitrary single writes per payload require a fresh full canary+FWSEC
+## mini-cycle BEFORE the OS driver — exactly the WildFlash pre-OS EFI
+## structure, now the primary path (#3); (3) handoff stock-first itself is
+## proven reliable on this host — reusable for future patched-driver boots.
