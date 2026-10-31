@@ -6,6 +6,12 @@ outcome. (Bash-greppable: one URL per bullet.)
 
 ## Articles
 
+- https://habr.com/ru/articles/1087254/ — iatethelogs **part 4**
+  (2026-09-27): **first published CMP 90HX P2P + Gen2 x16 datapoint** — P2P
+  at Gen1 (3.08/3.35 GB/s vs 1.60 staged), the IOMMU-`identity` fix (250 MB/s
+  trap; ACS exonerated), cross-socket NODE limits, and 6.70 GB/s symmetric
+  after his Gen2 ladder. His P2P + Gen2 automation is in pwner (below).
+  Full analysis: `docs/cmp90hx/rm-levers-and-p2p.md` §1-2.
 - https://habr.com/ru/articles/1082724/ — iatethelogs, "Часть 3. Кремний
   взломал кремний…" (2026-09-15): first-confirmed **PCIe Gen2 x16** claim for
   CMP 90HX. Method = same stock-module-first → patched-handoff → rejoin16
@@ -24,6 +30,10 @@ outcome. (Bash-greppable: one URL per bullet.)
   documented counter-example (per-step telemetry, ticket 03).
 - https://habr.com/ru/articles/1020334/ — same author, part 1 (dual-Xeon
   CMP fleet build context).
+- https://habr.com/ru/articles/1076224/ — same author, **part 2** (linked
+  from part 4's series index 2026-10-31; content unread — presumed the
+  PCIe-lane-soldering/Gen2 hardware story referenced by parts 3-4). TODO:
+  read when convenient, reflect here.
 
 ## Unlock repos (lineage)
 
@@ -112,15 +122,43 @@ outcome. (Bash-greppable: one URL per bullet.)
   extraction tooling: `firmware/fetch_artifacts.py`,
   `extract_boot_assets.py`, `extract_gsp.py` (in Zagitta repo).
 
-## Older campaign sources (previously scattered; consolidated here)
+## lixiangwuxian cluster (2026-10-31 — the lineage ROOT + new levers)
 
-- https://github.com/lixiangwuxian/170hx_tips — GA100 `Gen3_unlock_en.md`
-  (device 2082), reflected in `docs/cmp90hx/gen-feasibility.md`.
+- https://github.com/lixiangwuxian/cmpunlocker — HEAD **`2d10f89` = the
+  "cmpunlocker 2d10f891" cited by Zagitta AND jdowning's research notes**:
+  the root CMP unlocker (170HX/GA100, Tom's Hardware/wccftech/LTT-featured),
+  contains `driver/patches/sec2-postbl-plm-ss-cfg.patch` with the original
+  `plmTable` from which our whole 90HX lineage descends.
+- https://github.com/lixiangwuxian/170hx_tips — HEAD `0d30567` (2026-10-20).
+  `Gen3_unlock_en.md` = complete CMP **Gen3 x16** enablement guide (GA100,
+  driver 615.71.09): probe-stage software-fuse-override code
+  (`EN_SW_OVERRIDE 0x820040`, Gen3-disable bits `0x820250/0x820580`,
+  FEATURE_OVERRIDE `0x82380C/10/2C` CPU-writable on GA100), standalone
+  **RM-client staged link trainer** (`NV2080_CTRL_CMD_BUS_SET_PCIE_SPEED`
+  0x20801805, `set_pcie_speed.c`), registry combo
+  `RmForceEnableGen2=1;RMPcieLinkSpeed=0x5;CmpGen3=1`, RM error map
+  (0x1b=instance mixup, 0x0f=power-cycle), LnkSta-only acceptance +
+  single-pass discipline. Reflected: `docs/cmp90hx/rm-levers-and-p2p.md`.
+- https://github.com/lixiangwuxian/170hx-rir-tool — HEAD `03a612a`. GA100
+  **RIR fuse writer** (irreversible burns; unlocked `disable_sw_override` on
+  170HX). **GA100-only, NOT applicable to the 90HX, never run at llm2.**
+  Recorded for the mechanism chain (why 170HX needed a burn: burned
+  `0x820084` bit0; our L1b probe answers whether 90HX fuses are burned).
+
+- https://github.com/iatethelogs/cmp90hx_pwner — **updated HEAD `73bc5ea`
+  (2026-09-27 "Document manual P2P mode")** vs our older vendored snapshot:
+  now ships the full P2P recipe (exact `NVreg_RegistryDwords` string +
+  IOMMU-identity switching + srcversion-verified insmod of the rejoin16-
+  patched stockflow module). Key-by-key audit vs our tree in
+  `docs/cmp90hx/rm-levers-and-p2p.md` §2.
 - https://github.com/xrip/cmp50hx-unlock/issues/14 — 50HX P2P proof +
   `iommu=pt`/GSP counter-case; basis of patches `05-rtx2080ti-rebar`,
   `06-aikitoria-p2p`, `07-turing-p2p` and `docs/P2P.md`.
 - https://github.com/iatethelogs/cmp90hx_pwner/issues (2, 5, 7) — apply
   automation reports.
+- (2026-10-31, unresolved) `google.com/goto?url=CAESZAHrOzAV…` — opaque
+  Google redirect token from the user's message; no target URL recoverable
+  client-side. If still needed, ask the user to paste the final URL.
 
 ## Where the campaign record lives
 

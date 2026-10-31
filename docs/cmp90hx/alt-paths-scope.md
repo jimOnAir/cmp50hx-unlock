@@ -167,3 +167,35 @@ Every step fail-closed; any NO-EFFECT ⇒ stop, stay Gen1, rebind, serve.
   disassembling the bindata booter (extraction route mapped; kernel
   `s_allocateUcodeFromBinArchive` PROD/DBG image pairs inside
   `gsp_ga10x.bin` `.fwimage`).
+
+## Update 2026-10-31 (late) — RM-side levers + P2P unblocked from Gen2 (Habr 4 + lixiangwuxian cluster)
+
+Full analysis: `docs/cmp90hx/rm-levers-and-p2p.md`. Ranked consequences:
+
+1. **P2P was never actually blocked by the Gen2 wall.** Habr part 4 +
+   pwner@73bc5ea publish the exact 90HX P2P recipe (patched stockflow .ko +
+   `RMForceP2PType=1;ForceP2P=0x111;PeerMappingOverride=1;RMForceStaticBar1=1;…`
+   + IOMMU-identity groups): 3.08-3.35 GB/s at **Gen1**, 6.70 GB/s at Gen2.
+   llm2's `gen2-p2p` goal is half-satisfiable NOW → new window candidate
+   **W-a** (P2P-at-Gen1, standalone payoff, no chain dependency).
+2. **Three RM-native Gen2 levers, all compiled into our tree, all untested:**
+   `RmForceEnableGen2` (chipset.c:75 → FORCE_GEN2 property), `RMPcieLinkSpeed`
+   ALLOW_GEN2 bitfield (registry header :1915; stock `EnablePCIeGen3` proves
+   the path), and `NV2080_CTRL_BUS_SET_PCIE_SPEED` staged trainer shipped as
+   a complete standalone client by the 170HX guide. Windows **W-b** (RM SET(2)
+   after landed mask) and **W-c** (registry-only, no mask — discriminator for
+   RM-side vs card-side gating) are cheap riding tests.
+3. **L1 re-opened as L1b (low prior, near-zero cost):** GA100 guide proves
+   probe-stage CPU writes to OPT/fuse-override regs STICK on 170HX (before
+   GSP boot, with `EN_SW_OVERRIDE 0x820040` prelude); our window #9 tested
+   steady-state FEAT writes without that prelude. Read-only probe of the
+   GA102 equivalents (0x820040/0x820084 mapping + bit0 burned?) decides
+   whether L1b gets a micro-test. RIR fuse-burning is GA100-only — N/A and
+   forbidden at llm2.
+4. **Lineage root located:** lixiangwuxian/cmpunlocker@2d10f89 = the
+   "cmpunlocker 2d10f891 plmTable" cited by both Zagitta and jdowning's
+   notes — same repo family we already port from. Their guide's discipline
+   (LnkSta-only acceptance, single-pass, RM error map 0x1b/0x0f) adopts into
+   our runbook verbatim.
+Path ranking unchanged (#5a primary) — these are additional carrier-agnostic
+levers, several of which ride in EXISTING windows at near-zero cost.
