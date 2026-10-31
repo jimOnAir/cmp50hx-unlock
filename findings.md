@@ -396,3 +396,27 @@ overnight) = new path #6, compressible to ~6 six-write launches if #5a's
 multi-launch pre-driver holds; (4) the RmForceEnableGen2/RMPcieLinkSpeed
 "mailbox1=0x6" landmine is carrier-specific (stockflow), jdowning's install.sh
 ships those keys on his tree — W-c reopened only there.
+
+## Plan-day corrections (2026-11-01, re-verified against work/upstream/):
+jdowning's ladder is 34-36 module RELOAD cycles in ONE boot (systemd oneshot
+runs bench/rejoin16-apply-all.sh -> rejoin16-cycle.sh loop: rmmod -> CPU
+relock SS via bar0poke 0x82381c/0x823820=0 ("CPU-writable while
+FEAT_OVR_PLM is open", "so the canary path runs on next load") -> 8-byte LE
+spec -> insmod), NOT a reboot-per-write overnight saga as the 2026-10-31
+entry implied. PAYLOAD_WRITES = 36 ordered entries, FEAT bootstrap
+0x823804 FIRST (extra writes NO-EFFECT unless FEAT_OVR_PLM open; FEAT
+persists across reloads; "works with FEAT locked" for the bootstrap itself),
+then XVE x6 (0x88fe8-8ff8 + 0x88ab4), XP3G x17 (0x8e1b0-0x8e1f0), OPTB x10
+(0x8200d0-0x8200f4), 0x823800, 0x823b04; warm-reboot fast-path comment:
+XVE/XP3G/FEAT persist across WARM reboot, OPTB re-locks, and "Gen2
+provably works with OPTB locked" (minimal set may be 24; fast-path readback
+tuple (0x88ff4, 0x8e1b0, 0x823800)). Two llm2-critical implications: (1)
+#6 viability hinges on bar0poke relock working HERE — window #9 observed it
+INERT ("selectors stayed full") — so #6 gets a relock-preflight gate before
+any ladder; our tree already carries patch 0016 (the spec-read code) but we
+only ever ran stock<>patched alternation, never his relock-armed single-
+module loop. (2) Persistence story for W4: expect hold-across-warm-reboot +
+cold-boot-clears, matching our D3/power-off evidence; Zagitta module params
+confirmed gpu_unlock.targets=<bdf|all> + resume bool. Experiment-cycle plan
+= ticket 11 (W0 probe -> W1 scaffold -> W2 one-launch diagnostic with
+FEAT-first 2-write frame -> W3 full batch -> W4 closeout; #6 = contingency).

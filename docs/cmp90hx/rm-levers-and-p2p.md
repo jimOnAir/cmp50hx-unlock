@@ -145,8 +145,13 @@ at Gen1); W-b/W-c are cheap discriminators riding existing windows; #5a
   execution after FWSEC/FRTS)". His shipped answer = rejoin16 ladder:
   **run #1 of each load carries ONE arbitrary (addr,value) from
   `/var/lib/cmpunlocker-rs/rejoin16-next-write.bin`**;
-  `systemd/cmp90hx-gen2.service` auto-cycles (write → reboot → next),
-  34 loads total; masks-open then speed path written **from kernel context
+   `systemd/cmp90hx-gen2.service` runs `bench/rejoin16-apply-all.sh` once
+   per boot; it loops `bench/rejoin16-cycle.sh`: rmmod stack → CPU-relock
+   selectors via `bar0poke wr 0x82381c/0x823820=0` ("CPU-writable while
+   FEAT_OVR_PLM is open… so the canary path runs on next load") → write
+   8-byte spec → insmod → RM init. **34–36 RELOAD cycles within ONE boot
+   (~minutes), not reboots** (corrected 2026-11-01); masks-open then speed
+   path written **from kernel context
   at two points** (post-Booter late-boot + first device open), then GPU +
   bridge TLS + bridge Retrain toggle. Userspace speed writes warned as
   "coin flip on wedging" (GSP-RM race) — matches our window #9 inert-CPU
@@ -156,12 +161,14 @@ at Gen1); W-b/W-c are cheap discriminators riding existing windows; #5a
      uses it; our 0/49 reproduces his own measurement. (b1 Q9 must ask the
      *sharper* discriminator instead: on his bench, do entries 2..26 of
      pcie-gen2.patch ever land, or do they log FAILED?)
-  2. **Never tested on llm2: author's pure flow** = one mask per LOAD as
-     run #1 via next-write.bin spec, self-cycling over N reboots. Every
-     llm2 mask attempt we made was run-#2-shaped. Given run #1 lands 2/2
-     here, his ladder's per-boot run #1 should land too — brute force
-     (34 boots) unless combined with 6-write frames (→ ~6 boots; or with
-     #5a pre-driver batching).
+   2. **Author’s pure LOOP SHAPE untested on llm2** = single patched
+      module reload ×34 with bar0poke relock arming + spec file (his
+      cycle.sh), not our stock≠patched alternation. Caveat found
+      2026-11-01: his relock arming was INERT on llm2 window #9
+      ("selectors stayed full") — if arming cannot work here, his loop
+      has no mechanism to re-fire the canary and #6’s viability must be
+      gated on a relock preflight test, not assumed. Note our tree already
+      carries his patch 0016 (patches/cmp90hx/0016) + 0017/0018 follow-ups.
   3. **Mask set is 34 registers** (XVE×6, XP3G×17, OPTB×10, FEAT_OVR×1;
      "minimal subset unknown") — our "2 masks" model was the headline pair
      (0x823800+0x88fe8), not the proven set.
@@ -176,9 +183,10 @@ at Gen1); W-b/W-c are cheap discriminators riding existing windows; #5a
      SHIPS `RmForceEnableGen2=1;RMPcieLinkSpeed=0x1` with his patched tree
      (+booter-verify, +persistent-sw-state…) — unknown whether his tree
      fixes the landmine. W-c stays open only on HIS carrier, not stockflow.
-- Path addition: **#6 = run the author's shipped flow on llm2** (build via
-  `90hx/build-candidate-with-rejoin16.sh` or full `install.sh`, systemd
-  self-cycle, one unattended overnight window; fail-closed with our
-  LnkSta+WPR2 checks between boots). #5a remains primary (6 boots/1 load vs
-  34), #6 is the maximally-faithful fallback and the b1-thread empirical
-  bridge.
+- Path addition: **#6 = run the author's shipped LOOP SHAPE on llm2**
+  (build via `90hx/build-candidate-with-rejoin16.sh`, then his relock-armed
+  reload loop — ~minutes within ONE boot, not an overnight reboot saga;
+  fail-closed with our LnkSta+WPR2 checks between cycles; viability gated
+  on a bar0poke relock preflight, see consequence 2). #5a remains primary
+  (6 pre-driver launches, no relock-dependency); #6 is the maximally-
+  faithful fallback and the b1-thread empirical bridge.
