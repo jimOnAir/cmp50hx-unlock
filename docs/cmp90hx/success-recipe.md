@@ -74,6 +74,11 @@ timings from the success journal (whole claim ~1 s, 10:39:07→:08).
    that order: WPR_CFG first is required by the executor (its own
    `ga10x_plm` opener), and FEAT must precede `0x823800` (PLM law). 3
    entries ≤ 6-slot DMA frame ⇒ **exactly one launch**.
+   *Measured law (W3a, boot `6b8b83b1`):* **the V67 chain fires exactly once
+   per FLR-separated load** — a second SEC2 launch inside one load times out
+   (`completion error=-110`, `fhstate=0xfff8 csberr=0x400000`), so any ladder
+   longer than the payload needs one insmod/rmmod cycle per ≤4 targets plus
+   the two auto-reopened openers (port patch 0003 `gu_window`).
 2. **Stage** on target: ko → `/root/zagitta-port/gpu_unlock_diag.ko`; the 4
    ga102-suffix assets (§1) under `/root/.cache/gpu-unlock/assets/610.43.03/`.
 3. **Arm** (`l2-w2.sh arm`, deployed `/root/l2-w2/`): install initramfs

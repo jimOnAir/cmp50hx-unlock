@@ -1,0 +1,98 @@
+From 6694a012b119bd6878c99fece84ec317d22bb98f Mon Sep 17 00:00:00 2001
+From: Dmitry Belozerov <dmitrii.belozyorov@gmail.com>
+Date: Sat, 31 Oct 2026 14:15:25 +0300
+Subject: [PATCH] gu_window=START:LEN module parameter: reload-ladder view into
+ oversized privileged tables (W3b). V67 chain fires once per FLR-separated
+ load (W3a measurement: 2nd SEC2 launch of a load times out fhstate=0xfff8
+ csberr=0x400000) so the 37-entry CMP90HX ladder must be one windowed launch
+ per load. Opener pair (WPR_CFG,FEAT) auto-prepended when START>0 per
+ FEAT-first law; gated to tables > GU_PAYLOAD_MAX_WRITES so upstream 2/3-entry
+ tables and diag builds are byte-path-identical; invalid windows fail closed
+ (claim aborts, production binds stock).
+
+---
+ kernel/gpu_unlock/unlock_610.c | 61 ++++++++++++++++++++++++++++++++--
+ 1 file changed, 59 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/gpu_unlock/unlock_610.c b/kernel/gpu_unlock/unlock_610.c
+index 8849cd7..5c222af 100644
+--- a/kernel/gpu_unlock/unlock_610.c
++++ b/kernel/gpu_unlock/unlock_610.c
+@@ -1206,6 +1206,54 @@ static int table_failure(struct unlock_transaction_work *work, const char *phase
+ 		work->attempt, entry->addr, entry->value, observed, ret);
+ 	return GU_RESULT(ret);
+ }
++
++/* W3b reload-ladder support: a module-parameter window into oversized
++ * privileged tables. Measured law (jdowning rejoin16-cycle notes; W3a on
++ * llm2: second SEC2 launch of one load times out, fhstate=0xfff8
++ * csberr=0x400000): the V67 chain fires exactly once per FLR-separated
++ * load, so ladders longer than one launch are applied as repeated
++ * insmod/rmmod cycles, one windowed single launch each. Whenever the
++ * window does not begin at entry 0, the opener pair (entries 0..1:
++ * WPR_CFG, FEAT) is re-prepended - measured rules require the FEAT-first
++ * law per load and idempotent openers make each load self-sufficient.
++ * Gated to tables that cannot fit one payload (count > slots) so stock
++ * paths (ga10x_plm 2, diag 3, selectors) never see it. */
++static char *gu_window;
++module_param(gu_window, charp, 0444);
++MODULE_PARM_DESC(gu_window, "START:LEN window into an oversized privileged table");
++
++static int gu_window_view(struct unlock_transaction_work *work,
++			  const struct gu_write_table *base,
++			  struct gu_reg_write *buf, size_t buf_count,
++			  struct gu_write_table *out)
++{
++	unsigned long start, len;
++	char *colon;
++	size_t n = 0, i;
++
++	if (!gu_window || !*gu_window || base->count <= GU_PAYLOAD_MAX_WRITES)
++		return 0;
++	start = simple_strtoul(gu_window, &colon, 0);
++	if (*colon != ':' || kstrtoul(colon + 1, 0, &len))
++		return GU_RESULT(-EINVAL);
++	if (start == 1 || !len || start >= base->count || start + len > base->count)
++		return GU_RESULT(-ERANGE);
++	if (len + (start > 1 ? 2 : 0) > buf_count ||
++	    len + (start > 1 ? 2 : 0) > work->payload->writes)
++		return GU_RESULT(-E2BIG);
++	if (start > 1) {
++		buf[n++] = base->entries[0];
++		buf[n++] = base->entries[1];
++	}
++	for (i = 0; i < len; i++)
++		buf[n++] = base->entries[start + i];
++	out->entries = buf;
++	out->count = n;
++	dev_info(&work->pdev->dev,
++		 "gpu_unlock: gu_window=%u:%u reopen=%u entries=%zu table=%zu\n",
++		 (unsigned int)start, (unsigned int)len, start > 1, n, base->count);
++	return 1;
++}
+ static int run_privileged_writes(struct unlock_transaction_work *work,
+ 				 const struct gu_write_table *table)
+ {
+@@ -1636,8 +1684,17 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
+ 		ret = unlock_transaction_fwsec(work);
+ 	if (!ret)
+ 		ret = publish_signature(work);
+-	if (!ret)
+-		ret = run_privileged_writes(work, &work->card->family->privileged);
++	if (!ret) {
++		struct gu_reg_write win_buf[GU_PAYLOAD_MAX_WRITES + 2];
++		struct gu_write_table view;
++		const struct gu_write_table *priv = &work->card->family->privileged;
++		int v = gu_window_view(work, priv, win_buf, ARRAY_SIZE(win_buf), &view);
++
++		if (v < 0)
++			ret = v;
++		else
++			ret = run_privileged_writes(work, v > 0 ? &view : priv);
++	}
+ 	if (!ret)
+ 		ret = restore_stock_signature(work);
+ 	if (!ret)
+-- 
+2.56.0
+
