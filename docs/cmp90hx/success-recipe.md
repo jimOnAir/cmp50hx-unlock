@@ -25,6 +25,14 @@ same work cycle as each success; rules in ticket 11 (`Success logging`).
   (schema in Appendix A). No evidence reference ⇒ not a success entry.
 - `success.jsonl` is copied off-host at the end of every window BEFORE
   fleet restore; repo-cache copies are append-merged, never overwritten.
+- **Stubbed-card reads are untrustworthy** (measured RF window): a BAR0
+  mmap read on a pci-stub-bound card returns **all-FF for every offset**
+  while the PCI command register has memory-decode off (`COMMAND=0100`,
+  lspci shows Region 0 `[disabled]`) — indistinguishable from "every mask
+  open". Check `setpci -s <bdf> COMMAND` bit 1 (or read post-driver-bind)
+  before believing any value from a stubbed card. This artifact briefly
+  produced a false "FEAT warm-persisted open" claim (RF boots
+  `4c850625`/`8857dbe3` `rf-check` lines — void).
 
 ## 1. Preconditions (state required before running the method)
 
@@ -263,6 +271,33 @@ Observed exactly so on every W3 window boot; canonical transcript
   full-driver-init interleave (#6, W3h). Multi-target on llm2 requires
   the driver-embedded one-crafted-write-per-boot lineage
   (`90hx-boot-ladder.service`), not ko reloads.
+- **Route RF — the author's own rejoin16 lineage reproduces the wall on
+  this card** (RF window 2026-10-31; warm boot `4c850625`, cold boot
+  `8857dbe3` → warm `867c2fa1`; evidence `evidence/rf-*`, harness
+  `llm2:/root/rf/`, lineage pins in `SOURCES.md`). Built exactly per his
+  recipe (bundle 0014+0015 + repo 0016 @`2cdc63cf` →
+  `PASS_CMP90HX_6104303_STOCKFLOW_REJOIN16_BUILD`), run with his bench
+  (`rejoin16-apply-all.sh`, unmodified bar one accessor patch), campaign
+  fully out of circuit (3 cards pci-stubbed early, `cmp50hx-boot`/
+  `cmp-idle-governor` masked, `gputempd` disabled, ladder HALT set).
+  Grade, identical on warm and cold starts: the stock V67 chain's FEAT
+  write lands every load (`0xffffff8f→0xffffffff`) — the card *can* take
+  booter-context writes — while his crafted extra write to `0x00088fe8`
+  completes with matching codes (`status=0x55 mailbox0=0x00000011`) but
+  never sticks (readback stays `0xffffffcf`, `polls=1000 NO-EFFECT`,
+  apply auto-aborts per his design). Cycle-1 `polls=0 OK` on the FEAT
+  spec is **vacuous** here (chain already opened FEAT in the same load —
+  §0 attribution law). Conclusion: the extra-write gate is
+  card/booter-side, not build- or flow-side (E2's preemption theory
+  cannot explain this: campaign was out of circuit and his own canary
+  fired); the identical-card assumption is falsified at the
+  booter-payload level — his cold-validated rig takes the same write at
+  ~147 polls. Robustness finding for his lineage on this host: repeated
+  cycle loads after a FWSEC `FRTS 0xbe` first-boot hiccup entered a
+  selector-handoff `rc=-5` loop (0016's FLR-retry path asserts on the
+  consumed stock-signature memdesc, `kernel_gsp.c:5986`); recovery by
+  warm reboot measured; endpoint stayed sane throughout (real BAR0 reads,
+  zero Xid/DPC, link intact).
 - ECC `0x823800` landed **once**, in the W2 diagnostic frame (row 1,
   `da354d66`). The current `0:6` frame does not target it and later-boot
   post-bind checks read `0xffffff8f` (not landed); no reproduction claim
@@ -287,6 +322,19 @@ Observed exactly so on every W3 window boot; canonical transcript
 | warm reboot | ✗ **RESET** — every ladder boot's first pre-driver ko read of each target is the locked `0x4cb8f`, although the previous boot ended at `0xffffffff` (final window checks) | n/a | all seven boots W3a `6b8b83b1` … W3h `41ebb379`: `grep 'pass=2/6'`/`pass=3/6` in `evidence/w3*-journal*`/`w3*-mono*` |
 | cold boot (power cycle) | ✗ **RESET — measured 2026-10-31** (cold boot `5b05bf0d` after W3h): all four XVE addresses read post-bind at the production partial baseline (`0xffffffcf/0xffffff8f`), **zero `0xffffffff`**, although the previous boot ended with `0xffffffff` held at every one through production bind | n/a | `maskread.py 0x823804 0x88fe8 0x88fec 0x88ff0 0x88ff4 0x823800` post-cold-boot; FEAT `0xffffffff` = production canary, not carried-over (§1 row) |
 | runtime D3 round-trip | n/a — this host never D3s the card: `nvidia-persistenced` masked, `gputempd`/`cmp-idle-governor` hold it; `power_state=D0` in every window read | n/a | W3h `pre-state … power=D0`; production topology notes, ticket 11 |
+
+RF-window addendum (2026-10-31, boots `8857dbe3` cold / `867c2fa1`):
+cold re-latch re-confirmed with trusted in-driver reads — the stock
+chain's own `FEAT_PLM_before=0xffffff8f` line fires on every boot's first
+successful Booter execution (warm AND cold), i.e. FEAT is locked at
+handoff regardless of how the previous boot ended; the chain — not
+persistence — is why runtime FEAT is open (§1 row). Two earlier readings
+are hereby **voided**: the `rf-check` `FEAT baseline=0xffffffff` lines on
+stub-bound cards (all-FF artifact — §0), and an analysis note claiming
+`0x8e1b0` "read `0xffffffff` with no table write" (address misalignment —
+`0x8e1b0` read `0xffffff8f` at every RF sample point; the stable
+`0xffffffff` is at `0x8e1f0`, present already at cold baseline in both
+RF sweeps, untouched by any write this campaign).
 
 ## 7. Rollback
 

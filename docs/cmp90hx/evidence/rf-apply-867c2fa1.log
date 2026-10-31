@@ -1,0 +1,4 @@
+rejoin16-apply-all: preflight: FEAT_PLM open (took 1s)
+rejoin16-apply-all: phase1 [0x00823804=0xffffffff] readback=0xffffffff polls=0 OK
+rejoin16-apply-all: phase1 [0x00088fe8=0xffffffff] readback=0xffffffcf polls=1000 NO-EFFECT
+rejoin16-apply-all: phase1 ABORT: write to 0x00088fe8 did not land

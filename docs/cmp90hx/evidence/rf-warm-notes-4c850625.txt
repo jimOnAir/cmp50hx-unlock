@@ -1,0 +1,30 @@
+boot_id=4c850625-7b62-47ce-953e-9eba62535e0f
+Oct 31 15:51:48 llm2 kernel: NVRM: GPU0 _kgspCmp90ReplaceSignatureMemdescAfterGfw: CMP90_PROD_STACK_SHIFT_PLM_V67: replaced stock signature after GFW_BOOT with GA102 0xfa00 single-write chain for BAR0
+Oct 31 15:51:49 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x55 mailbox0=0x34197000 FEAT_PLM_before=0xffffff8f FEAT_PLM_after=0xffffffff c
+Oct 31 15:51:49 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: no write spec at /var/lib/cmpunlocker-rs/rejoin16-next-write.bin (0x59); no extra write this load
+Oct 31 15:51:56 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x0 mailbox0=0x00000000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff cp
+Oct 31 16:00:49 llm2 kernel: NVRM: GPU0 _kgspCmp90ReplaceSignatureMemdescAfterGfw: CMP90_PROD_STACK_SHIFT_PLM_V67: replaced stock signature after GFW_BOOT with GA102 0xfa00 single-write chain for BAR0
+Oct 31 16:00:49 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x55 mailbox0=0x32d4e000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff c
+Oct 31 16:00:49 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: no write spec at /var/lib/cmpunlocker-rs/rejoin16-next-write.bin (0x59); no extra write this load
+Oct 31 16:00:56 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x0 mailbox0=0x00000000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff cp
+Oct 31 16:00:58 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x0 mailbox0=0x00000000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff cp
+Oct 31 16:01:05 llm2 kernel: NVRM: GPU0 _kgspCmp90ReplaceSignatureMemdescAfterGfw: CMP90_PROD_STACK_SHIFT_PLM_V67: replaced stock signature after GFW_BOOT with GA102 0xfa00 single-write chain for BAR0
+Oct 31 16:01:05 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x55 mailbox0=0x3d7c8000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff c
+Oct 31 16:01:05 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: spec 0x00823804=0xffffffff wpr2_lo=0x027fe000 wpr2_hi=0x027fee00
+Oct 31 16:01:05 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: fwsec status=0xffff
+Oct 31 16:01:05 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: write 0x00823804=0xffffffff status=0x55 mailbox0=0x00000011 readback=0xffffffff polls=0 OK
+Oct 31 16:01:13 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x0 mailbox0=0x00000000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff cp
+Oct 31 16:01:21 llm2 kernel: NVRM: GPU0 _kgspCmp90ReplaceSignatureMemdescAfterGfw: CMP90_PROD_STACK_SHIFT_PLM_V67: replaced stock signature after GFW_BOOT with GA102 0xfa00 single-write chain for BAR0
+Oct 31 16:01:21 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x55 mailbox0=0x02ca1000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff c
+Oct 31 16:01:21 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: spec 0x00088fe8=0xffffffff wpr2_lo=0x027fe000 wpr2_hi=0x027fee00
+Oct 31 16:01:21 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: fwsec status=0xffff
+Oct 31 16:01:23 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: write 0x00088fe8=0xffffffff status=0x55 mailbox0=0x00000011 readback=0xffffffcf polls=1000 NO-EFFECT
+Oct 31 16:01:31 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x0 mailbox0=0x00000000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff cp
+== mask sweep post-window ==
+0xffffffff 0xffffffcf 0xffffffcf 0xffffffcf 0xffffff8f 0xffffff8f 0xffffff8f 0xffffff8f 0xffffffff 0xffffff8f 0xffffff8f
+== link ==
+		LnkSta:	Speed 2.5GT/s, Width x4 (downgraded)
+			TrErr- Train- SlotClk+ DLActive- BWMgmt- ABWMgmt-
+ls: cannot access '/root/rf/apply-*.log': No such file or directory
+== apply log tail ==
+tail: cannot open '/root/rf/apply-*.log' for reading: No such file or directory

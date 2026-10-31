@@ -1,0 +1,35 @@
+boot_id=867c2fa1-71da-4ea7-9945-43d6c163a284 (cold 8857dbe3 -> warm 867c2fa1)
+== REJOIN16 graded lines (this boot) ==
+Oct 31 16:18:36 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x55 mailbox0=0x0a853000 FEAT_PLM_before=0xffffff8f FEAT_PLM_after=0xffffffff c
+Oct 31 16:18:36 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: no write spec at /var/lib/cmpunlocker-rs/rejoin16-next-write.bin (0x59); no extra write this load
+Oct 31 16:18:43 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x0 mailbox0=0x00000000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff cp
+Oct 31 16:18:50 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x55 mailbox0=0x1e1b2000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff c
+Oct 31 16:18:50 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: spec 0x00823804=0xffffffff wpr2_lo=0x027fe000 wpr2_hi=0x027fee00
+Oct 31 16:18:50 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: write 0x00823804=0xffffffff status=0x55 mailbox0=0x00000011 readback=0xffffffff polls=0 OK
+Oct 31 16:18:58 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x0 mailbox0=0x00000000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff cp
+Oct 31 16:19:06 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x55 mailbox0=0x0d46b000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff c
+Oct 31 16:19:06 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: spec 0x00088fe8=0xffffffff wpr2_lo=0x027fe000 wpr2_hi=0x027fee00
+Oct 31 16:19:08 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_STOCKFLOW_REJOIN16: write 0x00088fe8=0xffffffff status=0x55 mailbox0=0x00000011 readback=0xffffffcf polls=1000 NO-EFFECT
+Oct 31 16:19:15 llm2 kernel: NVRM: GPU0 kgspExecuteBooterLoad_TU102: CMP90_PROD_STACK_SHIFT_PLM_V67: native GA102 status=0x0 mailbox0=0x00000000 FEAT_PLM_before=0xffffffff FEAT_PLM_after=0xffffffff cp
+== hiccup lines (priming load) ==
+Oct 31 16:18:00 llm2 kernel: RAMDISK: [mem 0x62113000-0x67d5afff]
+Oct 31 16:18:36 llm2 kernel: NVRM: GPU0 kgspBootstrap_TU102: failed to execute Booter Load (ucode for initial boot): 0x62
+Oct 31 16:18:36 llm2 kernel: NVRM: GPU 0000:03:00.0: RmInitAdapter failed! (0x62:0x62:2119)
+Oct 31 16:18:36 llm2 kernel: NVRM: GPU 0000:03:00.0: CMP90_STOCKFLOW_REJOIN14: retrying nv_start_device after selector handoff FLR rc=-5 flags=0x0
+Oct 31 16:18:44 llm2 kernel: NVRM: GPU 0000:03:00.0: CMP90_STOCKFLOW_REJOIN14: nv_start_device retry completed rc=0 flags=0x29
+Oct 31 16:18:50 llm2 kernel: NVRM: GPU0 kgspExecuteFwsec_TU102: failed to execute FWSEC for FRTS: FRTS error code 0xbe
+Oct 31 16:18:50 llm2 kernel: NVRM: GPU0 kgspBootstrap_TU102: failed to execute Booter Load (ucode for initial boot): 0x62
+Oct 31 16:18:50 llm2 kernel: NVRM: GPU 0000:03:00.0: RmInitAdapter failed! (0x62:0x62:2119)
+== mask sweep post-apply (driver-bound, trusted reads) ==
+0xffffffff 0xffffffcf 0xffffffcf 0xffffffcf 0xffffff8f 0xffffff8f 0xffffff8f 0xffffff8f 0xffffffff 0xffffff8f 0xfffffffc 0xffffff8f 0xffffff8f
+== link ==
+2.5 GT/s PCIe
+		LnkSta:	Speed 2.5GT/s, Width x4 (downgraded)
+			TrErr- Train- SlotClk+ DLActive- BWMgmt- ABWMgmt-
+== apply log tail ==
+rejoin16-apply-all: preflight: FEAT_PLM open (took 1s)
+rejoin16-apply-all: phase1 [0x00823804=0xffffffff] readback=0xffffffff polls=0 OK
+rejoin16-apply-all: phase1 [0x00088fe8=0xffffffff] readback=0xffffffcf polls=1000 NO-EFFECT
+rejoin16-apply-all: phase1 ABORT: write to 0x00088fe8 did not land
+== spec file ==
+PRESENT

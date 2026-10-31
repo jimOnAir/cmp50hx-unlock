@@ -83,6 +83,30 @@ the entire boot and **only recover on a cold reset**. Any reload loop
 must gate on *all* GPUs enumerated before unloading. We learned this the
 expensive way (two cards down for a boot until power-cycle).
 
+**The dedicated Gen2 module lineage was reproduced here too, and stops
+one write deeper.** We built the rejoin16 flow exactly per its author's
+recipe — stockflow bundle patches 0014+0015 plus his 0016 patch,
+`PASS_CMP90HX_6104303_STOCKFLOW_REJOIN16_BUILD`, driver 610.43.03 on
+kernel 7.0.0-38 — and ran his own bench against a card fully isolated
+from every other unlock flow (all GPU endpoints pci-stubbed from
+initramfs, boot units masked), on both a warm and a cold boot, FEAT
+locked at handoff in each (his own chain prints
+`FEAT_PLM_before=0xffffff8f`). Result, identical both times: the stock
+V67 chain's FEAT write lands on every load, but his crafted per-cycle
+extra write completes (`status=0x55 mailbox0=0x00000011`) and **never
+sticks** — `0x00088fe8` stays `0xffffffcf`, `polls=1000 NO-EFFECT`, the
+apply self-aborts at its fail-closed check. On the author's validated
+hardware the same build takes that write at ~147 polls. So the
+once-per-boot extra-write gate on this card is booter-side, below
+anything the kernel module controls; if anyone knows a card-level
+fingerprint (VBIOS `94.02.74.00.01` here, board rev, PLM seed) that
+predicts which GA102s accept non-FEAT payload writes, that is the last
+missing piece of this picture. Robustness note for that lineage on
+flaky-GSP hosts: after one FWSEC `FRTS 0xbe` boot hiccup, its FLR-retry
+path asserts (`stock signature memdesc == NULL`, `kernel_gsp.c:5986`)
+and the device then loops `rc=-5` selector-handoff failures until a
+reboot — endpoint stays otherwise sane (BAR0 readable, no Xid).
+
 Method notes: every privileged-write attempt logged as one JSON line
 (`landed=true` only on readback match + survival through FLR + production
 bind); accessor is a 16 MiB `mmap` on `resource0` (sysfs `pread` returns
