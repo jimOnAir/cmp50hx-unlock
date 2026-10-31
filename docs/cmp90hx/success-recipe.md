@@ -135,7 +135,15 @@ timings from the success journal (whole claim ~1 s, 10:39:07→:08).
    found reloads never produce crafted-healthy here (one success only
    early in a fresh boot, which is exactly cycle-1's behavior). Multi-
    target on llm2 therefore requires the driver-embedded one-crafted-write-
-   per-boot ladder lineage (`90hx-boot-ladder.service`), not ko reloads.
+   per-boot lineage (`90hx-boot-ladder.service`), not ko reloads — though
+   note that lineage's OWN llm2 history (windows #6–#9, 2026-10-30, host
+   `verdicts.tsv`) is NO-EFFECT ×4 on `0x88fe8` with the fleet-interference
+   theory already killed by a solo run; those verdicts are trustworthy
+   (kernel-side write lines + mmap grader). The driver-vehicle-vs-ko
+   asymmetry on the same target is an open upstream question. Warm reboot
+   resets all masks (§6), so cross-boot accumulation of landed targets is
+   impossible and any full-ladder must fit one boot — arithmetically
+   unreachable by the standalone ko (6-entry budget/boot).
    Ladders of any kind therefore get one claim-load per ≤4 targets
    (+2 auto-reopened openers, port patch 0003 `gu_window`); the
    initramfs reload-ladder (#5a) AND its userspace driver-interleave
