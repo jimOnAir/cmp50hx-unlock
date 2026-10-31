@@ -1,8 +1,7 @@
 diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
-index 82338b8..a848f9f 100644
 --- a/kernel-open/nvidia/nv-pci.c
 +++ b/kernel-open/nvidia/nv-pci.c
-@@ -36,6 +36,7 @@
+@@ -40,6 +40,7 @@
  #include <linux/clk.h>
  #include <linux/device.h>
  #include <linux/jiffies.h>
@@ -10,7 +9,7 @@ index 82338b8..a848f9f 100644
  #include <linux/kernel.h>
  #include <linux/workqueue.h>
  
-@@ -337,6 +338,141 @@ static void nv_get_pci_sysfs_config
+@@ -484,6 +485,141 @@
  #endif
  }
  
@@ -152,7 +151,7 @@ index 82338b8..a848f9f 100644
  static int nv_resize_pcie_bars(struct pci_dev *pci_dev) {
  #if defined(NV_PCI_REBAR_GET_POSSIBLE_SIZES_PRESENT)
      u16 cmd;
-@@ -1992,6 +2128,12 @@ nv_pci_probe
+@@ -2236,6 +2372,12 @@
          goto failed;
      }
  
@@ -165,7 +164,7 @@ index 82338b8..a848f9f 100644
      if ((pci_dev->irq == 0 && !pci_find_capability(pci_dev, PCI_CAP_ID_MSIX))
          && nv_treat_missing_irq_as_error())
      {
-@@ -2093,6 +2235,17 @@ nv_pci_probe
+@@ -2357,6 +2499,17 @@
          goto err_zero_dev;
      }
  

@@ -1,6 +1,6 @@
-diff -ruN a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
---- a/kernel-open/nvidia/nv.c	2026-08-14 11:18:34.959716416 -0500
-+++ b/kernel-open/nvidia/nv.c	2026-08-14 11:49:13.787546484 -0500
+diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
 @@ -64,6 +64,120 @@
  #endif
  
@@ -122,7 +122,7 @@ diff -ruN a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
  static DEFINE_MUTEX(cmp90_rejoin15_start_lock);
  
  #include <linux/cdev.h>
-@@ -1737,6 +1851,8 @@
+@@ -1895,6 +2009,8 @@
          }
          if (rc != 0)
              return rc;
@@ -131,9 +131,9 @@ diff -ruN a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
      }
      else if (rm_is_device_sequestered(sp, nv))
      {
-diff -ruN a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
---- a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c	2026-08-14 10:56:33.431146768 -0500
-+++ b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c	2026-08-14 10:57:05.523521813 -0500
+diff --git a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
+--- a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
++++ b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
 @@ -43,9 +43,14 @@
  #define CMP90_PC_EXACT_SS1                       0x00823820U
  #define CMP90_PC_EXACT_SS0_FULL                  0x88888888U
@@ -217,7 +217,7 @@ diff -ruN a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c 
 +                                     wpr2HiSaved);
 +
 +                        if (pKernelGsp->pFwsecUcode != NULL &&
-+                            pKernelGsp->pWprMeta != NULL)
++                            pKernelGsp->pWprMetaV1 != NULL)
 +                        {
 +                            KernelGspPreparedFwsecCmd *pFwsecCmd =
 +                                portMemAllocNonPaged(
@@ -227,7 +227,7 @@ diff -ruN a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c 
 +                                NV_STATUS fwsecStatus =
 +                                    kgspPrepareForFwsecFrts_HAL(pGpu,
 +                                        pKernelGsp, pKernelGsp->pFwsecUcode,
-+                                        pKernelGsp->pWprMeta->frtsOffset,
++                                        pKernelGsp->pWprMetaV1->frtsOffset,
 +                                        pFwsecCmd);
 +                                if (fwsecStatus == NV_OK)
 +                                {
@@ -340,10 +340,10 @@ diff -ruN a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c 
      return status;
  }
  
-diff -ruN a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
---- a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c	2026-08-14 10:56:33.427146722 -0500
-+++ b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c	2026-08-14 10:56:33.447146954 -0500
-@@ -5896,6 +5896,48 @@
+diff --git a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+--- a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
++++ b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+@@ -6543,6 +6543,48 @@
      _kgspCmp90PutU32(pSignatureVa, 0xf9ec, 0x000081eeU);
  }
  

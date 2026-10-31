@@ -90,38 +90,37 @@ new patch is made.
 ## Kernel API compatibility
 
 Kernel-version compatibility is maintained separately from CMP50HX features.
-`patches/cmp50hx/` contains card-specific changes. The shared compatibility
-patch is `patches/common/01-nvidia-kernel-string-api.patch`; `build.sh` applies
-it after the selected card patch series.
+`patches/cmp50hx/`, `patches/cmp90hx/` and `patches/both/` contain the
+card-specific change series; the driver version and input hashes live in
+`driver-pin.env`.
 
-The patch updates string-copy code in these NVIDIA Open `610.43.03` source
-files:
+The former shared compatibility patch
+`patches/common/01-nvidia-kernel-string-api.patch` was **retired with the
+615.78.08 port**: NVIDIA fixed every site upstream (`strscpy` in
+`os_get_current_process_name`, bounded `memcpy` for the nvswitch registry
+value, `snprintf` for the UVM chunk name; both strncpy-returning wrappers
+were deleted). See `patches/common/README.md` for the site-by-site evidence.
 
-| Source file | Change |
-| --- | --- |
-| `kernel-open/nvidia/os-interface.c` | Use `strscpy` for the current process name. |
-| `kernel-open/nvidia/linux_nvswitch.c` | Use bounded `memcpy` for the fixed-length registry value and `strscpy_pad` in the string wrapper. |
-| `kernel-open/nvidia-uvm/uvm_pmm_gpu.c` | Use `strscpy` for the UVM chunk name. |
-| `kernel-open/nvidia-modeset/nvidia-modeset-linux.c` | Use `strscpy_pad` in the modeset string wrapper. |
-
-The same patch is applied unchanged for each kernel build.
+Historical kernel build results (driver `610.43.03` era):
 
 | Kernel | Build result |
 | --- | --- |
 | `6.8.0-139-generic` | All five NVIDIA modules built. |
 | `7.2.9-cmp50hx` | `nvidia`, `nvidia-uvm`, `nvidia-modeset`, and `nvidia-peermem` built. |
 
-These results cover only the listed kernel releases. On `7.2.9-cmp50hx`,
-`nvidia-drm.ko` was omitted because NVIDIA `610.43.03` uses DRM atomic APIs
-that do not match this kernel's API; the shared string compatibility patch
-does not address that separate issue.
+On `7.2.9-cmp50hx`, `nvidia-drm.ko` was omitted because NVIDIA `610.43.03`
+uses DRM atomic APIs that do not match this kernel's API. With the `615.78.08`
+port all five modules — including `nvidia-drm.ko` — build on `7.2.9-1-MANJARO`.
 
 ## CUDA kernel profiling
 
 The driver build series includes `08-cmp50-driver-profiling.patch`. For the
-supported CMP 50HX PCI and subsystem IDs, it clears `isCmpSku` in the chip-info
-copy used by CPU-RM. This is meant to let unmodified CUDA profilers read kernel
-and SM metrics from workloads such as LLM inference.
+supported CMP 50HX PCI and subsystem IDs, it clears the CMP-SKU flag at its
+source: on `610.43.03` that was `isCmpSku` in the chip-info copy used by
+CPU-RM; on `615.78.08` NVIDIA moved the flag behind the
+`gpuGetIsCmpSku_FWCLIENT` accessor, so the patch overrides it there. This is
+meant to let unmodified CUDA profilers read kernel and SM metrics from
+workloads such as LLM inference.
 
 This driver path is not yet built or live-tested. It does not change PCI IDs or
 unlock SMs. The existing private CUPTI and Nsight copies remain validated for

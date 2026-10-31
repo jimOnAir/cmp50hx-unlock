@@ -33,8 +33,8 @@ set -Eeuo pipefail
 # authoritative; the inline fallback below serves the `curl | bash`
 # bootstrap and is asserted against the pin by build.sh (exit 6) whenever
 # both files live in one tree.
-DRIVER_VERSION_FALLBACK="610.43.03"
-NVIDIA_RUN_SHA256_FALLBACK="45e2d4c134a23c35e50f253a4aa63e7e5e8d17e3d185d4a07c8a58e9612ed392"
+DRIVER_VERSION_FALLBACK="615.78.08"
+NVIDIA_RUN_SHA256_FALLBACK="3e3f6dddc2ee767a08185300af7be3cb286ece76698d2dde3524599782d07ffe"
 _install_dir_candidate="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-/.}")" 2>/dev/null && pwd || true)"
 if [[ -n "${_install_dir_candidate}" && -f "${_install_dir_candidate}/driver-pin.env" \
       && -f "${_install_dir_candidate}/build.sh" ]]; then

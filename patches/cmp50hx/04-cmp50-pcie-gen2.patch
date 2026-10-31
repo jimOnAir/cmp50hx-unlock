@@ -1,5 +1,4 @@
 diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
-index b771a00..1a2b3c4 100644
 --- a/kernel-open/nvidia/nv.c
 +++ b/kernel-open/nvidia/nv.c
 @@ -65,6 +65,10 @@
@@ -13,11 +12,10 @@ index b771a00..1a2b3c4 100644
  
  #include <sound/core.h>             /* HDA struct snd_card */
  
-@@ -1362,6 +1366,295 @@
- #endif
+@@ -1515,6 +1519,295 @@
  }
  
-+/*
+ /*
 + * The capability adoption is one-shot per power cycle: once the card has
 + * regenerated its PCIe config block, no later kick re-derives it. On a cold
 + * boot GSP reverts the policy at gsp-ready and the driver's kick a moment
@@ -306,10 +304,11 @@ index b771a00..1a2b3c4 100644
 +                  ret);
 +    iounmap(bar0);
 +}
- /*
++/*
   * Brings up the device on the first file open. Assumes nvl->ldata_lock is held.
   */
-@@ -1521,6 +1814,8 @@
+ int nv_start_device(nv_state_t *nv, nvidia_stack_t *sp)
+@@ -1673,6 +1966,8 @@
          goto failed_release_irq;
      }
  
@@ -318,4 +317,3 @@ index b771a00..1a2b3c4 100644
      /* Generate and cache the UUID for future callers */
      (void)rm_get_gpu_uuid_raw(sp, nv);
  
-

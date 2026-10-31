@@ -1,23 +1,21 @@
 diff --git a/src/nvidia/generated/g_kernel_gsp_nvoc.h b/src/nvidia/generated/g_kernel_gsp_nvoc.h
-index 86af3dd..ff779b9 100644
 --- a/src/nvidia/generated/g_kernel_gsp_nvoc.h
 +++ b/src/nvidia/generated/g_kernel_gsp_nvoc.h
-@@ -544,6 +544,8 @@ struct KernelGsp {
+@@ -573,6 +573,8 @@
      RM_RISCV_UCODE_DESC *pGspRmBootUcodeDesc;
      MEMORY_DESCRIPTOR *pGspUCodeRadix3Descriptor;
      MEMORY_DESCRIPTOR *pSignatureMemdesc;
 +    NvU8 *pStockSignatureData;
 +    NvU64 stockSignatureSize;
-     GspSystemInfo *pSystemInfo;
      NvU32 regTableSize;
      PACKED_REGISTRY_TABLE *pRegTable;
+     NvU64 *pEncodedSystemInfo;
 diff --git a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
-index 4da1151..92d2f8e 100644
 --- a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
 +++ b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
-@@ -102,6 +102,18 @@
- 
- #include "crashcat/crashcat_report.h"
+@@ -130,6 +130,18 @@
+     GSP_ERROR_TYPE_COUNT
+ } GSP_ERROR_TYPE;
  
 +#define CMP50_PC_CANARY_PCI_DEVICE_ID       0x1E0910DEU
 +#define CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(id) (((id) == 0x155410DEU) || ((id) == 0x371F1462U))
@@ -34,68 +32,66 @@ index 4da1151..92d2f8e 100644
  
  struct MIG_CI_UPDATE_CALLBACK_PARAMS
  {
-@@ -4453,8 +4465,35 @@ _kgspPrepareScrubberImageIfNeeded(OBJGPU *pGpu, KernelGsp *pKernelGsp)
- 
-     // WAR for Bug 5016200 - Always run scrubber from kernel RM for ADA config
-     if ((neededSize > prescrubbedSize) || kgspIsScrubberImageSupported(pGpu, pKernelGsp))
--        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR,
--            kgspAllocateScrubberUcodeImage(pGpu, pKernelGsp, &pKernelGsp->pScrubberUcode));
+@@ -5329,7 +5341,25 @@
+                            pKernelGsp->pEncodedSystemInfo,
+                            sizeof(NvU64) * pKernelGsp->encodedSystemInfoCount,
+                            pKVStaticInfoData, &responseSize);
+-    if (status != NV_OK)
++    if ((status == NV_ERR_TIMEOUT) &&
++        (pGpu->idInfo.PCIDeviceID == CMP50_PC_CANARY_PCI_DEVICE_ID) &&
++        CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(pGpu->idInfo.PCISubDeviceID))
 +    {
-+        NV_STATUS scrubberStatus = kgspAllocateScrubberUcodeImage(
-+            pGpu, pKernelGsp, &pKernelGsp->pScrubberUcode);
-+        if (scrubberStatus != NV_OK)
-+        {
-+            if ((pGpu->idInfo.PCIDeviceID == CMP50_PC_CANARY_PCI_DEVICE_ID) &&
-+                CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(pGpu->idInfo.PCISubDeviceID))
-+            {
-+                NV_PRINTF(LEVEL_ERROR,
-+                          "CMP50_STOCKFLOW_V551: SCRUBBER_ALLOC_FAIL "
-+                          "status=0x%x needed=0x%llx prescrubbed=0x%llx "
-+                          "supported=%u\n",
-+                          scrubberStatus, neededSize, prescrubbedSize,
-+                          kgspIsScrubberImageSupported(pGpu, pKernelGsp));
-+                if ((scrubberStatus == NV_ERR_NOT_SUPPORTED) &&
-+                    !kgspIsScrubberImageSupported(pGpu, pKernelGsp))
-+                {
-+                    pKernelGsp->pScrubberUcode = NULL;
-+                    NV_PRINTF(LEVEL_ERROR,
-+                              "CMP50_STOCKFLOW_V551: "
-+                              "SCRUBBER_UNSUPPORTED_SKIP "
-+                              "needed=0x%llx prescrubbed=0x%llx\n",
-+                              neededSize, prescrubbedSize);
-+                    return NV_OK;
-+                }
-+            }
-+            return scrubberStatus;
-+        }
++        /*
++         * 615 port of the 610 kgspWaitForRmInitDone rpc_result intercept
++         * (upstream replaced the GSP_INIT_DONE event poll with this
++         * synchronous GSP_INIT command).  The signed-Booter
++         * native-continuation path has a running GSP RISC-V, but GSP
++         * reports its own bounded initialization timeout.  Continue only
++         * for the exact CMP 50HX identity; the normal static-info decode,
++         * RM, RPC and measured-compute health gates still have to pass.
++         */
++        NV_PRINTF(LEVEL_ERROR,
++                  "CMP50_COMPUTE_UNLOCK_V240: BOUNDED_INIT_TIMEOUT_CONTINUE "
++                  "cmd=GMCAPI_CMD_GSP_INIT status=0x%x\n",
++                  status);
 +    }
- 
-     return NV_OK;
- }
-@@ -4805,9 +4844,19 @@ _kgspBootGspRm(OBJGPU *pGpu, KernelGsp *pKernelGsp, GSP_FIRMWARE *pGspFw, GPU_MA
++    else if (status != NV_OK)
+     {
+         NV_PRINTF(LEVEL_ERROR, "GMCAPI_CMD_GSP_INIT failed: 0x%x\n", status);
+         goto done;
+@@ -5439,15 +5469,25 @@
      if (kgspIsWpr2Up_HAL(pGpu, pKernelGsp) &&
          (!pGpu->getProperty(pGpu, PDB_PROP_GPU_PREINITIALIZED_WPR_REGION)))
      {
 -        NV_PRINTF(LEVEL_ERROR, "unexpected WPR2 already up, cannot proceed with booting GSP\n");
 -        NV_PRINTF(LEVEL_ERROR, "(the GPU is likely in a bad state and may need to be reset)\n");
--        return NV_ERR_INVALID_STATE;
+-
+-        if (pKernelBif != NULL)
 +        if ((pGpu->idInfo.PCIDeviceID == CMP50_PC_CANARY_PCI_DEVICE_ID) &&
 +            CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(pGpu->idInfo.PCISubDeviceID))
-+        {
+         {
+-            kbifCheckResetStatus_HAL(pGpu, pKernelBif);
 +            NV_PRINTF(LEVEL_ERROR,
 +                      "CMP50_COMPUTE_UNLOCK_V132: continuing final FECS "
 +                      "pass with cumulative WPR PLMs active\n");
-+        }
+         }
 +        else
 +        {
 +            NV_PRINTF(LEVEL_ERROR, "unexpected WPR2 already up, cannot proceed with booting GSP\n");
 +            NV_PRINTF(LEVEL_ERROR, "(the GPU is likely in a bad state and may need to be reset)\n");
+ 
+-        return NV_ERR_INVALID_STATE;
++            if (pKernelBif != NULL)
++            {
++                kbifCheckResetStatus_HAL(pGpu, pKernelBif);
++            }
++
 +            return NV_ERR_INVALID_STATE;
 +        }
      }
  
      // Populate WPR meta structure (requires knowing FB size on dGPU, which depends on GFW_BOOT)
-@@ -5566,8 +5615,8 @@ kgspPrepareBootBinaryImage_IMPL
+@@ -6247,8 +6287,8 @@
  )
  {
      NV_STATUS status;
@@ -106,7 +102,7 @@ index 4da1151..92d2f8e 100644
      NvU32 bufSize;
      NvU32 bufSizeAligned;
      RM_RISCV_UCODE_DESC *pDesc = NULL;
-@@ -5580,6 +5629,18 @@ kgspPrepareBootBinaryImage_IMPL
+@@ -6261,6 +6301,18 @@
  
      // get the bindata storage for the image/descriptor
      kgspGetGspRmBootUcodeStorage_HAL(pGpu, pKernelGsp, &pBinStorageImage, &pBinStorageDesc);
@@ -125,7 +121,7 @@ index 4da1151..92d2f8e 100644
  
      // copy the image to sysmem
      bufSize = bindataGetBufferSize(pBinStorageImage);
-@@ -5662,6 +5723,20 @@ _kgspFreeBootBinaryImage
+@@ -6343,6 +6395,20 @@
      pKernelGsp->gspRmBootUcodeSize   = 0;
  }
  
@@ -146,7 +142,7 @@ index 4da1151..92d2f8e 100644
  static NV_STATUS
  _kgspCreateSignatureMemdesc
  (
-@@ -5672,6 +5747,13 @@ _kgspCreateSignatureMemdesc
+@@ -6353,6 +6419,13 @@
  {
      NV_STATUS status = NV_OK;
      NvU8 *pSignatureVa = NULL;
@@ -160,7 +156,7 @@ index 4da1151..92d2f8e 100644
      NvU64 flags = MEMDESC_FLAGS_NONE;
  
      if (confComputeForceUnprotAlloc(pGpu))
-@@ -5682,7 +5764,7 @@ _kgspCreateSignatureMemdesc
+@@ -6363,7 +6436,7 @@
      // NOTE: align to 256 because that's the alignment needed for Booter DMA
      NV_CHECK_OK_OR_RETURN(LEVEL_ERROR,
          memdescCreate(&pKernelGsp->pSignatureMemdesc, pGpu,
@@ -169,7 +165,7 @@ index 4da1151..92d2f8e 100644
              NV_TRUE, ADDR_SYSMEM, NV_MEMORY_CACHED, flags));
  
      memdescTagAlloc(status,
-@@ -5694,15 +5776,370 @@ _kgspCreateSignatureMemdesc
+@@ -6375,15 +6448,370 @@
          (pSignatureVa != NULL) ? NV_OK : NV_ERR_INSUFFICIENT_RESOURCES,
          fail_alloc);
  
@@ -542,7 +538,7 @@ index 4da1151..92d2f8e 100644
      memdescFree(pKernelGsp->pSignatureMemdesc);
  
  fail_create:
-@@ -5712,6 +6149,194 @@ fail_create:
+@@ -6393,6 +6821,194 @@
      return status;
  }
  
@@ -587,15 +583,15 @@ index 4da1151..92d2f8e 100644
 +    pSignatureVa = NULL;
 +    memdescFlushCpuCaches(pGpu, pKernelGsp->pSignatureMemdesc);
 +
-+    if (pKernelGsp->pWprMeta != NULL)
++    if (pKernelGsp->pWprMetaV1 != NULL)
 +    {
-+        pKernelGsp->pWprMeta->sysmemAddrOfSignature =
++        pKernelGsp->pWprMetaV1->sysmemAddrOfSignature =
 +            memdescGetPhysAddr(pKernelGsp->pSignatureMemdesc, AT_GPU, 0);
-+        pKernelGsp->pWprMeta->sizeOfSignature = stockAdvertisedSize;
++        pKernelGsp->pWprMetaV1->sizeOfSignature = stockAdvertisedSize;
 +    }
-+    if (pKernelGsp->pWprMetaDescriptor != NULL)
++    if (pKernelGsp->pWprMetaV1Descriptor != NULL)
 +    {
-+        memdescFlushCpuCaches(pGpu, pKernelGsp->pWprMetaDescriptor);
++        memdescFlushCpuCaches(pGpu, pKernelGsp->pWprMetaV1Descriptor);
 +    }
 +
 +    NV_PRINTF(LEVEL_ERROR,
@@ -626,7 +622,7 @@ index 4da1151..92d2f8e 100644
 +    if ((pOldMemdesc == NULL) ||
 +        (pKernelGsp->pStockSignatureData == NULL) ||
 +        (pKernelGsp->stockSignatureSize == 0) ||
-+        (pKernelGsp->pWprMeta == NULL))
++        (pKernelGsp->pWprMetaV1 == NULL))
 +    {
 +        return NV_ERR_INVALID_STATE;
 +    }
@@ -704,12 +700,12 @@ index 4da1151..92d2f8e 100644
 +    memdescFlushCpuCaches(pGpu, pNewMemdesc);
 +
 +    pKernelGsp->pSignatureMemdesc = pNewMemdesc;
-+    pKernelGsp->pWprMeta->sysmemAddrOfSignature =
++    pKernelGsp->pWprMetaV1->sysmemAddrOfSignature =
 +        memdescGetPhysAddr(pNewMemdesc, AT_GPU, 0);
-+    pKernelGsp->pWprMeta->sizeOfSignature = newSize;
-+    if (pKernelGsp->pWprMetaDescriptor != NULL)
++    pKernelGsp->pWprMetaV1->sizeOfSignature = newSize;
++    if (pKernelGsp->pWprMetaV1Descriptor != NULL)
 +    {
-+        memdescFlushCpuCaches(pGpu, pKernelGsp->pWprMetaDescriptor);
++        memdescFlushCpuCaches(pGpu, pKernelGsp->pWprMetaV1Descriptor);
 +    }
 +
 +    memdescFree(pOldMemdesc);
@@ -737,39 +733,7 @@ index 4da1151..92d2f8e 100644
  /*!
   * Verify that the version embedded in the .fwversion section of the ELF given
   * by pElfData and elfDataSize matches our NV_VERSION_STRING.
-@@ -6285,7 +6910,29 @@ kgspWaitForRmInitDone_IMPL
-     // Now check if RPC really succeeded (NV_VGPU_MSG_RESULT_* are defined to
-     // equivalent NV_STATUS codes in RM).
-     //
--    NV_ASSERT_OK_OR_RETURN(rpcGetVgpuMessageHeader(pRpc)->rpc_result);
-+    rpc_message_header_v *pCmp50RpcHeader = rpcGetVgpuMessageHeader(pRpc);
-+    if ((pCmp50RpcHeader->rpc_result == NV_ERR_TIMEOUT) &&
-+        (pGpu->idInfo.PCIDeviceID == CMP50_PC_CANARY_PCI_DEVICE_ID) &&
-+        CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(pGpu->idInfo.PCISubDeviceID))
-+    {
-+        /*
-+         * The signed-Booter native-continuation path has already produced a
-+         * valid INIT_DONE event and a running GSP RISC-V, but GSP reports its
-+         * own bounded initialization timeout.  Continue only for the exact
-+         * CMP 50HX identity so the caller can run the normal RM, RPC and
-+         * measured-compute health gates.
-+         */
-+        NV_PRINTF(LEVEL_ERROR,
-+                  "CMP50_COMPUTE_UNLOCK_V240: BOUNDED_INIT_TIMEOUT_CONTINUE "
-+                  "function=0x%x sequence=0x%x length=0x%x result=0x%x\n",
-+                  pCmp50RpcHeader->function, pCmp50RpcHeader->sequence,
-+                  pCmp50RpcHeader->length, pCmp50RpcHeader->rpc_result);
-+        pCmp50RpcHeader->rpc_result = NV_OK;
-+    }
-+    else
-+    {
-+        NV_ASSERT_OK_OR_RETURN(pCmp50RpcHeader->rpc_result);
-+    }
- 
-     pGpu->gspRmInitialized = NV_TRUE;
- 
 diff --git a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
-index 208d551..b2335f1 100644
 --- a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
 +++ b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
 @@ -24,11 +24,204 @@
@@ -977,7 +941,7 @@ index 208d551..b2335f1 100644
  
  static NV_STATUS
  s_executeBooterUcode_TU102
-@@ -88,6 +281,9 @@ kgspExecuteBooterLoad_TU102
+@@ -88,6 +281,9 @@
  {
      NV_STATUS status;
      NvU32 mailbox0 = 0, mailbox1 = 0;
@@ -987,7 +951,7 @@ index 208d551..b2335f1 100644
  
      KernelSec2 *pKernelSec2 = GPU_GET_KERNEL_SEC2(pGpu);
  
-@@ -106,14 +302,138 @@ kgspExecuteBooterLoad_TU102
+@@ -106,14 +302,138 @@
      NV_PRINTF(LEVEL_INFO, "executing Booter Load, sysmemAddrOfData 0x%llx\n",
                sysmemAddrOfData);
  
@@ -1127,7 +1091,6 @@ index 208d551..b2335f1 100644
          return status;
      }
 diff --git a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_falcon_tu102.c b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_falcon_tu102.c
-index 587b508..f7fbdc6 100644
 --- a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_falcon_tu102.c
 +++ b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_falcon_tu102.c
 @@ -39,6 +39,36 @@
@@ -1167,7 +1130,7 @@ index 587b508..f7fbdc6 100644
  /*!
   * Copy sizeBytes from pSrc to DMEM offset dmemDest using DMEM access port 0.
   *
-@@ -422,8 +452,23 @@ kgspExecuteHsFalcon_TU102
+@@ -424,8 +454,23 @@
      // Start CPU now
      kflcnStartCpu_HAL(pGpu, pKernelFlcn);
  
@@ -1194,7 +1157,6 @@ index 587b508..f7fbdc6 100644
      // Read mailboxes if requested
      if (pMailbox0 != NULL)
 diff --git a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
-index 0ee595f..48e8c82 100644
 --- a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
 +++ b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
 @@ -40,6 +40,279 @@
@@ -1477,7 +1439,7 @@ index 0ee595f..48e8c82 100644
  #include "published/turing/tu102/dev_gsp_addendum.h"
  #include "published/turing/tu102/dev_riscv_pri.h"
  #include "published/turing/tu102/dev_fbif_v4.h"
-@@ -306,6 +551,12 @@ kgspFreeBootArgs_TU102
+@@ -202,6 +475,12 @@
          memdescDestroy(pKernelGsp->pSignatureMemdesc);
          pKernelGsp->pSignatureMemdesc = NULL;
      }
@@ -1488,9 +1450,9 @@ index 0ee595f..48e8c82 100644
 +        pKernelGsp->stockSignatureSize = 0;
 +    }
  
-     // Release sysmem heap memory
-     if (pKernelGsp->pSysmemHeapDescriptor != NULL)
-@@ -496,6 +747,86 @@ _kgspGetBooterLoadArgs
+     //
+     // This should already have been freed after INIT_DONE, but maybe we errored
+@@ -366,6 +645,86 @@
      return 0;
  }
  
@@ -1515,8 +1477,8 @@ index 0ee595f..48e8c82 100644
 +    NvU64 freshPhys;
 +    NvU64 flags = MEMDESC_FLAGS_ALLOC_IN_UNPROTECTED_MEMORY;
 +
-+    if ((pKernelGsp->pWprMeta == NULL) ||
-+        (pKernelGsp->pWprMetaDescriptor == NULL))
++    if ((pKernelGsp->pWprMetaV1 == NULL) ||
++        (pKernelGsp->pWprMetaV1Descriptor == NULL))
 +    {
 +        return NV_ERR_INVALID_STATE;
 +    }
@@ -1533,8 +1495,8 @@ index 0ee595f..48e8c82 100644
 +        (pFreshVa != NULL) ? NV_OK : NV_ERR_INSUFFICIENT_RESOURCES,
 +        cleanup);
 +    portMemSet(pFreshVa, 0, 0x1000);
-+    portMemCopy(pFreshVa, 0x1000, pKernelGsp->pWprMeta,
-+                sizeof(*pKernelGsp->pWprMeta));
++    portMemCopy(pFreshVa, 0x1000, pKernelGsp->pWprMetaV1,
++                sizeof(*pKernelGsp->pWprMetaV1));
 +    memdescUnmapInternal(pGpu, pFreshMeta, 0);
 +    pFreshVa = NULL;
 +    memdescFlushCpuCaches(pGpu, pFreshMeta);
@@ -1544,8 +1506,8 @@ index 0ee595f..48e8c82 100644
 +              "CMP50_COMPUTE_UNLOCK_V140: fresh WPR metadata "
 +              "phys=0x%llx signature=0x%llx size=0x%llx\n",
 +              freshPhys,
-+              pKernelGsp->pWprMeta->sysmemAddrOfSignature,
-+              pKernelGsp->pWprMeta->sizeOfSignature);
++              pKernelGsp->pWprMetaV1->sysmemAddrOfSignature,
++              pKernelGsp->pWprMetaV1->sizeOfSignature);
 +
 +    bootStatus = kgspExecuteBooterLoad_HAL(pGpu, pKernelGsp, freshPhys);
 +
@@ -1553,12 +1515,12 @@ index 0ee595f..48e8c82 100644
 +    NV_CHECK_OK_OR_GOTO(status, LEVEL_ERROR,
 +        (pFreshVa != NULL) ? NV_OK : NV_ERR_INSUFFICIENT_RESOURCES,
 +        cleanup);
-+    portMemCopy(pKernelGsp->pWprMeta,
-+                sizeof(*pKernelGsp->pWprMeta),
-+                pFreshVa, sizeof(*pKernelGsp->pWprMeta));
++    portMemCopy(pKernelGsp->pWprMetaV1,
++                sizeof(*pKernelGsp->pWprMetaV1),
++                pFreshVa, sizeof(*pKernelGsp->pWprMetaV1));
 +    memdescUnmapInternal(pGpu, pFreshMeta, 0);
 +    pFreshVa = NULL;
-+    memdescFlushCpuCaches(pGpu, pKernelGsp->pWprMetaDescriptor);
++    memdescFlushCpuCaches(pGpu, pKernelGsp->pWprMetaV1Descriptor);
 +    status = bootStatus;
 +
 +cleanup:
@@ -1577,7 +1539,7 @@ index 0ee595f..48e8c82 100644
  /*!
   * Boot GSP-RM.
   *
-@@ -528,6 +859,408 @@ kgspBootstrap_TU102
+@@ -398,6 +757,408 @@
  {
      NV_STATUS status;
      KernelFalcon *pKernelFalcon = staticCast(pKernelGsp, KernelFalcon);
@@ -1821,11 +1783,11 @@ index 0ee595f..48e8c82 100644
 +        NV_PRINTF(LEVEL_ERROR,
 +                  "CMP50_COMPUTE_UNLOCK_V523: WPR_META_BEFORE_RESET "
 +                  "bootCount=0x%016llx verified=0x%016llx\n",
-+                  pKernelGsp->pWprMeta->bootCount,
-+                  pKernelGsp->pWprMeta->verified);
-+        pKernelGsp->pWprMeta->bootCount = 0;
-+        pKernelGsp->pWprMeta->verified = 0;
-+        memdescFlushCpuCaches(pGpu, pKernelGsp->pWprMetaDescriptor);
++                  pKernelGsp->pWprMetaV1->bootCount,
++                  pKernelGsp->pWprMetaV1->verified);
++        pKernelGsp->pWprMetaV1->bootCount = 0;
++        pKernelGsp->pWprMetaV1->verified = 0;
++        memdescFlushCpuCaches(pGpu, pKernelGsp->pWprMetaV1Descriptor);
 +        NV_PRINTF(LEVEL_ERROR,
 +                  "CMP50_COMPUTE_UNLOCK_V523: "
 +                  "WPR_META_INPUT_RESET_PASS bootCount=0 verified=0\n");
@@ -1986,7 +1948,7 @@ index 0ee595f..48e8c82 100644
  
      // Execute Scrubber if needed
      if (((bootMode == KGSP_BOOT_MODE_SR_RESUME) || (bootMode == KGSP_BOOT_MODE_NORMAL)) &&
-@@ -550,27 +1283,96 @@ kgspBootstrap_TU102
+@@ -420,27 +1181,96 @@
              NV_ASSERT_OK_OR_RETURN(kflcnReset_HAL(pGpu, pKernelFalcon));
  
              status = kgspExecuteFwsec_HAL(pGpu, pKernelGsp, pKernelGsp->pPreparedFwsecCmd);
@@ -2085,10 +2047,10 @@ index 0ee595f..48e8c82 100644
 +        s_cmp50ApplyGen2Policy(pGpu, "post-booter");
 +    }
 +
-     // Send init RPCs necessary for GSP-RM booting, before creating OBJGPU.
-     // Skips for suspend/resume as GSP saves/restores context
-     if (bootMode == KGSP_BOOT_MODE_NORMAL)
-@@ -615,6 +1417,23 @@ kgspBootstrap_TU102
+     // Program FALCON_OS
+     RM_RISCV_UCODE_DESC *pRiscvDesc = pKernelGsp->pGspRmBootUcodeDesc;
+     kflcnRegWrite_HAL(pGpu, pKernelFalcon, NV_PFALCON_FALCON_OS, pRiscvDesc->appVersion);
+@@ -479,6 +1309,23 @@
  
      NV_PRINTF(LEVEL_INFO, "GSP FW RM ready.\n");
  
@@ -2112,7 +2074,7 @@ index 0ee595f..48e8c82 100644
      return NV_OK;
  }
  
-@@ -715,6 +1534,18 @@ kgspGetGspRmBootUcodeStorage_TU102
+@@ -579,6 +1426,18 @@
  {
      const BINDATA_ARCHIVE *pBinArchive = kgspGetBinArchiveGspRmBoot_HAL(pKernelGsp);
  
@@ -2130,4 +2092,41 @@ index 0ee595f..48e8c82 100644
 +
      *ppBinStorageImage = (BINDATA_STORAGE *) bindataArchiveGetStorage(pBinArchive, BINDATA_LABEL_UCODE_IMAGE);
      *ppBinStorageDesc  = (BINDATA_STORAGE *) bindataArchiveGetStorage(pBinArchive, BINDATA_LABEL_UCODE_DESC);
+ }
+@@ -1306,8 +2165,34 @@
+ 
+     // WAR for Bug 5016200 - Always run scrubber from kernel RM for ADA config
+     if ((neededSize > prescrubbedSize) || kgspIsScrubberImageSupported(pGpu, pKernelGsp))
+-        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR,
+-            kgspAllocateScrubberUcodeImage(pGpu, pKernelGsp, &pKernelGsp->pScrubberUcode));
++    {
++        NV_STATUS scrubberStatus = kgspAllocateScrubberUcodeImage(
++            pGpu, pKernelGsp, &pKernelGsp->pScrubberUcode);
++        if (scrubberStatus != NV_OK)
++        {
++            if (s_isCmp50ComputeUnlock(pGpu))
++            {
++                NV_PRINTF(LEVEL_ERROR,
++                          "CMP50_STOCKFLOW_V551: SCRUBBER_ALLOC_FAIL "
++                          "status=0x%x needed=0x%llx prescrubbed=0x%llx "
++                          "supported=%u\n",
++                          scrubberStatus, neededSize, prescrubbedSize,
++                          kgspIsScrubberImageSupported(pGpu, pKernelGsp));
++                if ((scrubberStatus == NV_ERR_NOT_SUPPORTED) &&
++                    !kgspIsScrubberImageSupported(pGpu, pKernelGsp))
++                {
++                    pKernelGsp->pScrubberUcode = NULL;
++                    NV_PRINTF(LEVEL_ERROR,
++                              "CMP50_STOCKFLOW_V551: "
++                              "SCRUBBER_UNSUPPORTED_SKIP "
++                              "needed=0x%llx prescrubbed=0x%llx\n",
++                              neededSize, prescrubbedSize);
++                    return NV_OK;
++                }
++            }
++            return scrubberStatus;
++        }
++    }
+ 
+     return NV_OK;
  }

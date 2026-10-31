@@ -420,3 +420,48 @@ cold-boot-clears, matching our D3/power-off evidence; Zagitta module params
 confirmed gpu_unlock.targets=<bdf|all> + resume bool. Experiment-cycle plan
 = ticket 11 (W0 probe -> W1 scaffold -> W2 one-launch diagnostic with
 FEAT-first 2-write frame -> W3 full batch -> W4 closeout; #6 = contingency).
+
+## 615.78.08 port — what NVIDIA restructured under the unlock stack (2026-10-31)
+
+Porting the full three-profile series to 615.78.08 surfaced five upstream
+restructurings, each verified in the 615 tag tree and re-anchored
+zero-fuzz (all profiles compile: `PASS_CMP50HX_ALL_BUILD`):
+
+1. **GSP init handshake replaced.** `kgspWaitForRmInitDone` (rpcRecvPoll on
+   `GSP_INIT_DONE`, rpc_result in the message header) is gone; 615 does a
+   synchronous `gmcapiCommand(GMCAPI_CMD_GSP_INIT)` inside
+   `kgspSendInitRpcs_IMPL`. The V240 bounded-init-timeout intercept now
+   triggers on `status == NV_ERR_TIMEOUT` there. GSP_INIT_DONE survives only
+   as an enum in `rpc_global_enums.h`.
+2. **WPR meta members renamed**: `KernelGsp.pWprMeta/pWprMetaDescriptor` →
+   `pWprMetaV1/pWprMetaV1Descriptor` (type `GspFwWprMetaV1`, same 256-byte
+   firmware ABI — `sysmemAddrOfSignature/sizeOfSignature/bootCount/verified`
+   all kept). Mechanical rename applied across every added line.
+3. **Scrubber prep moved to HAL**: `_kgspPrepareScrubberImageIfNeeded`
+   (static, kernel_gsp.c) → `kgspPrepareScrubberImageIfNeeded_TU102`, which
+   the nvoc dispatch also assigns to GA102..AD107 — so one re-anchor covers
+   50HX, 90HX and the mixed fleet; the V551/REJOIN9 survival intercept is
+   preserved there (initial "drop as obsolete" read was wrong: the
+   Bug-5016200 alloc line is alive, only its file moved).
+4. **CMP-SKU flag behind an accessor**: `pChipInfo->isCmpSku` replaced by
+   `gpuGetIsCmpSku_FWCLIENT()` reading the decoded GSP static config; the
+   08-profiling override re-anchors inside that accessor (still clears
+   `NV2080_CTRL_GPU_INFO_INDEX_CMP_SKU` for the exact 50HX triple).
+5. **`nv_pci_probe` split** into `nv_pci_probe_body` (plus a contended-pool
+   variant); ReBAR/Gen2 straps land inside `_body` — same statements, renamed
+   function (context verified byte-identical).
+Also: 615's `_kgspBootGspRm` WPR2 already-up branch gained
+`kbifCheckResetStatus_HAL` (kept in the non-CMP branch of the merged gate),
+and `patches/common/01-nvidia-kernel-string-api.patch` is fully obsolete —
+every string-API site it fixed is stock-correct in 615 (see
+`patches/common/README.md`).
+
+Verification discipline that caught the near-misses: a function-enclosure
+audit of every added line (610-patched tree vs 615 tree) flagged two
+fuzz-misplacements that patch(1) reported as "success" — the 0014
+signature-cleanup hunk fuzz-landed into `kgspPrepareForBootstrap`, and the
+08-profiling hunk fuzz-landed into `gpuInitPhysicalRmApi` where
+`pChipInfo` is still NULL (would have NULL-dereferenced at first boot).
+Regenerated patches apply with `-F0` and **zero offsets**; each series is a
+chain of tree-diffs whose application exactly reproduces the hand-ported
+tree.
