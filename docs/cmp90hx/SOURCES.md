@@ -40,11 +40,21 @@ outcome. (Bash-greppable: one URL per bullet.)
 - https://github.com/bendy2/cmp90hx — V67 stockflow origin for CMP 90HX.
 - https://github.com/pearlfortune/cmpunlocker — production compute unlock;
   llm2 serving flow. Reflected: `patches/cmp90hx/0014/0015`, findings.md.
+  RF-window fetch (2026-10-31): release bundle
+  `…/releases/download/v0.1.28/cmpunlocker-v0.1.28-linux-x64-90hx-stockflow.tar.gz`,
+  sha256 `19c67cd0cb2df5ee10ea28c97ada756ada309553f2500129f973c3adf84f99c3`
+  (against published SHA256SUMS); v0.1.28 tag = commit `f60330c`.
 - https://github.com/jdowning100/cmpunlocker — rejoin16 Gen2 path +
   `90HX-GEN2-RESEARCH-NOTES.md` (vendored here as
   `docs/cmp90hx/rejoin16-RESEARCH-NOTES.md`) + `bench/rejoin16-apply-all.sh`.
   Tested 1:1 → 0/49 on llm2; see ticket 03, `upstream-issue-draft.md`
   (b1, ready to post).
+  RF-window clone (2026-10-31) at commit `2cdc63cf1ab8`: vendored `0016` patch
+  + `build-candidate-with-rejoin16.sh` byte-identical (md5 `3a9fff52`/`625e20a8`);
+  patches 0014/0015 absent from git — ship only in the release bundle above.
+- https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-610.43.03.tar.xz
+  — RF-window build input, sha256 `7e118923c7a23edc36114d63273a46e3e04e9af98695a42203e7ac2dfe9fc1dc`
+  (pinned by the author's build script; verified on llm2 before build).
 - https://github.com/Wh1stle05/cmp90hx — published 2×90HX landings (6.8.0-
   139). Vendored: `docs/cmp90hx/upstream/wh1stle05/` (see VENDORED-NOTE.md).
 - https://github.com/iatethelogs/cmp90hx_pwner — Habr part-3 tool. Vendored:
