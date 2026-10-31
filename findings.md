@@ -346,3 +346,29 @@ open; stock-first handoff; old-kernel boot (26.04 ships none).
 ## mini-cycle BEFORE the OS driver — exactly the WildFlash pre-OS EFI
 ## structure, now the primary path (#3); (3) handoff stock-first itself is
 ## proven reliable on this host — reusable for future patched-driver boots.
+
+## V67 chain capacity is SIX privileged writes per execution, not one
+(bendy2/WildFlash single-frame was the minimal form): Zagitta/gpu-unlock
+(HEAD 7eb51bcca, reviewed 2026-10-31 via KohakuBlueleaf/KohakUnlock) ships a
+GA102 payload using Petri Krohn's re-entrant frame layout — enter
+reg_write_indirect() at 0x1110 (address r0/value r1), each write consumes
+0x18 stack bytes and the epilogue pops carry the NEXT write's parameters, so
+one chain execution lands six (addr,value) pairs, batching longer tables into
+launches of six (recipes.c:5-53, unlock_610.c:1211-1310). Their device table
+already lists GA102(0x220d) = CMP 90HX with our exact FEAT offsets. Their
+12-write GA100 table descends from cmpunlocker 2d10f891 plmTable — i.e. this
+capability lived in jdowning's own lineage all along; rejoin16's one-write-
+per-load bench design was a choice, not a constraint. Consequences: (1) Gen2's
+two masks + PLM opens fit in ONE boot-style run #1 — the shape landing 2/2 on
+llm2 — so run #2 may simply be unnecessary (paths #5a/#5b); (2) their flow
+re-LAUNCHES the booter repeatedly after ONE healthy FWSEC (WPR2 host restore +
+full SEC2 reset/reload per launch, FWSEC not re-primed) on consumer GA102 at
+production scale, so the post-window-#10 "one crafted run per healthy FWSEC"
+model is NOT a GA102 law — the llm2 run-#2 refusal is in-driver-context-
+and/or card-specific; (3) their executor reads the FWSEC-FRTS image from the
+card's live PCI ROM export at runtime, dissolving path #3's blocked "need
+94.02.74.x fwsec/sec2 blobs" gate pending one read-only probe
+(sudo cat /sys/bus/pci/devices/0000:03:00.0/rom — caveat documented: some
+PROMs hide NVIDIA extension images beyond the standard chain). New primary
+path = port their pre-driver initramfs executor with a 90HX Gen2 write table
+(#5a) — pure-Linux, GPL-2.0, pinned 610.43.03 assets we already hold.

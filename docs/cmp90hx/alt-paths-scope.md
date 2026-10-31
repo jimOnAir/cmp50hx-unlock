@@ -73,6 +73,56 @@ it would also collapse #2's 10-minute boot-apply to seconds. **Gate:**
 cheaper paths first (#1→#2→#3); pursue if they all dead-end and Gen2 still
 matters on llm2-class hosts.
 
+## Update 2026-10-31 — **#4 UNBLOCKED; new primary path #5** (Zagitta/gpu-unlock)
+
+Found via KohakuBlueleaf/KohakUnlock → **Zagitta/gpu-unlock** (`7eb51bcca`,
+GPL-2.0; provenance + file refs in `upstream/zagitta-gpu-unlock/README.md`).
+File-verified facts that rewrite this doc's assumptions:
+
+- **#4's gate question is answered publicly.** The GA102 booter payload IS
+  multi-write: Petri Krohn's re-entrant frame layout enters
+  `reg_write_indirect()` at `0x1110`; one write per `0x18` stack frame; the
+  epilogue pops carry the NEXT write's params → **6 privileged writes per
+  single chain execution** (`recipes.c:5-53`), and their own GA100 table (12
+  writes) comes from *cmpunlocker `2d10f891` plmTable* — jdowning's lineage.
+  Our "no public evidence of a loop-back" premise (§#4) was wrong.
+- **New primary #5 — port their pre-driver module to a 90HX recipe.** Their
+  `gpu_unlock` initramfs module (FWSEC-FRTS → Booter on SEC2 via own falcon
+  code → write-table launches → FLR → unmodified driver binds) already lists
+  **`GA102(0x220d)` = CMP 90HX** (`recipes.c:419`), uses our exact constants
+  (`FEAT_PLM 0x823804`, `SS1 0x823820`), batches arbitrary write tables into
+  launches of six with WPR2/FRTS restore + HALT-evidence gating per launch
+  (`unlock_610.c:1211-1310`), reads the **FWSEC image from the card's live
+  ROM BAR** at runtime (`unlock_610.c:792-833`) — dissolving #3's blob gate —
+  and extracts the rest from public pinned 610.43.03 archives (we hold the
+  verified tarball). Their safety envelope matches our fail-closed policy
+  (refuses driver-bound cards; retains DMA on non-halting firmware).
+  - **#5a (carrier = their module, recommended):** add a Gen2 recipe
+    (`WPR_CFG_PLM/FEAT_PLM opens + 0x00823800 + 0x00088fe8`), initramfs hook,
+    `gpu_unlock.targets=0000:03:00.0` only; post-boot retrain via existing
+    cmp50hx-gen2/patch-0017 logic.
+  - **#5b (carrier = our patched driver):** graft the 6-write builder into
+    our run-#1 signature path (kernel_gsp.c builder currently emits the
+    single-frame bendy2 layout at `0xf948/0xf960/0xf9ec`) — lands both masks
+    in the boot-style execution that is 2/2 reliable on llm2 (window #10).
+- **Mechanism correction for the model:** their flow performs **multiple
+  Booter launches after ONE healthy FWSEC** (launch ≥2 = host WPR2 restore +
+  full SEC2 reset/reload, no FWSEC re-prime) on consumer GA102, in production,
+  100+ reports. So "the booter executes only the first crafted run following a
+  healthy FWSEC" (our post-window-#10 model) is NOT a GA102 law — llm2's
+  run-#2 refusal is specific to the in-driver context and/or this card.
+  Pre-driver is their proven shape → #5a first.
+- **#3 demoted to fallback** — but note it got cheaper too: with 6-write
+  launches, an EFI port needs only ONE chain execution for all Gen2 writes
+  (PLM opens + 2 masks = 4 writes ≤ 6), so per-pair FWSEC mini-cycles are
+  unnecessary there as well.
+- Open host-side questions (non-mutating or window-gated): (a) does the 90HX
+  ROM BAR export expose the FWSEC-FRTS image (`sudo cat .../rom` probe);
+  (b) first #5a window = one masked launch, readback-gated — run-#2-shaped
+  refusal there would be a NEW and very informative signal (in-driver-only
+  anomaly confirmed); (c) whether jdowning's 34/34 bench used single-write
+  frames deliberately (b1 draft gained Q8).
+
 ## #2 (recorded for when #1 lands) — solo full-apply + in-boot rebind recipe
 
 1. Boot solo (`90hx-solo` marker + ladder in `chain` mode, or scripted
