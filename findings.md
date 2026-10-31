@@ -465,3 +465,34 @@ signature-cleanup hunk fuzz-landed into `kgspPrepareForBootstrap`, and the
 Regenerated patches apply with `-F0` and **zero offsets**; each series is a
 chain of tree-diffs whose application exactly reproduces the hand-ported
 tree.
+
+## 615.78.08 is broken against Ubuntu kernel 7.0.0-42-generic — pristine,
+## not our patches (2026-10-31, found by the ticket-06 container lifecycle)
+
+The ubuntu:26.04 install-lifecycle container failed DKMS with
+`common/inc/nv-linux.h:1270: error: field 'cxlds' has incomplete type`.
+Isolation (same container, same headers, zero patches):
+
+| tree | kernel 7.0.0-42-generic (ubuntu:26.04) | 7.2.9-1-MANJARO (build host) |
+|---|---|---|
+| pristine 610.43.03 | **BUILD OK** (no `cxlds` field exists at all) | (fleet baseline) |
+| pristine 615.78.08 | **FAIL** — `struct cxl_dev_state` incomplete | BUILD OK |
+| 615 + full patch series | — | BUILD OK (all 3 profiles PASS) |
+
+Mechanism: Kbuild injects `-DNV_CXL_CXL_H_PRESENT` whenever
+`CONFIG_CXL_BUS=y` and `<cxl/cxl.h>` is includable; 615's `nv_cxl` struct
+then embeds `struct cxl_dev_state` **by value**. On Ubuntu's 7.0.0-42 that
+header path no longer provides the complete type (kernel-side CXL reorg),
+so the probe lies and the build dies. On Manjaro 7.2.9 `include/cxl/cxl.h`
+still defines the full struct — hence green here. No patch file in this
+repo touches `nv-linux.h`, `nv-pci.h`, `nv-imp.c`, or anything CXL (grep
+proof).
+
+Consequences: (1) the CI `linux-2604-install` gate is currently broken for
+615 by upstream, not by us — do not "fix" it by weakening the job;
+(2) the llm2 cutover is judged on the **llm2 kernel** (ticket 02 reports
+it; noble 6.8.x headers build 615 fine per the ubuntu:24.04 lifecycle),
+(3) after cutover, **kernel upgrades on llm2 must be DKMS-verified for
+615.78.08 BEFORE installing** (a 7.0.0-42-class Ubuntu kernel would strand
+DKMS on reboot) — this belongs in the cutover runbook + FAQ, and the apt
+pin already blocks the *other* drift vector (stock NVIDIA userspace).
