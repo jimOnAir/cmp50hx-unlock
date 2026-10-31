@@ -496,3 +496,19 @@ it; noble 6.8.x headers build 615 fine per the ubuntu:24.04 lifecycle),
 615.78.08 BEFORE installing** (a 7.0.0-42-class Ubuntu kernel would strand
 DKMS on reboot) — this belongs in the cutover runbook + FAQ, and the apt
 pin already blocks the *other* drift vector (stock NVIDIA userspace).
+
+## CORRECTION (same day): llm2's kernel was never unknown — it is
+## 7.0.0-38-generic, recorded 66× in the campaign captures (user called out
+## the "needs probe" hand-wave — correct). Re-tested everything against it:
+
+| test vs linux-headers-7.0.0-38-generic | result |
+|---|---|
+| pristine 615.78.08 `make modules` | **BUILD OK** (nvidia.ko produced) |
+| full deb lifecycle (`CMP_DEB_KREL=7.0.0-38-generic`) | **PASS** — DKMS builds patched both-profile, modinfo=615.78.08 under updates/dkms, 81× `CMP50_*` + 43× `CMP90_*` lineage strings in the built nvidia.ko, apt pin applied, remove clean |
+| pristine 615 vs 7.0.0-42-generic | FAIL (cxlds) — so the CXL break landed between Ubuntu -38 and -42 |
+
+Consequence: the cxlds gate is an **upgrade trap**, not a cutover blocker:
+llm2 boots fine on -38 forever; accepting `linux-image ≥7.0.0-42` after
+cutover would fail DKMS autorebuild and strand modules at next reboot.
+Runbook now says hold 7.0.0-42+ images/headers until NVIDIA fixes the
+conftest (or add a pre-upgrade `dkms build --force -k <new>` precheck).
