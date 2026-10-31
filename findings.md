@@ -619,3 +619,10 @@ transcripts, window transcripts). Durable lessons:
    and llm2 serving on `610.43.03-20261101.16` with the restored module's
    srcversion bit-identical to the pre-window serving module
    (`2EF347F7…A611C`).
+
+Postscript (same day): the lifecycle harness's own grub.cfg scan had used
+`\t` in `grep -E` (matches a literal backslash-t) — a vacuously-passing
+assertion caught only during close-out review, not by any run. Lesson:
+an assertion must FAIL when it matches nothing; both harness and window
+scans now count matches and hard-fail on zero, and the grub check was
+unit-proven positive+negative afterwards.

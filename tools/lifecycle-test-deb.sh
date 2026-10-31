@@ -277,10 +277,16 @@ phase_assert_removed() {
                 fail "grub-mkconfig fails after purge"
             fi
             local missing=0 path
-            while read -r path; do
+            local -a gpaths=()
+            # NB: no \t inside grep -E — it matches a literal backslash-t,
+            # which silently made an earlier version of this loop vacuous
+            # on real grub.cfg (caught in the 2026-11-02 close-out).
+            mapfile -t gpaths < <(grep -oE '^[[:space:]]+(linux|initrd)[[:space:]]+/boot/[^[:space:]]+' /boot/grub/grub.cfg | awk '{print $2}' | sort -u)
+            (( ${#gpaths[@]} > 0 )) || fail "grub path scan matched nothing — pattern bug, not a pass"
+            for path in "${gpaths[@]}"; do
                 [[ -f "${path}" ]] || { fail "grub.cfg references missing ${path}"; missing=1; }
-            done < <(grep -oE '^\t(linux|initrd)\s+/boot/[^ ]+' /boot/grub/grub.cfg | awk '{print $2}' | sort -u)
-            (( missing == 0 )) && ok "every linux/initrd path in grub.cfg exists"
+            done
+            (( missing == 0 )) && ok "every linux/initrd path in grub.cfg exists (${#gpaths[@]} unique)"
         else
             log "grub-mkconfig/grub.cfg absent (container): grub check vacuous here"
         fi
