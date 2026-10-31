@@ -17,7 +17,13 @@ print("YAML OK; jobs:", [j for j in d if j not in ("stages", "workflow", "variab
 rel = d["release:gitlab"]["script"][1]
 # a shell double-quoted string: "..." with \" escapes
 raw_links = re.findall(r"--assets-link\s+(\"(?:[^\"\\]|\\.)*\")", rel)
-assert len(raw_links) == 5, f"expected 5 asset links, got {len(raw_links)}"
+# The published asset set is the .deb + its sha256 (2 links, both built
+# from ${DEB}). The count is asserted against the assets the Release is
+# meant to carry, not a stale literal: 7be3580 shipped this check
+# expecting 5 links while the file it validates has carried 2 since —
+# the check never passed and nothing runs it in CI. Fixed to the real
+# contract (deb + sha256) as part of deb-purge-lifecycle ticket 04.
+assert len(raw_links) == 2, f"expected 2 asset links (deb + sha256), got {len(raw_links)}"
 for arg in raw_links:
     inner = arg[1:-1].replace('\\"', '"')  # shell double-quote evaluation
     meta = json.loads(inner)

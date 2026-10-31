@@ -139,10 +139,50 @@ jobs:
         run: cat /var/log/cmp50hx-unlock-install.log || true
 
   # -------------------------------------------------------------------
+  # Full lifecycle gate (deb-purge-lifecycle): install across TWO kernel
+  # header sets, purge residue audit (modules for every kernel, userland,
+  # firmware, conffiles, pin, /opt, /boot), reinstall, remove + double
+  # purge idempotency, and the offline self-containment attempt (skipped
+  # loudly where the runner sandbox forbids unshare -n; the docker-based
+  # local loop keeps the hard --network-none proof). Ubuntu 24.04 base —
+  # the fleet-host class; the 26.04 job above stays focused on 26.04
+  # DKMS + the apt-pin lifecycle.
+  # -------------------------------------------------------------------
+  linux-lifecycle:
+    needs: linux
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:24.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: cmp50hx-unlock-linux
+          path: dist
+
+      - name: Full install/purge/reinstall lifecycle contract
+        run: |
+          set -eux
+          apt-get update -qq
+          apt-get install -y --no-install-recommends dpkg-dev ca-certificates
+          apt-get install -y --no-install-recommends \
+              linux-headers-generic linux-headers-6.8.0-124-generic linux-image-generic
+          DEB="$(pwd)/$(ls dist/cmp50hx-unlock_*_amd64.deb)"
+          bash tools/lifecycle-test-deb.sh self --deb "${DEB}" | tee lifecycle.log
+          grep -q 'LIFECYCLE_LOOP_LEGS_FAILED=0' lifecycle.log
+
+      - name: Dump the postinst log on failure
+        if: failure()
+        run: cat /var/log/cmp50hx-unlock-install.log || true
+
+  # -------------------------------------------------------------------
   # Publish the release (tag pushes only)
   # -------------------------------------------------------------------
   release:
-    needs: [linux, linux-2604-install]
+    needs: [linux, linux-2604-install, linux-lifecycle]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
@@ -167,7 +207,8 @@ jobs:
             official .run), the patched open kernel modules as a DKMS tree
             (auto-rebuild on every kernel update), the UEFI ESP unlock, the
             cmp50hx-boot boot-flow service, the optional idle governor and cmp-tune.
-            Remove with `sudo apt remove cmp50hx-unlock` (uninstalls the driver).
+            Remove with `sudo apt purge cmp50hx-unlock` (uninstalls the
+            driver, leaves no module, firmware, or config behind).
 
             The package ships the UEFI compute unlock (FP32 31.7x / DP4A 28.4x
             over the locked stock driver, zero Xid; A/B matrix:

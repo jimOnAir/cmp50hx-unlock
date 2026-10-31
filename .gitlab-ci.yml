@@ -130,6 +130,34 @@ test:linux-2604-install:
     - cat /var/log/cmp50hx-unlock-install.log 2>/dev/null || true
 
 # -------------------------------------------------------------------
+# Full lifecycle gate (deb-purge-lifecycle): install across TWO kernel
+# header sets, purge residue audit, reinstall, remove + double purge
+# idempotency, offline self-containment attempt (skipped loudly where
+# the runner sandbox forbids unshare -n). ubuntu:24.04 base = the
+# fleet-host class; the 26.04 job above stays focused on 26.04 DKMS +
+# apt-pin lifecycle. Mirrors the GitHub linux-lifecycle job.
+# -------------------------------------------------------------------
+test:linux-lifecycle:
+  stage: package
+  image: ubuntu:24.04
+  needs: [package:linux]
+  timeout: 45m
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+  script:
+    - |
+      set -eux
+      apt-get update -qq
+      apt-get install -y --no-install-recommends dpkg-dev ca-certificates
+      apt-get install -y --no-install-recommends \
+          linux-headers-generic linux-headers-6.8.0-124-generic linux-image-generic
+      DEB="$(pwd)/$(ls cmp50hx-unlock_*_amd64.deb)"
+      bash tools/lifecycle-test-deb.sh self --deb "${DEB}" | tee lifecycle.log
+      grep -q 'LIFECYCLE_LOOP_LEGS_FAILED=0' lifecycle.log
+  after_script:
+    - cat /var/log/cmp50hx-unlock-install.log 2>/dev/null || true
+
+# -------------------------------------------------------------------
 # release: upload artifacts to the Generic Package Registry (permanent
 # URLs, independent of job artifact expiry) and create the Release
 # -------------------------------------------------------------------
@@ -138,7 +166,7 @@ release:gitlab:
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   rules:
     - if: $CI_COMMIT_TAG
-  needs: [package:linux, test:linux-2604-install]
+  needs: [package:linux, test:linux-2604-install, test:linux-lifecycle]
   script:
     - |
       set -eux
@@ -163,7 +191,8 @@ release:gitlab:
       official .run), the patched open kernel modules as a DKMS tree
       (auto-rebuild on every kernel update), the UEFI ESP unlock, the
       cmp50hx-boot boot-flow service, the optional idle governor and cmp-tune.
-      Remove with 'sudo apt remove cmp50hx-unlock' (uninstalls the driver).
+      Remove with 'sudo apt purge cmp50hx-unlock' (uninstalls the driver,
+      leaves no module, firmware, or config behind).
 
       The package ships the UEFI compute unlock (FP32 31.7x / DP4A 28.4x over
       the locked stock driver, zero Xid; A/B matrix:

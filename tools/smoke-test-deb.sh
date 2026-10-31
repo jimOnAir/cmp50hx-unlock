@@ -69,6 +69,35 @@ for link in cmp50hx cmp-tune rm-issue-rate; do
         || { printf 'bad /usr/bin/%s symlink target: %s\n' "${link}" "${target:-none}" >&2; exit 1; }
 done
 
+# --- purge lifecycle wiring (deb-purge-lifecycle fix batch, 2026-11-01) -----
+# The dynamic half is tools/lifecycle-test-deb.sh (full install/purge/
+# reinstall loop); the static half locks the maintainer-script wiring so a
+# future edit cannot silently drop a purge guarantee. Patterns use grep -F
+# on here-strings — never a pipe into grep -q (SIGPIPE + pipefail = 141).
+for spec in \
+        "prerm:CMP_ESP_SKIP:removal must honour the ESP skip convention" \
+        "prerm:initrd-kernels:prerm must record the kernels needing an initramfs rebuild" \
+        "postrm:initrd-kernels:postrm must rebuild every recorded kernel's initramfs" \
+        "postrm:cmp50-bak:postrm purge must remove the initrd rollback backups" \
+        "postrm:firmware-copies.txt:postrm must clean the fallback firmware copies" \
+        "postrm:install_dir}/logs:postrm must remove the untracked logs dir" \
+        "postinst:firmware-copies.txt:postinst must record fallback firmware copies" \
+        "postinst:nvidia-peermem:postinst must verify all five modules per kernel" \
+        "postinst:nvidia-uvm:postinst must verify all five modules per kernel"; do
+    script="${spec%%:*}"; rest="${spec#*:}"; pattern="${rest%%:*}"; why="${rest#*:}"
+    body="$(dpkg-deb --ctrl-tarfile "${deb}" | tar -xO "./${script}")"
+    grep -qF -- "${pattern}" <<<"${body}" \
+        || { printf '%s missing wiring (%s): %s\n' "${script}" "${pattern}" "${why}" >&2; exit 1; }
+done
+
+# install-linux.sh --remove must be ownership-scoped: a wholesale rm -rf of
+# the ESP EFI directory would delete other unlockers' files (gap 2)
+efi_body="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./opt/cmp50hx-unlock/efi/install-linux.sh)"
+! grep -qF 'rm -rf "$ESP_MNT/$EFI_DIR"' <<<"${efi_body}" \
+    || { printf 'install-linux.sh still wipes the whole ESP EFI directory\n' >&2; exit 1; }
+grep -qF 'files this deployer did not place' <<<"${efi_body}" \
+    || { printf 'install-linux.sh --remove is not ownership-scoped\n' >&2; exit 1; }
+
 # --- apt pin protection wiring --------------------------------------------------
 # The deb blocks stock NVIDIA driver packages from moving over the unlock via
 # /etc/apt/preferences.d/cmp50hx-unlock (deb/apt-pins.sh documents the
