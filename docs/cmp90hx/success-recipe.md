@@ -54,6 +54,9 @@ One row per `landed=true` line in `success.jsonl`:
 | 8–12 | 2026-10-31T12:04:22Z | `cdee788d` | W3c | ladder cycle 1 (`0:6`) | `0x823804`, `0x88fe8`, `0x88fec`, `0x88ff0`, `0x88ff4` | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — same set as rows 3–7: cycle-1 landing reproduced **identically** on independent boot (ladder determinism) |
 | 13–17 | 2026-10-31T12:42:48Z | `50c2df42` | W3d | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — third identical reproduction; W3d added certified C-side pacing (`CWAIT-PROBE delta=2s [up=4s]`) |
 | 18–22 | 2026-10-31T12:56:03Z | `c211e3a9` | W3e | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — fourth identical reproduction; gate finding: `en_rc=0` (MEM enable proven; chip reading later exposed as accessor artifact, §3) |
+| 23–27 | 2026-10-31T13:21:53Z | `38a6664d` | W3f | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — fifth identical reproduction; window finding: BARs survive FLR, pread accessor exposed (§3) |
+| 28–32 | 2026-10-31T13:31:04Z | `f60bf796` | W3g | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — sixth identical reproduction; window finding: healthy device still refuses re-claim (§3 law) |
+| 33–37 | 2026-10-31T14:05:23Z | `41ebb379` | W3h | user-ladder cycle 1 (`0:6`, jdowning-shape reload interleave) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — seventh identical reproduction; window finding: full driver init between loads STILL refuses re-claim (§3 law final); both 50HXes paid the warm-reload GSP cost (§3 known-bad), power-cycle pending |
 
 Supporting (write verified in-boot, `landed=false` per §0 — re-locked at
 production init **by design**, documented upstream behavior, kept for
@@ -79,6 +82,17 @@ lead, later corrected in §3: the chip value was an accessor artifact),
 `evidence/w3e-success.jsonl` + `evidence/w3e-journal-c211e3a9.txt` +
 `evidence/w3e-mono-c211e3a9.txt`
 (W3e: `en_rc=0` — MEM enable itself works; read path still blind).
+`evidence/w3f-success.jsonl` + `evidence/w3f-journal-38a6664d.txt` +
+`evidence/w3f-mono-38a6664d.txt`
+(W3f: BARs bit-exact post-FLR; honest accessor prints `err` — pread
+masked-failure discovery), `evidence/w3g-success.jsonl` +
+`evidence/w3g-journal-f60bf796.txt` + `evidence/w3g-mono-f60bf796.txt`
+(W3g: mmap accessor truth — healthy from t0, re-claim still `-114`),
+`evidence/w3h-success.jsonl` + `evidence/w3h-journal-41ebb379.txt` +
+`evidence/w3h-mono-41ebb379.txt`
+(W3h: jdowning-shape full driver-reload interleave — re-claim STILL
+refused; #5a and #6 both closed by measurement; warm-reload GSP cost
+documented).
 
 ## 3. Exact procedure
 
@@ -96,20 +110,39 @@ timings from the success journal (whole claim ~1 s, 10:39:07→:08).
    `ga10x_plm` opener), and FEAT must precede `0x823800` (PLM law). 3
    entries ≤ 6-slot DMA frame ⇒ **exactly one launch**.
    *Measured law (final form; W3a `6b8b83b1`, W3b `18d94504`, W3g
-   `f60bf796`):* **the V67 chain fires once per FLR-separated load, and a
-   re-claim only succeeds if a full driver initialization ran between
-   loads.** A second SEC2 launch inside one load times out
-   (`completion error=-110`, `fhstate=0xfff8 csberr=0x400000`); a re-claim
-   without driver-init is refused (`gfw error=-114`) **even when the
-   device is chip-id-healthy from t0 with bit-exact BARs and live config
-   space** (W3g: `ready after 5s chip_seq[t0=0xb72000a1]` yet `ret=-114`,
-   twice, two-strike stop). Gating on CPU-visible readiness (chip-id poll,
-   MEM re-enable, BAR replay) is *insufficient by physics* — the
-   GFW/FWSEC chain needs the driver's boot handshake to re-arm. Ladders
-   therefore need one claim-load per ≤4 targets (+2 auto-reopened openers,
-   port patch 0003 `gu_window`) with a **driver unbind/re-bind cycle
-   between loads** (jdowning's inter-cycle shape) — the initramfs
-   reload-ladder (#5a) is closed by the W3g measurement.
+   `f60bf796`, W3h `41ebb379`):* **the standalone-ko V67 chain fires
+   exactly once per boot on this host — the first claim after firmware
+   init.** A second SEC2 launch inside one load times out
+   (`completion error=-110`, `fhstate=0xfff8 csberr=0x400000`). Re-claim in
+   a later load is refused (`gfw error=-114`) **no matter what happens
+   between the loads**: pure waiting with a chip-id-healthy device
+   (W3g: `ready after 5s chip_seq[t0=0xb72000a1]` yet `ret=-114` ×2) AND a
+   full nvidia stack load + serialized GSP-RM init + unload + verified
+   SS0/SS1 re-lock (W3h: `device ready after 6s/11s chip=0xb72000a1
+   relock=verified` yet `ret=-114` ×2). The W3g-era inference "driver
+   boot handshake re-arms the GFW" is hereby MEASURED FALSE for the
+   standalone ko. jdowning's 34/34 bench reloads ride a different
+   mechanism: the payload is consumed by FWSEC **inside the patched
+   driver's own canary path on each load** (spec file
+   `/var/lib/cmpunlocker-rs/rejoin16-next-write.bin`), not by a
+   standalone-ko launch — and llm2's own windows v2–v5 census had already
+   found reloads never produce crafted-healthy here (one success only
+   early in a fresh boot, which is exactly cycle-1's behavior). Multi-
+   target on llm2 therefore requires the driver-embedded one-crafted-write-
+   per-boot ladder lineage (`90hx-boot-ladder.service`), not ko reloads.
+   Ladders of any kind therefore get one claim-load per ≤4 targets
+   (+2 auto-reopened openers, port patch 0003 `gu_window`); the
+   initramfs reload-ladder (#5a) AND its userspace driver-interleave
+   variant (#6/W3h) are both closed by measurement.
+
+   *Known-bad (W3h cost, honest ledger):* warm-reloading the nvidia stack
+   while the driver's **serialized** `nv_start_device` init is still in
+   flight for other GPUs orphans their GSP boots — both CMP 50HXes then
+   failed `RmInitAdapter: Cannot initialize GSP firmware RM`
+   (`0x62:0x40:2119`, ×16 each) for the whole boot, recoverable only by
+   cold reset. Any future reload-based procedure on this host MUST gate
+   on **all three GPUs enumerated** before unloading, and treat this
+   class as a capacity-costly operation.
    *Instrument caveat (W3d→W3g, resolved):* a pre-claim chip-id poll via
    the module-style path is **structurally blind** twice over — (a) FLR
    clears `COMMAND.MEM` (bit 1 of config 0x4), so decode must be
