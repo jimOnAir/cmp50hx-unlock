@@ -528,7 +528,18 @@ loads, srcversion matches, zero Xid. The entire patched kernel flow runs
 correctly up to and including the Booter hand-off (armed state correct:
 RESET=0xff, PRE_RESET_SKIPPED_HALTED_PASS, bounded halt status=0x0).
 
-**Where 615 dies:** the 615.78.08 signed Booters (TU102 **and** GA10x) reject
+**Where 615 dies (root cause CORRECTED the same evening — see
+`research-11-booter-analysis.md`):** the Booter ucode is **byte-identical**
+610↔615 (bindata sha `8765694cd38b…` both) — all gadget/DMEM/token constants
+are still valid. The real delta: 615's LibOS image + signed LS manifest
+declare `signature+0x880 = 0x441` (610 stock: `0x401`; gr10x layout differs,
+irrelevant) while our frame still writes the 580-era `0x344`. 610's booter
+tolerated the stale declaration; 615's verification path answers `0x1c`.
+Fix = per-BDF LS-metadata experiment (ticket 11 re-scoped: two dwords, one
+owner boot session), NOT a booter re-bench. Original (partly wrong) reading
+below kept for the record.
+
+Original pass: the 615.78.08 signed Booters (TU102 **and** GA10x) reject
 the V244-era exploit signature inside NVIDIA's own verifier:
 `s_executeBooterUcode_TU102: Booter failed with non-zero error code: 0x1c` →
 `SIGNED_EXACT_STATE_MISMATCH tracepc=0x00001b38 SS0=0 SS1=0` — deterministic,
