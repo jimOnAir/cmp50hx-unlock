@@ -124,3 +124,61 @@ onward to jdowning100/pearlfortune (90HX/GA102 ports).
 Ordering to discuss with user: W-a has standalone payoff (P2P at 3 GB/s even
 at Gen1); W-b/W-c are cheap discriminators riding existing windows; #5a
 (Zagitta port) stays primary for the Gen2 wall itself.
+
+## 7. Corpus-day findings (repo clones, 2026-10-31) — jdowning's TWO Gen2 generations
+
+`work/upstream/` analysis (cloned via `tools/clone-upstream.sh`; manifest
+`docs/cmp90hx/upstream/CLONES.md`) surfaced `jdowning100-cmpunlocker@2cdc63cf`:
+
+- **`driver/patches/pcie-gen2.patch` (310 lines, still in `build.sh`
+  PATCH_ORDER)** — a *legacy-generation* design: inside `kgspBootstrap` it
+  loops a **26-entry table** (XVE 3, XP3G_PLM 4, OPTB 10, FEAT_OVR_ECC_PLM
+  0x823800, OPT_GEN23 clear, XP3G OVR/VAL 0/3) doing per entry:
+  WPR2 restore via CPU (`0x1fa824/828`) →
+  `kgspSec2PostblTimingRefillPayload(addr,value)` →
+  `kgspExecuteBooterLoad_HAL` → readback, ×2 attempts, SOFT-FAIL (logs
+  `xp3g booter FAILED to set …` and continues). Then CPU writes for the
+  speed path + VSEC_DEVICE/PRIV_MISC_1 via booter launches + LTSSM poke.
+- **`bench/90HX-GEN2-RESEARCH-NOTES.md` (identical to our vendored copy)
+  states the wall as the author's own GA102 measurement**: "the chain
+  re-fires **only once per FLR-separated module load** (first Booter
+  execution after FWSEC/FRTS)". His shipped answer = rejoin16 ladder:
+  **run #1 of each load carries ONE arbitrary (addr,value) from
+  `/var/lib/cmpunlocker-rs/rejoin16-next-write.bin`**;
+  `systemd/cmp90hx-gen2.service` auto-cycles (write → reboot → next),
+  34 loads total; masks-open then speed path written **from kernel context
+  at two points** (post-Booter late-boot + first device open), then GPU +
+  bridge TLS + bridge Retrain toggle. Userspace speed writes warned as
+  "coin flip on wedging" (GSP-RM race) — matches our window #9 inert-CPU
+  + DPC-family precedents.
+- Consequences for llm2:
+  1. **No llm2-vs-jdowning contradiction on run #2** — his design never
+     uses it; our 0/49 reproduces his own measurement. (b1 Q9 must ask the
+     *sharper* discriminator instead: on his bench, do entries 2..26 of
+     pcie-gen2.patch ever land, or do they log FAILED?)
+  2. **Never tested on llm2: author's pure flow** = one mask per LOAD as
+     run #1 via next-write.bin spec, self-cycling over N reboots. Every
+     llm2 mask attempt we made was run-#2-shaped. Given run #1 lands 2/2
+     here, his ladder's per-boot run #1 should land too — brute force
+     (34 boots) unless combined with 6-write frames (→ ~6 boots; or with
+     #5a pre-driver batching).
+  3. **Mask set is 34 registers** (XVE×6, XP3G×17, OPTB×10, FEAT_OVR×1;
+     "minimal subset unknown") — our "2 masks" model was the headline pair
+     (0x823800+0x88fe8), not the proven set.
+  4. Full GA102 Gen2 register map now on file: **CYA_0 0x8c2c0 bit2 =
+     DIS_G2** (CPU-writable post-open), LINK_CONFIG_0 0x8c040 MAX_RATE
+     (0x2<<18), PL_LINK_RATE 0x8c1c0=0x240036, LTSSM override 0x8872c=6,
+     OPT_MAGIC 0x820520, VSEC_DEVICE 0x8860c bit0 (booter-written),
+     PRIV_MISC_1 0x8841c bits(11|13)~(12|14), XVE_OVR@0x8872c.
+  5. **§3 correction re: registry landmine**: our Aug-2026 finding
+     "RegistryDwords break stockflow GSP boot (mailbox1=0x6)" was on the
+     pearlfortune-stockflow carrier; jdowning's own `install.sh:229`
+     SHIPS `RmForceEnableGen2=1;RMPcieLinkSpeed=0x1` with his patched tree
+     (+booter-verify, +persistent-sw-state…) — unknown whether his tree
+     fixes the landmine. W-c stays open only on HIS carrier, not stockflow.
+- Path addition: **#6 = run the author's shipped flow on llm2** (build via
+  `90hx/build-candidate-with-rejoin16.sh` or full `install.sh`, systemd
+  self-cycle, one unattended overnight window; fail-closed with our
+  LnkSta+WPR2 checks between boots). #5a remains primary (6 boots/1 load vs
+  34), #6 is the maximally-faithful fallback and the b1-thread empirical
+  bridge.
