@@ -53,7 +53,7 @@ One row per `landed=true` line in `success.jsonl`:
 | 7 | 2026-10-31T11:49:46Z | `18d94504` | W3b | same launch | `0x00088ff4` | `0xffffffff` | `0xffffffff` | second independent confirmation of row 3 |
 | 8–12 | 2026-10-31T12:04:22Z | `cdee788d` | W3c | ladder cycle 1 (`0:6`) | `0x823804`, `0x88fe8`, `0x88fec`, `0x88ff0`, `0x88ff4` | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — same set as rows 3–7: cycle-1 landing reproduced **identically** on independent boot (ladder determinism) |
 | 13–17 | 2026-10-31T12:42:48Z | `50c2df42` | W3d | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — third identical reproduction; W3d added certified C-side pacing (`CWAIT-PROBE delta=2s [up=4s]`) |
-| 18–22 | 2026-10-31T12:56:03Z | `c211e3a9` | W3e | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — fourth identical reproduction; gate finding: `en_rc=0` yet chip `0x00000000` (H2 refuted, see §3) |
+| 18–22 | 2026-10-31T12:56:03Z | `c211e3a9` | W3e | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — fourth identical reproduction; gate finding: `en_rc=0` (MEM enable proven; chip reading later exposed as accessor artifact, §3) |
 
 Supporting (write verified in-boot, `landed=false` per §0 — re-locked at
 production init **by design**, documented upstream behavior, kept for
@@ -74,11 +74,11 @@ measurement), `evidence/w3c-success.jsonl` + `evidence/w3c-journal-cdee788d.txt`
 (W3c: cycle-1 reproduction; poll-loop pacing bug exposed via
 short-monotonic stamps), `evidence/w3d-success.jsonl` +
 `evidence/w3d-journal-50c2df42.txt` + `evidence/w3d-mono-50c2df42.txt`
-(W3d: certified 45 s wait + `chip=0x00000000 cfg_vendor=0x220d10de` —
-the FLR-clears-MEM instrument finding), `evidence/w3e-success.jsonl` +
-`evidence/w3e-journal-c211e3a9.txt` + `evidence/w3e-mono-c211e3a9.txt`
-(W3e: `en_rc=0` + chip still 0 — decode artifact refuted, death-timeline
-story in §3).
+(W3d: certified 45 s wait + `chip=… cfg_vendor=0x220d10de` — MEM-decode
+lead, later corrected in §3: the chip value was an accessor artifact),
+`evidence/w3e-success.jsonl` + `evidence/w3e-journal-c211e3a9.txt` +
+`evidence/w3e-mono-c211e3a9.txt`
+(W3e: `en_rc=0` — MEM enable itself works; read path still blind).
 
 ## 3. Exact procedure
 
@@ -110,18 +110,21 @@ timings from the success journal (whole claim ~1 s, 10:39:07→:08).
    (`vendor/device = 0x10de:0x220d`); the module's own `pci_enable_device`
    is why in-claim reads show the real sentinel `0xbadf5620` instead.
    Any readiness gate must re-enable MEM decode first (`ss-relock en`:
-   config dword 0x4 |= 0x2, computed in-binary) or the wait certifies
-   nothing — and MEM alone is NOT sufficient: W3e boot `c211e3a9` set it
-   (`en_rc=0`) and chip-id still read `0x00000000` for 45 s. **Death
-   timeline (measured across `18d94504`/`c211e3a9` + ko's own
-   `stage=flr` lines): chip `0xb72000a1` alive at +0.1 s after the raw
-   `pcie_flr()`, `0xbadf5620` poison at +1 s, `0x00000000` at +45 s** —
-   the function dies progressively after FLR (GSP-ROM boot needs host
-   firmware-load participation; nobody provides it between loads).
-   Whether waiting alone (no driver init) restores re-fire
-   capability remains OPEN — W3d/W3e neither prove nor refute it;
-   W3f (BAR pre-capture + pinned replay + change-transcript polling)
-   discriminates fabric-death from FLR-cleared-BARs.
+   config dword 0x4 |= 0x2, computed in-binary) — MEM did demonstrably set
+   in W3e (`en_rc=0`) yet reads still failed; **and the accessor must be
+   the mmap one**: on kernel 7.0.0-38 sysfs `pread` of `resource0` returns
+   EIO even on a healthy bound card (maskread's 16 MiB `mmap` succeeds;
+   W3f boot `38a6664d` proved the ladder's `chip=0x00000000` values were
+   wait-rd printing its zero-init after failed preads — masked failures,
+   not device zeros). **Trustworthy device datapoints, both in-kernel
+   iomap: `chip=0xb72000a1` alive ~100 ms after `pcie_flr()`
+   (`stage=flr`, every launch) and `0xbadf5620` poison at the +1 s W3b
+   re-claim. The window between is unobserved** (H1 fabric-death vs
+   later recovery OPEN). FLR additionally clears COMMAND.MEM but does NOT
+   clear device-side BARs (W3f: `BAR0=0xf9000000` bit-exact after FLR).
+   W3g: mmap-based `ss-relock` v4 with stage-named failures
+   (`ERR_OPEN`/`ERR_MMAP`, never a fabricated value) re-runs the same
+   gated poll to get the real timeline.
 2. **Stage** on target: ko → `/root/zagitta-port/gpu_unlock_diag.ko`; the 4
    ga102-suffix assets (§1) under `/root/.cache/gpu-unlock/assets/610.43.03/`.
 3. **Arm** (`l2-w2.sh arm`, deployed `/root/l2-w2/`): install initramfs
