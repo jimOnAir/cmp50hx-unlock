@@ -157,6 +157,9 @@ answer is to be recorded on that ticket.
 
 ## Sources
 
+Canonical full link ledger: `docs/cmp90hx/SOURCES.md` (all user-provided +
+discovered URLs, with reflection pointers). Subset relevant to this page:
+
 - lixiangwuxian/170hx_tips — `Gen3_unlock_en.md` (GA100 guide, device `2082`).
 - jdowning100/cmpunlocker — `90hx/0016-6104303-cmp90hx-stockflow-rejoin16-pcie-jtag-plm.patch`, `90HX-GEN2-RESEARCH-NOTES.md`, `bench/rejoin16-apply-all.sh` (proven 36-row apply table incl. warm fast-path), `systemd/cmp90hx-gen2.service`.
 - pearlfortune/cmpunlocker v0.1.28 — compute unlock / stockflow base (MIT); lineage bendy2/cmp90hx V67.
