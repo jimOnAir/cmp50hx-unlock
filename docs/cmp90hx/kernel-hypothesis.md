@@ -107,3 +107,32 @@ with the source sweep above: no kernel test needed for the mechanism verdict;
 window #11 (6.12.95 discriminator) stays OPTIONAL and is now only useful to
 characterize llm2's card-specific behavior — the #5a pre-driver port
 supersedes it as the next action.
+
+## Addendum 2026-10-31 (post-WD) — under "identical cards", campaign-flow
+preemption is the remaining hypothesis and is NOT excluded
+
+Assuming llm2's card equals the bench cards, the gap has two addresses.
+**E1:** every standalone-ko reload attempt (#5a initramfs, #6/W3h userspace
+interleave) used a vehicle jdowning never uses — his writes ride the patched
+driver's own firmware-init canary-success branch, i.e., each is a fresh
+first-fire-per-firmware-init (consistent with the measured once-per-boot law;
+147-polls real fires vs llm2's polls=1000 refusals corroborate). **E2:** the
+only his-shape attempts (windows #6–#9 driver-embedded spec) all ran the
+CAMPAIGN build lineage on the 90HX — stockflow rejoin14/15 retry logic,
+REJOIN9 early-handoff poll, rejoin18 flags=0x07 (production now 0x29); solo
+window #8 stubbed the 50HXes but never removed the campaign flow from the
+90HX, so "fleet theory dead" ruled out GPU interference, not campaign-flow
+preemption of the canary-success context. Testable without upstream (route E,
+decision package §5c): his flow discipline on this host — card workload-free,
+stockflow suppressed, HALT cleared, one spec target; LANDED ⇒ flow root cause
+and the 34-cycle route reopens; polls=1000 ⇒ identical-card assumption
+falsified and per-card protection state stands experimentally. Note the two
+claim-conflicts this assumption dissolves anyway: his warm-preservation was a
+fully-unlocked card POSTing at Gen2 (our reset measurements were 5-mask
+regime), and his TLS method is kernel-context-after-all-masks (WD's
+config-space drop does not contradict it — different vehicle, untested state).
+One more mechanical note: his bench consumes artifacts keyed
+`610.43.03-$(uname -r)-rejoin16-pcie-jtag-plm` — per-kernel builds; none exist
+for 7.0.0-38, so his flow cannot run as-shipped on llm2 without a build pass
+(window #11 on 6.12.95, where a matching build is possible, remains the
+alternative discriminator).
