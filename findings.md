@@ -576,3 +576,46 @@ cron) never executed against the host — they are absent from journal,
 filesystem, and crontab. Evidence-chain rule now explicit: a claim is
 recorded only with a host-corroborated artifact (boot id in journal, file
 on disk with mtime, command output re-derivable from state).
+
+## 2026-11-02 — deb purge lifecycle: what a purge really leaves (rev 15), and the rev-16 contract, hardware-proven on llm2
+
+Full evidence: `.scratch/deb-purge-lifecycle/` (spec, VERDICT.md, loop
+transcripts, window transcripts). Durable lessons:
+
+1. **Purge residue on the as-installed rev-15 bits** (identical in the
+   container baseline and on llm2): `/opt/cmp50hx-unlock/logs` (created by
+   postinst outside the dpkg manifest) and `/boot/initrd.img-*.cmp50-bak-*`
+   rollback backups survive; `apt remove`/`purge` otherwise fully removes
+   DKMS state, module files for EVERY kernel, userland, GSP firmware,
+   conffiles and the pin file. Fixed in rev 16 (`deb/postrm`).
+2. **DKMS restore semantics surprise on a campaign host**: `dkms remove`
+   restored llm2's pre-package `updates/cmpunlocker/*.ko` originals (the
+   "Original modules exist" flag predated the window), so after purge
+   `modinfo nvidia` resolves a full-speed campaign module — correct DKMS
+   behavior, but "no nvidia under updates/" as a purge criterion only holds
+   on hosts without pre-existing replacements. Classify residue against the
+   pre-window snapshot, not against an absolute.
+3. **Header purge ≠ DKMS prune**: purging `linux-headers-X` does NOT remove
+   the `cmp50hx` build for X; a `dkms remove -m cmp50hx -v <ver> -k X` is
+   required after dropping a header set (runbook note; the window did it).
+4. **`install-linux.sh` NEWID parse is fragile**: with firmware reusing a
+   freed boot-entry id, the created-entry parse grabbed `0000` (Ubuntu) and
+   armed `BootNext` to Ubuntu instead of the unlock entry — one-shot and
+   self-clearing, and BootOrder ended byte-identical to the snapshot, but
+   the "placed first" success line was misleading. Follow-up candidate.
+5. **`verify/verify.py` is 50HX-scoped**: it hard-gates `len(v2)==8` (the
+   TU102 issue-rate table); the GA102/90HX table has 9 entries, so a fully
+   unlocked 90HX FAILs the tool (all raws zero = full speed). Do not use it
+   as a 90HX gate; a GA102-aware check belongs to the 90HX campaign tooling.
+6. **EFI payload drift caught by sha discipline**: the dev-tree
+   `50HXUNLK.EFI` had silently changed during the lsvar work
+   (`48bdb301…`); the rev-16 fleet payload is extracted from rev 15 itself
+   (`a8e3d795…`) and byte-verified — rebuild-from-repo-tree is not a
+   substitute for shipping the proven binary.
+7. **Lifecycle contract is now gated**: `tools/lifecycle-test-deb.sh`
+   (install×2 kernels → purge audit → reinstall → remove → double purge →
+   offline) + smoke-test wiring assertions + `test:linux-lifecycle` job in
+   both pipelines; rev 16 green (`LIFECYCLE_LOOP_LEGS_FAILED=0`, 19 legs)
+   and llm2 serving on `610.43.03-20261101.16` with the restored module's
+   srcversion bit-identical to the pre-window serving module
+   (`2EF347F7…A611C`).
