@@ -59,6 +59,21 @@ for candidate in "${run_candidates[@]}"; do
     break
 done
 
+# --- remember which kernels booted with our modules -------------------------
+# postrm must rebuild EVERY such kernel's initramfs after the .ko files are
+# gone — rebuilding only the running kernel leaves a stale patched module
+# baked into another kernel's image. prerm runs while the files still exist;
+# the list goes to /run, which survives dpkg's file removal between prerm
+# and postrm (deb-purge-lifecycle gap 3).
+initrd_list="/run/cmp50hx-unlock.initrd-kernels"
+: > "${initrd_list}" 2>/dev/null || true
+shopt -s nullglob
+for ko in /lib/modules/*/updates/dkms/nvidia.ko /lib/modules/*/updates/dkms/nvidia.ko.*; do
+    printf '%s\n' "${ko#/lib/modules/}" | cut -d/ -f1 >> "${initrd_list}" 2>/dev/null || true
+done
+shopt -u nullglob
+[[ -s "${initrd_list}" ]] && sort -u "${initrd_list}" -o "${initrd_list}" 2>/dev/null || true
+
 # --- DKMS tree and modules for every kernel (tree still present) -----------
 if command -v dkms >/dev/null 2>&1; then
     for ver_dir in /usr/src/cmp50hx-*/; do
@@ -81,7 +96,12 @@ fi
 [[ -L /usr/local/bin/rm-issue-rate ]] && rm -f /usr/local/bin/rm-issue-rate
 
 # --- UEFI boot entry + ESP files ---------------------------------------------
-if [[ -d /sys/firmware/efi && -f "${install_dir}/efi/install-linux.sh" ]]; then
+# CMP_ESP_SKIP=1 is the same host-side convention deb/postinst documents for
+# its ESP deploy: a curated multi-entry boot chain must also survive the
+# teardown. Without the flag, removal reverts the deploy (gap 1).
+if [[ "${CMP_ESP_SKIP:-0}" == "1" ]]; then
+    log "CMP_ESP_SKIP=1: leaving the UEFI boot entry and ESP files untouched (curated boot chain; redeploy with ${install_dir}/efi/install-linux.sh when intended)"
+elif [[ -d /sys/firmware/efi && -f "${install_dir}/efi/install-linux.sh" ]]; then
     log "removing the 50HX Unlock boot entry"
     run_cmd bash "${install_dir}/efi/install-linux.sh" --remove
 fi

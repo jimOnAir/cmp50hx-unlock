@@ -25,7 +25,9 @@ self-contained: it embeds the official NVIDIA 610.43.03 driver (userland
 from the `.run`), installs the patched open kernel module as a **DKMS**
 tree that rebuilds on every kernel update, deploys the UEFI ESP unlock
 and the `cmp50hx-boot` boot-flow service, and seeds `cmp-tune`. Reboot
-afterwards. `sudo apt remove cmp50hx-unlock` uninstalls the driver again.
+afterwards. `sudo apt purge cmp50hx-unlock` uninstalls the driver again and
+leaves nothing behind (plain `apt remove` keeps the conffiles and the state
+dir, standard Debian policy).
 On install the package also drops an apt pin file
 (`/etc/apt/preferences.d/cmp50hx-unlock`) that blocks Ubuntu's stock NVIDIA
 driver packages — new installs and upgrades — from ever landing over the

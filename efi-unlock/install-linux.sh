@@ -89,8 +89,19 @@ remove_entry() {
         efibootmgr -q -B -b "$id" || true
     done
     if [[ -n "$ESP_MNT" && -d "$ESP_MNT/$EFI_DIR" ]]; then
-        rm -rf "$ESP_MNT/$EFI_DIR"
-        say "removed $ESP_MNT/$EFI_DIR"
+        # Ownership scoping: this deployer only ever copies $EFI_NAME here.
+        # A wholesale rm -rf would delete foreign files (other unlocker
+        # deployments share the directory) — remove only our own file and
+        # prune the directory when it ends up empty (deb-purge-lifecycle gap 2).
+        if [[ -e "$ESP_MNT/$EFI_DIR/$EFI_NAME" ]]; then
+            rm -f "$ESP_MNT/$EFI_DIR/$EFI_NAME"
+            say "removed $ESP_MNT/$EFI_DIR/$EFI_NAME"
+        fi
+        if [[ -z "$(ls -A "$ESP_MNT/$EFI_DIR" 2>/dev/null)" ]]; then
+            rmdir "$ESP_MNT/$EFI_DIR" && say "pruned empty $ESP_MNT/$EFI_DIR"
+        else
+            say "kept $ESP_MNT/$EFI_DIR: contains files this deployer did not place"
+        fi
     fi
     say "rollback complete; reboot to return to stock behavior"
 }

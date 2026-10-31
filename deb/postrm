@@ -5,6 +5,7 @@
 set -u
 
 readonly state_dir="/var/lib/cmp50hx-unlock"
+readonly install_dir="/opt/cmp50hx-unlock"
 readonly log_file="/var/log/cmp50hx-unlock-install.log"
 krel="$(uname -r)"
 readonly krel
@@ -63,17 +64,64 @@ if [[ -d /var/lib/dkms/cmp50hx ]]; then
     rm -rf /var/lib/dkms/cmp50hx
 fi
 
+# --- fallback firmware copies tracked by postinst ----------------------------
+# The .run uninstaller only removes what IT installed; when postinst had to
+# copy GSP firmware by hand it recorded a manifest in ${state_dir} (relative
+# to /lib/firmware). Clean those here, before the purge branch deletes the
+# state dir (gap 6).
+if [[ -f "${state_dir}/firmware-copies.txt" ]]; then
+    log "removing the fallback firmware copies tracked in firmware-copies.txt"
+    while IFS= read -r rel; do
+        case "${rel}" in
+            ''|'#'*) continue ;;
+            nvidia/*) rm -f "/lib/firmware/${rel}" ;;
+            *) warn "ignoring unsafe firmware manifest path: ${rel}" ;;
+        esac
+    done < "${state_dir}/firmware-copies.txt"
+    rm -f "${state_dir}/firmware-copies.txt"
+fi
+
+# --- postinst-created leftovers outside the dpkg manifest -------------------
+# ${install_dir}/logs is created at configure time and is not a package
+# file; without this it survives removal (gap 5). rmdir succeeds only when
+# dpkg took everything else, so foreign files are never deleted here.
+if [[ -d "${install_dir}" ]]; then
+    rm -rf "${install_dir}/logs"
+    rmdir "${install_dir}" 2>/dev/null \
+        || warn "${install_dir} not empty after file removal; kept for inspection"
+fi
+
 # --- initramfs without the patched modules ----------------------------------
-if command -v update-initramfs >/dev/null 2>&1 \
-        && { [[ -e "/boot/initrd.img-${krel}" ]] || [[ -e "/boot/initramfs.img-${krel}" ]]; }; then
-    log "rebuilding the initramfs without the patched modules"
-    run_cmd update-initramfs -u -k "${krel}"
+# Rebuild EVERY kernel that had our modules (prerm recorded the list while
+# the .ko files still existed), not just the running one — otherwise a stale
+# patched module stays baked into another kernel's initramfs (gap 3).
+if command -v update-initramfs >/dev/null 2>&1; then
+    declare -A initrd_kernels=()
+    if [[ -r /run/cmp50hx-unlock.initrd-kernels ]]; then
+        while IFS= read -r k; do
+            [[ -n "${k}" ]] && initrd_kernels["${k}"]=1
+        done < /run/cmp50hx-unlock.initrd-kernels
+    fi
+    initrd_kernels["${krel}"]=1
+    for k in "${!initrd_kernels[@]}"; do
+        if [[ -e "/boot/initrd.img-${k}" ]] || [[ -e "/boot/initramfs.img-${k}" ]]; then
+            log "rebuilding the initramfs for ${k} without the patched modules"
+            run_cmd update-initramfs -u -k "${k}"
+        fi
+    done
+    rm -f /run/cmp50hx-unlock.initrd-kernels
 fi
 
 if [[ "${1:-remove}" == "purge" ]]; then
     rm -rf "${state_dir}"
     rm -f "${log_file}"
-    log "purged ${state_dir} and ${log_file}"
+    # install-initramfs.sh keeps up to 3 pre-rebuild initrd backups for its
+    # --rollback option; a purge means this host will never boot into that
+    # stack again, so the backups go with it (gap 8)
+    shopt -s nullglob
+    rm -f /boot/initrd.img-*.cmp50-bak-*
+    shopt -u nullglob
+    log "purged ${state_dir}, ${log_file} and the /boot initrd rollback backups"
 fi
 
 # Note: /etc/modprobe.d/cmp-unlock.conf and /etc/modprobe.d/cmp50hx-unlock.conf

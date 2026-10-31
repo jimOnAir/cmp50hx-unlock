@@ -109,6 +109,12 @@ if ! find /lib/firmware/nvidia -name 'gsp*.bin' -print -quit 2>/dev/null | grep 
     sh "${run_file}" -x --target "${fw_dir}" >/dev/null
     if [[ -d "${fw_dir}/firmware" ]]; then
         cp -a "${fw_dir}/firmware/." /lib/firmware/
+        # the .run uninstaller does not know about these hand-copied files;
+        # record a manifest (paths relative to /lib/firmware) so postrm can
+        # remove them — otherwise they leak past purge (gap 6)
+        (cd "${fw_dir}/firmware" && find . -type f | sed 's#^\./##') \
+            > "${state_dir}/firmware-copies.txt"
+        log "recorded $(wc -l < "${state_dir}/firmware-copies.txt") fallback firmware copies for removal"
     else
         warn "no firmware directory inside the .run package"
     fi
@@ -142,12 +148,14 @@ if modinfo -n -k "${krel}" nvidia >/dev/null 2>&1; then
     [[ "${ko}" == /lib/modules/${krel}/updates/* ]] && running_has_module=1
 fi
 for kernel in "${build_kernels[@]}"; do
-    ko="$(modinfo -n -k "${kernel}" nvidia 2>/dev/null || true)"
-    [[ "${ko}" == /lib/modules/${kernel}/updates/* ]] \
-        || die "the patched nvidia.ko is not first for kernel ${kernel} (found: ${ko:-none})"
+    for mod in nvidia nvidia-uvm nvidia-modeset nvidia-drm nvidia-peermem; do
+        ko="$(modinfo -n -k "${kernel}" "${mod}" 2>/dev/null || true)"
+        [[ "${ko}" == /lib/modules/${kernel}/updates/* ]] \
+            || die "the patched ${mod}.ko is not first for kernel ${kernel} (found: ${ko:-none})"
+    done
     [[ "$(modinfo -F version -k "${kernel}" nvidia)" == "${driver_version}" ]] \
         || die "installed nvidia.ko has the wrong version for kernel ${kernel}"
-    log "patched modules in place for ${kernel}: ${ko}"
+    log "patched modules in place for ${kernel}: all five resolve under updates/"
 done
 
 # --- nouveau blacklist + ReBAR option are dpkg conffiles (/etc/modprobe.d) ----
@@ -250,7 +258,8 @@ Next step:
   1. Reboot to load the patched module and run the UEFI unlock.
 
 Rollback:
-  sudo apt remove cmp50hx-unlock   # uninstalls the NVIDIA driver again,
-                                   # removes the apt pin file it set
+  sudo apt purge cmp50hx-unlock    # uninstalls the NVIDIA driver again,
+                                   # removes the apt pin file, modules,
+                                   # firmware and configuration it set
 EOF
 exit 0
