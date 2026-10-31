@@ -46,6 +46,11 @@ One row per `landed=true` line in `success.jsonl`:
 |---|---|---|---|---|---|---|---|---|
 | 1 | 2026-10-31T10:40:05Z | `da354d66` | W2 | pre-driver initramfs | `0x00823800` | `0xffffffff` | `0xffffffff` (in-boot `after=` + production runtime read) | FLR ✓ · production nvidia bind ✓ (jsonl line 6: `landed=true`, `checkpoint_attributable=true`) |
 | 2 | 2026-10-31T10:40:05Z | `da354d66` | W2 | pre-driver initramfs | `0x00823804` (FEAT) | `0xffffffff` | `0xffffffff` | FLR ✓ · production bind ✓ — **non-attributable**: production canary opens FEAT every boot (W0.4), so the write is a no-op-safe idempotent opener, not independent proof |
+| 3 | 2026-10-31T11:04:28Z | `6b8b83b1` | W3a | pre-driver initramfs (full-table launch #1) | `0x00088ff4` (XVE_PLM) | `0xffffffff` | `0xffffffff` | FLR ✓ · production bind ✓ — first attributable non-opener landing (rows initially tagged `W2`, relabeled from state; fixed in harness) |
+| 4 | 2026-10-31T11:49:46Z | `18d94504` | W3b | pre-driver initramfs (ladder cycle 1, `gu_window=0:6`) | `0x00088fe8` | `0xffffffff` | `0xffffffff` | FLR ✓ · production bind ✓ |
+| 5 | 2026-10-31T11:49:46Z | `18d94504` | W3b | same launch | `0x00088fec` | `0xffffffff` | `0xffffffff` | FLR ✓ · production bind ✓ |
+| 6 | 2026-10-31T11:49:46Z | `18d94504` | W3b | same launch | `0x00088ff0` | `0xffffffff` | `0xffffffff` | FLR ✓ · production bind ✓ |
+| 7 | 2026-10-31T11:49:46Z | `18d94504` | W3b | same launch | `0x00088ff4` | `0xffffffff` | `0xffffffff` | second independent confirmation of row 3 |
 
 Supporting (write verified in-boot, `landed=false` per §0 — re-locked at
 production init **by design**, documented upstream behavior, kept for
@@ -57,7 +62,12 @@ Evidence files (tracked): `evidence/w2-success.jsonl` (6 lines: 3 ×
 `status=absent` from harness-bug attempt `0cdbe414`, 3 × `ok` from
 `da354d66`), `evidence/w2-journal-da354d66.txt` (raw journal incl. all three
 `pass=…/3 … ret=0` lines and `stage=flr`/`stage=handoff`),
-`evidence/w2-journal-0cdbe414-abort.txt`.
+`evidence/w2-journal-0cdbe414-abort.txt`, `evidence/w3a-success.jsonl` +
+`evidence/w3a-journal-6b8b83b1.txt` (W3a: launch #1 6/6, launch #2 timeout
+— the multi-launch law measurement), `evidence/w3b-success.jsonl` +
+`evidence/w3b-journal-18d94504.txt` (W3b: cycle 1 full success incl. four
+XVE landings; cycles 2–9 refused at gfw `-114` — the readiness-law
+measurement).
 
 ## 3. Exact procedure
 
@@ -74,11 +84,15 @@ timings from the success journal (whole claim ~1 s, 10:39:07→:08).
    that order: WPR_CFG first is required by the executor (its own
    `ga10x_plm` opener), and FEAT must precede `0x823800` (PLM law). 3
    entries ≤ 6-slot DMA frame ⇒ **exactly one launch**.
-   *Measured law (W3a, boot `6b8b83b1`):* **the V67 chain fires exactly once
-   per FLR-separated load** — a second SEC2 launch inside one load times out
-   (`completion error=-110`, `fhstate=0xfff8 csberr=0x400000`), so any ladder
-   longer than the payload needs one insmod/rmmod cycle per ≤4 targets plus
-   the two auto-reopened openers (port patch 0003 `gu_window`).
+   *Measured law (W3a boot `6b8b83b1`, W3b boot `18d94504`):* **the V67
+   chain fires once per load whose device completed re-initialization** —
+   a second SEC2 launch inside one load times out (`completion error=-110`,
+   `fhstate=0xfff8 csberr=0x400000`), and a re-claim right after a load's
+   terminal FLR is refused (`gfw error=-114`, reads `0xbadf5620` = device
+   still in reset). Ladders therefore need one claim-load per ≤4 targets
+   (+2 auto-reopened openers, port patch 0003 `gu_window`) *gated on device
+   readiness* between loads (chip-id re-poll; or full driver init —
+   jdowning's inter-cycle shape).
 2. **Stage** on target: ko → `/root/zagitta-port/gpu_unlock_diag.ko`; the 4
    ga102-suffix assets (§1) under `/root/.cache/gpu-unlock/assets/610.43.03/`.
 3. **Arm** (`l2-w2.sh arm`, deployed `/root/l2-w2/`): install initramfs
