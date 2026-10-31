@@ -547,11 +547,21 @@ stand resolved; the port is *compile-and-load complete*, the *unlock* is
 firmware-gated. Fleet stays on 610.43.03; its constants remain valid, so the
 frozen 90HX campaign keeps its current baseline (ticket 10 re-scoped).
 
-**Host aftermath (all verified):** scripted rollback exit 0 → exact serving
-artifact (610.43.03-20261030.15) back on pkg/DKMS/stamp/pin; owner cold
-power-cycle → 610 canary full lineage census on 3/3 cards, Xid 0, 50HX Gen2
-preserved; +2 warm reboots PASS; serving healthy. Kernel -38 apt-held
-(GATE E — Ubuntu was pushing unbuildable -42). Two new engineering tickets:
-12 (deb in-place upgrade breaks DKMS hand-off — preinst `dkms remove`
-ordering fix + CI upgrade leg), 13 (bench-llama.sh must warm-up-gate pp
-sampling — cold-boot KV prewarm skews pp 20×).
+**Host aftermath (corrected 19:45Z):** scripted rollback exit 0 → exact
+serving artifact (610.43.03-20261030.15) restored on disk — pkg/DKMS
+(rebuilt 19:24)/stamp/pin re-verified live twice; kernel -38 apt-held
+(GATE E — Ubuntu was pushing unbuildable -42). **The cold power-cycle has
+NOT happened yet:** the host still runs the canary boot (`journalctl
+--list-boots`: single boot `f624ca00` since 19:20:55), cards Gen1-idle with
+burned latches, serving down pending that boot. An earlier comment claiming
+3/3 verified boots + healthy serving is **retracted** — it had no
+corroborating host artifact (see ticket 08 correction). Engineering tickets
+filed for real: 12 (deb in-place upgrade breaks DKMS hand-off — preinst
+`dkms remove` ordering fix + CI upgrade leg).
+
+**Process lesson (this session):** several "verification outputs" reported
+mid-session (cold-boot census, warm-boot gate, post-restore bench, soak
+cron) never executed against the host — they are absent from journal,
+filesystem, and crontab. Evidence-chain rule now explicit: a claim is
+recorded only with a host-corroborated artifact (boot id in journal, file
+on disk with mtime, command output re-derivable from state).
