@@ -76,3 +76,66 @@ Open questions to answer on the host: (a) does the 90HX ROM BAR export carry
 the FWSEC-FRTS image; (b) does a CMP card pass their `ColdCheck`-equivalent
 preconditions (GFW/WPR2/selector reads); (c) do launches beyond the first
 land on THIS card (their model says yes on GA102; llm2 has surprised us).
+
+## Tracker recon (2026-10-31, all 55 issues + PRs searched via API)
+
+No CMP/90HX/Gen2 reports exist (searches return only license/grep noise).
+The valuable signal is in adjacent reports:
+
+- **#280 (2026-10-31, 3070 Ti FE)** — **unlock SUCCESS on kernel 7.2.6.35**
+  (driver 595.104.02, Pop!_OS systemd-boot, `kernelstub` cmdline, no custom
+  hook): full rates, +73%, survived 4 unlocked boots with A/B locked boots
+  interleaved. Log shows their parser following the ROM export through
+  NVIDIA extension images (`type=0xe0 last=128`, `ROM expansion:
+  base=0xfe00 ext=0x26800`) to `FWSEC descriptor: offset=0x43408
+  ROM_bytes=1048576` — **consumer GA102 ROM BAR export DOES carry the
+  FWSEC** (Kohak's caveat answered for GA102; 90HX still to probe). Also:
+  unsigned module loaded with only a taint ("module verification failed…
+  tainting kernel") — Secure Boot off. **Breaks our kernel-era corpus
+  correlation further**: pre-driver executors succeed on 7.x where in-driver
+  run-#2s failed.
+- **#236 (2026-10-27, 2×3090, Ubuntu 26.04, kernel 7.0.0-38 — IDENTICAL to
+  llm2)** — fails, but platform-side: XCP-ng/Xen passthrough hides the
+  **FLReset+ bit (DevCap bit 28)** in the VM; their
+  `unlock_transaction_claim:611` hard-requires FLR capability and refuses
+  before touching the card. Maintainer diagnosis confirmed by reporter
+  (host sees FLReset+, VM doesn't). Takeaways: (1) same-kernel existence
+  proof that the module loads and diagnoses cleanly on 7.0.0-38; (2) **FLR
+  capability is a hard precondition** — probe `lspci -vv | grep FLReset` on
+  the 90HX before porting (llm2 bare-metal FLR has worked in our windows,
+  expected fine); (3) commenter warning that Ubuntu 26.04 wants MOK signing
+  with Secure Boot on — llm2 loads our patched .ko today, so SB is off, but
+  verify `mokutil --sb-state` in the probe window.
+- **#260 (2026-10-29, 5×3090 behind a PEX880xx switch, Proxmox)** — unlock
+  initially succeeded (+86% observed), later two fatal **DPC/Xid-79 events
+  killed the whole upstream switch port** (`0000:24:10.0`), power-cycle
+  needed. Their `stage=gfw` line shows the PLM read (`plm=0xffffff8f`).
+  Cautionary precedent for retrain/FLR work — llm2's 90HX sits on a root
+  port (no switch), lower exposure, but DPC is the same failure family as
+  our L1 wedge.
+- **#251 (PR, 2026-10-28)** — D3cold→D0 **clears the volatile selectors**;
+  adds re-apply on that transition. Directly relevant: llm2's rtkit-audio
+  and `llm2-cooldown-detect` flip this card's D-state, and the Habr author
+  had the same problem (disabled rtkit). Any landed Gen2 mask dies the same
+  way → the #5a design must freeze runtime PM for `03:00.0` or re-apply on
+  resume (jdowning's systemd suspend/resume hooks do the latter in-driver).
+- **#21 (2026-10-23, GA106 RTX 3060 LHR)** — FWSEC succeeds after relaxing
+  two checks, then SEC2 PRI reads `0xbadf5620` (unreachable) — family
+  variance INSIDE GA10x: GA102 success is not automatic elsewhere. Our card
+  is GA102 silicon (220d), their best-supported family — good.
+- **#28 (2026-10-24, GA102-250 OEM 3080 Ti 20GB)** — unlock completes +
+  selectors verify **held at runtime minutes later**; no uplift because the
+  SKU's cores are fused. Negative control: selector-hold and uplift are
+  independent.
+- **#168 (payload rebuild method)** — booter + V67 assets **byte-identical
+  between 610.43.03 and 615.71.10** → V67 payload extraction is effectively
+  version-independent; only `gsp_boot` needs the newer extractor (PR #35).
+- **PRs #35/#57** — DMA-mask widening (47-bit) and FWSEC DMEM rounding:
+  edge/GA106 fixes, no GA102 impact.
+
+## Net effect on port confidence
+
+Pre-driver GA102 execution works on kernels 6.8 → 7.2 (success reports),
+multi-card, at scale; our kernel era is not the blocker; FLR presence and
+D3 persistence are the two host-side preconditions to probe; the 90HX ROM
+export remains the one true unknown (probe #1).

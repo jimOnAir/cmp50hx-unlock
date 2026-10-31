@@ -94,3 +94,16 @@ pass). Window #11 (boot 6.12.95, re-run alternation) remains the cheap
 decisive test and is worth running mainly to close the corpus question for
 the upstream thread; #3 (pre-OS EFI) is immune to the answer either way
 and stays the primary implementation path.
+
+## Postscript 2026-10-31 (late) — corpus counterexamples from Zagitta tracker
+
+Two reports weaken the ≥7.0-era correlation itself: **Zagitta #280** — 3070
+Ti FE, **kernel 7.2.6**, pre-driver module, unlock SUCCESS, full rates, 4
+surviving boots; **#236** — kernel 7.0.0-38 (= llm2) with the *identical
+module*, failure root-caused to Xen hiding FLReset+ (platform, not kernel).
+Both are PRE-DRIVER executors, so they don't test our exact run-#2 context —
+but they kill any simple "≥7.0 kernels break the booter" story. Combined
+with the source sweep above: no kernel test needed for the mechanism verdict;
+window #11 (6.12.95 discriminator) stays OPTIONAL and is now only useful to
+characterize llm2's card-specific behavior — the #5a pre-driver port
+supersedes it as the next action.

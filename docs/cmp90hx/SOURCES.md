@@ -73,6 +73,28 @@ outcome. (Bash-greppable: one URL per bullet.)
   initramfs ordering (matters for our initramfs-tools hook plan).
 - https://github.com/Zagitta/gpu-unlock/pull/24 — Ada port ("not a
   device-ID-only extension" — caution precedent for our 220d recipe work).
+- Tracker recon 2026-10-31 (full analysis in
+  `docs/cmp90hx/upstream/zagitta-gpu-unlock/README.md`):
+  - https://github.com/Zagitta/gpu-unlock/issues/280 — 3070 Ti FE unlock
+    SUCCESS on kernel **7.2.6** (breaks kernel-era corpus correlation; ROM
+    export shown to carry FWSEC on consumer GA102).
+  - https://github.com/Zagitta/gpu-unlock/issues/236 — 2×3090 on **kernel
+    7.0.0-38 (= llm2)**; failure root-caused to Xen hiding FLReset+ →
+    module's hard FLR-capability precondition documented
+    (`unlock_transaction_claim:611`).
+  - https://github.com/Zagitta/gpu-unlock/issues/260 — 5×3090 behind
+    PEX880xx: post-unlock DPC/Xid-79 whole-switch loss (retrain/FLR caution
+    precedent).
+  - https://github.com/Zagitta/gpu-unlock/pull/251 — D3cold clears volatile
+    selectors, re-apply on resume (llm2 rtkit/cooldown interaction).
+  - https://github.com/Zagitta/gpu-unlock/issues/21 — GA106 SEC2
+    `0xbadf5620` (intra-GA10x family variance; GA102 = our silicon).
+  - https://github.com/Zagitta/gpu-unlock/issues/28 — OEM GA102-250:
+    selectors held at runtime, fused-no-uplift negative control.
+  - https://github.com/Zagitta/gpu-unlock/issues/168 — payload rebuild
+    method; booter/V67 byte-identical 610.43.03 vs 615.71.10.
+  - https://github.com/Zagitta/gpu-unlock/discussions/238 — XCP-ng FLR
+    workaround thread (referenced from #236).
 - https://github.com/impacifist/Windows-GPU-UNLOCK — Windows port of
   Zagitta (per their FAQ; adjacent to WildFlash's EFI approach).
 - https://github.com/haohervchb/Turing-unlock — upstream of KohakUnlock's
