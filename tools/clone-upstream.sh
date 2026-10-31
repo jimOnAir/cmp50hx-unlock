@@ -65,7 +65,8 @@ done
   fi
   echo
   echo "Not cloned (recorded in SOURCES.md only): xrip/cmp50hx-unlock (this"
-  echo "repo's origin), NVIDIA 610.43.03 archives (\`cache/\`, sha-verified), the"
+  echo "repo's origin), the pinned NVIDIA driver archives (\`cache/\`, sha-verified"
+  echo "against driver-pin.env), the"
   echo "campaign patched tree (\`work/build.1vZgdr/source/\`), huggingface AD103."
 } > "$MANIFEST"
 

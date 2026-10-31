@@ -15,7 +15,7 @@
 # What it does, in order:
 #   1. detects the card (or takes --card cmp50hx)
 #   2. installs build tools and kernel headers
-#   3. installs the NVIDIA 610.43.03 userland from the official .run package
+#   3. installs the pinned NVIDIA driver userland from the official .run package
 #   4. builds the patched kernel modules for the running kernel (build.sh)
 #   5. installs the modules with a backup of any previous ones, runs depmod
 #   6. installs the cmp50hx-boot boot-flow unit (unlock verdict + PCIe Gen2
@@ -29,11 +29,26 @@
 # reports PASS_CMP_INITRAMFS to load the patched module at boot.
 set -Eeuo pipefail
 
-readonly driver_version="610.43.03"
+# Driver pin. From a repo checkout, driver-pin.env beside this script is
+# authoritative; the inline fallback below serves the `curl | bash`
+# bootstrap and is asserted against the pin by build.sh (exit 6) whenever
+# both files live in one tree.
+DRIVER_VERSION_FALLBACK="610.43.03"
+NVIDIA_RUN_SHA256_FALLBACK="45e2d4c134a23c35e50f253a4aa63e7e5e8d17e3d185d4a07c8a58e9612ed392"
+_install_dir_candidate="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-/.}")" 2>/dev/null && pwd || true)"
+if [[ -n "${_install_dir_candidate}" && -f "${_install_dir_candidate}/driver-pin.env" \
+      && -f "${_install_dir_candidate}/build.sh" ]]; then
+    # shellcheck source=driver-pin.env
+    . "${_install_dir_candidate}/driver-pin.env"
+else
+    DRIVER_VERSION="${DRIVER_VERSION_FALLBACK}"
+    NVIDIA_RUN_SHA256="${NVIDIA_RUN_SHA256_FALLBACK}"
+fi
+readonly driver_version="${DRIVER_VERSION}"
 readonly repo_tarball="https://github.com/xrip/cmp50hx-unlock/archive/refs/heads/master.tar.gz"
 readonly nvidia_run_url="https://us.download.nvidia.com/XFree86/Linux-x86_64/${driver_version}/NVIDIA-Linux-x86_64-${driver_version}.run"
 # SHA-256 of the .run package above, pinned from the official download.
-readonly nvidia_run_sha256="45e2d4c134a23c35e50f253a4aa63e7e5e8d17e3d185d4a07c8a58e9612ed392"
+readonly nvidia_run_sha256="${NVIDIA_RUN_SHA256}"
 readonly install_dir="/opt/cmp50hx-unlock"
 readonly krel="$(uname -r)"
 

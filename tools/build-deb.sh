@@ -3,7 +3,8 @@
 #
 # The .deb replaces the old cmp50hx-unlock-linux.run and mirrors the
 # install.sh feature set:
-#   - embedded official NVIDIA 610.43.03 .run (userland, no kernel modules)
+#   - embedded official NVIDIA .run for the pinned version (userland, no
+#     kernel modules)
 #   - patched open kernel module source as a DKMS tree (auto-rebuild on
 #     every kernel update)
 #   - UEFI ESP unlock (50HXUNLK.EFI + install-linux.sh), the cmp50hx-boot
@@ -23,7 +24,9 @@
 set -Eeuo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly driver_version="610.43.03"
+# shellcheck source=../driver-pin.env
+. "${root}/driver-pin.env"
+readonly driver_version="${DRIVER_VERSION}"
 # Patch profile fed to build.sh --prepare-source. Default "both" = the
 # combined 90HX+50HX fleet stack — REQUIRED on multi-CMP hosts: the
 # cmp50hx-only profile is slot-blind, and its second/third identical
@@ -33,7 +36,7 @@ readonly driver_version="610.43.03"
 # the conflict-residue signature pair; verified compile + multi-card.
 readonly card_profile="${CMP_DEB_CARD:-both}"
 readonly nvidia_run_url="https://us.download.nvidia.com/XFree86/Linux-x86_64/${driver_version}/NVIDIA-Linux-x86_64-${driver_version}.run"
-readonly nvidia_run_sha256="45e2d4c134a23c35e50f253a4aa63e7e5e8d17e3d185d4a07c8a58e9612ed392"
+readonly nvidia_run_sha256="${NVIDIA_RUN_SHA256}"
 readonly cache_dir="${CMP_UNLOCK_CACHE_DIR:-${root}/cache}"
 readonly work_dir="${CMP_UNLOCK_WORK_DIR:-${root}/work}"
 
@@ -126,7 +129,7 @@ EOF
 # --- 3. runtime tree under /opt/cmp50hx-unlock ------------------------------
 opt="${stage}/opt/cmp50hx-unlock"
 mkdir -p "${opt}/cache" "${opt}/deb" "${opt}/efi" "${opt}/bin"
-cp "${root}/build.sh" "${root}/install-initramfs.sh" "${opt}/"
+cp "${root}/build.sh" "${root}/install-initramfs.sh" "${root}/driver-pin.env" "${opt}/"
 cp -a "${root}/patches" "${root}/verify" "${root}/cmp50hx" \
       "${root}/idle-governor" "${root}/tuning" "${opt}/"
 install -m 0644 "${run_file}" "${opt}/cache/"
@@ -175,7 +178,7 @@ mkdir -p "${stage}/etc/cmp50hx"
 install -m 0644 "${root}/deb/boot.conf" "${stage}/etc/cmp50hx/boot.conf"
 
 # --- 5. DEBIAN metadata and maintainer scripts -------------------------------
-sed "s/@VERSION@/${version}/" "${root}/deb/control.in" > "${stage}/DEBIAN/control"
+sed "s/@VERSION@/${version}/;s/@DRIVER_VERSION@/${driver_version}/g" "${root}/deb/control.in" > "${stage}/DEBIAN/control"
 install -m 0644 "${root}/deb/conffiles" "${stage}/DEBIAN/conffiles"
 for script in preinst prerm postinst postrm; do
     install -m 0755 "${root}/deb/${script}" "${stage}/DEBIAN/${script}"

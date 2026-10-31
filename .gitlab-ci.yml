@@ -1,7 +1,7 @@
 # GitLab CI — mirrors .github/workflows/release.yml.
 #
 # Produces the one-click Linux artifact on tag pipelines:
-#   - cmp50hx-unlock_<ver>_amd64.deb (self-contained: NVIDIA 610.43.03
+#   - cmp50hx-unlock_<ver>_amd64.deb (self-contained: pinned NVIDIA
 #     userland + patched DKMS modules + UEFI ESP unlock + services)
 # and publishes it as a GitLab Release. The release is gated on the
 # Ubuntu 26.04 install smoke below (test:linux-2604-install).
@@ -159,7 +159,7 @@ release:gitlab:
 
       Linux (Ubuntu 24.04 / 26.04, amd64) — download the .deb, then:
           sudo apt install ./${DEB}
-      The package embeds the NVIDIA 610.43.03 driver (userland from the
+      The package embeds the pinned NVIDIA driver (userland from the
       official .run), the patched open kernel modules as a DKMS tree
       (auto-rebuild on every kernel update), the UEFI ESP unlock, the
       cmp50hx-boot boot-flow service, the optional idle governor and cmp-tune.

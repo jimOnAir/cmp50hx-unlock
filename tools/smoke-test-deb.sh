@@ -4,14 +4,19 @@
 # Single home for the checks .github/workflows/release.yml and .gitlab-ci.yml
 # used to duplicate: both pipelines build the package, this file defines what
 # "well-formed" means. Runnable locally against any built .deb. The expected
-# payload paths carry the literal driver version on purpose: a build that
-# changes the version must update the contract here too.
+# payload paths are derived from driver-pin.env — the contract follows the
+# pin; only genuinely structural changes belong in this file.
 #
 #   tools/smoke-test-deb.sh cmp50hx-unlock_<driver>-<rev>_amd64.deb
 set -Eeuo pipefail
 
 deb="${1:?usage: smoke-test-deb.sh <cmp50hx-unlock_*_amd64.deb>}"
 [[ -f "${deb}" ]] || { printf 'not a file: %s\n' "${deb}" >&2; exit 1; }
+
+_smoke_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../driver-pin.env
+. "${_smoke_root}/driver-pin.env"
+readonly driver_version="${DRIVER_VERSION}"
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
@@ -39,9 +44,9 @@ done
 # --- embedded payloads ----------------------------------------------------------
 fsys="$(dpkg-deb --fsys-tarfile "${deb}" | tar -t)"
 for path in \
-        ./opt/cmp50hx-unlock/cache/NVIDIA-Linux-x86_64-610.43.03.run \
+        ./opt/cmp50hx-unlock/cache/NVIDIA-Linux-x86_64-${driver_version}.run \
         ./opt/cmp50hx-unlock/VERSION \
-        ./usr/src/cmp50hx-610.43.03/dkms.conf \
+        ./usr/src/cmp50hx-${driver_version}/dkms.conf \
         ./opt/cmp50hx-unlock/efi/50HXUNLK.EFI \
         ./lib/systemd/system/cmp50hx-boot.service \
         ./lib/systemd/system/cmp-idle-governor.service \
@@ -87,8 +92,8 @@ tmp="$(mktemp -d)"
 dpkg-deb -x "${deb}" "${tmp}"
 # maintainer scripts derive the driver version from the build stamp;
 # the stamp must carry exactly the version this contract pins
-[[ "$(cut -d- -f1 "${tmp}/opt/cmp50hx-unlock/VERSION")" == "610.43.03" ]] \
-    || { printf 'VERSION stamp does not carry driver 610.43.03\n' >&2; exit 1; }
+[[ "$(cut -d- -f1 "${tmp}/opt/cmp50hx-unlock/VERSION")" == "${driver_version}" ]] \
+    || { printf 'VERSION stamp does not carry driver %s\n' "${driver_version}" >&2; exit 1; }
 (cd "${tmp}/opt/cmp50hx-unlock/cache" \
     && sha256sum -c "${tmp}/opt/cmp50hx-unlock/deb/nvidia-run.sha256")
 rm -rf "${tmp}"

@@ -2,7 +2,22 @@
 set -Eeuo pipefail
 
 readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly driver_version="610.43.03"
+# shellcheck source=driver-pin.env
+. "${script_dir}/driver-pin.env"
+readonly driver_version="${DRIVER_VERSION}"
+
+# Pin drift guard: install.sh carries an inline fallback version for the
+# curl|bash bootstrap. When the checkout (or deb runtime tree) ships it,
+# its fallback must agree with driver-pin.env, or the bootstrap path would
+# install a different driver than the patches here are built for.
+if [[ -f "${script_dir}/install.sh" ]]; then
+    bootstrap_version="$(sed -n 's/^DRIVER_VERSION_FALLBACK="\([^"]*\)".*/\1/p' "${script_dir}/install.sh" | head -1)"
+    [[ "${bootstrap_version}" == "${DRIVER_VERSION}" ]] || {
+        printf 'install.sh bootstrap fallback %s != driver-pin.env %s\n' \
+            "${bootstrap_version:-none}" "${DRIVER_VERSION}" >&2
+        exit 6
+    }
+fi
 readonly kernel_release="${KERNEL_RELEASE:-$(uname -r)}"
 readonly jobs="${JOBS:-$(nproc)}"
 readonly cache_dir="${CMP_UNLOCK_CACHE_DIR:-${CMP50_ALL_CACHE_DIR:-${script_dir}/cache}}"
@@ -15,14 +30,14 @@ source_tarball=''
 prepare_source=''
 
 usage() {
-    cat <<'EOF'
+    cat <<EOF
 usage: bash ./build.sh [--card cmp50hx|cmp90hx|both] [--source-dir DIR | --source-tarball FILE]
 
 Card selects the patch profile: cmp50hx (default), cmp90hx (vendored
 WildFlash1st series), or both (mixed fleet). CARD env also honored.
 
-With no source option, the exact NVIDIA 610.43.03 source archive is downloaded
-and checked by SHA-256. The script builds artifacts only.
+With no source option, the exact NVIDIA ${DRIVER_VERSION} source archive is
+downloaded and checked by SHA-256. The script builds artifacts only.
 It does not install, load, unload, or reset a GPU.
 
 --prepare-source DIR skips the module build: it downloads, verifies, patches
@@ -64,7 +79,7 @@ done
 case "${card}" in
     cmp50hx)
         readonly source_url="https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/${driver_version}.tar.gz"
-        readonly source_sha256="9df87d753cd9c05aa0eedc462af9b35debb549a657136e863282f94c96ee2640"
+        readonly source_sha256="${SOURCE_SHA256}"
         readonly patch_dir="${script_dir}/patches/cmp50hx"
         # 05-cmp50-auto-pstate.patch is deliberately not built. A cold-boot A/B
         # on 2026-08-26 proved it pins the card at P8 645/405 even at 100% load
@@ -87,7 +102,7 @@ case "${card}" in
         ;;
     cmp90hx)
         readonly source_url="https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/${driver_version}.tar.gz"
-        readonly source_sha256="9df87d753cd9c05aa0eedc462af9b35debb549a657136e863282f94c96ee2640"
+        readonly source_sha256="${SOURCE_SHA256}"
         # Vendored from WildFlash1st/cmp90hx-unlock (GPL-2.0, commit 76940ae),
         # profile cmp90-rejoin15 — see docs/cmp90hx/VENDORED.md.
         # 0016 (PCIe Gen2 rejoin16) vendored 2026-10-30 from
@@ -116,7 +131,7 @@ case "${card}" in
         # again whenever either stockflow series changes), then the rest of
         # the cmp50 series which stacks cleanly on top.
         readonly source_url="https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/${driver_version}.tar.gz"
-        readonly source_sha256="9df87d753cd9c05aa0eedc462af9b35debb549a657136e863282f94c96ee2640"
+        readonly source_sha256="${SOURCE_SHA256}"
         patch_files=()
         for p in "${script_dir}/patches/cmp90hx/0014-6104303-cmp90hx-stockflow-rejoin14-multigpu-state.patch" \
                  "${script_dir}/patches/cmp90hx/0015-6104303-cmp90hx-stockflow-rejoin15-serialized-start.patch" \

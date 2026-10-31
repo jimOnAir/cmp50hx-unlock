@@ -7,9 +7,9 @@ Section: kernel
 Priority: optional
 Depends: dkms, build-essential, patch, kmod, pciutils, python3, mokutil, efibootmgr, initramfs-tools, linux-headers-generic | linux-headers-cloud-amd64 | linux-headers-amd64
 Conflicts: nvidia-driver, nvidia-settings
-Description: CMP 50HX compute unlock for Ubuntu (NVIDIA 610.43.03 + patched open modules)
+Description: CMP 50HX compute unlock for Ubuntu (NVIDIA @DRIVER_VERSION@ + patched open modules)
  One-click unlock for the NVIDIA CMP 50HX (TU102, 10de:1e09). The package
- embeds the official NVIDIA 610.43.03 .run and installs its userland,
+ embeds the official NVIDIA @DRIVER_VERSION@ .run and installs its userland,
  ships the patched open kernel modules as a DKMS tree (stock-flow GSP
   compute unlock, ReBAR, PCIe Gen2, profiling counters) that rebuilds
   automatically on every kernel update, deploys the UEFI ESP unlock

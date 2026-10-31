@@ -6,8 +6,8 @@
 #   make native        build the merged cmp50hx multi-call binary (native/)
 #   make clean         remove all build outputs
 #
-# The .deb is the single self-contained Linux artifact: embedded NVIDIA
-# 610.43.03 .run + patched DKMS module tree + UEFI ESP unlock + services.
+# The .deb is the single self-contained Linux artifact: embedded pinned
+# NVIDIA .run + patched DKMS module tree + UEFI ESP unlock + services.
 
 DEB_GLOB        := cmp50hx-unlock_*_amd64.deb
 VERSION         ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)

@@ -12,7 +12,7 @@ permissions:
 jobs:
   # -------------------------------------------------------------------
   # Linux: build the EFI binary and assemble the self-contained .deb
-  # (embedded NVIDIA 610.43.03 .run + patched DKMS module tree + UEFI
+  # (embedded pinned NVIDIA .run + patched DKMS module tree + UEFI
   # ESP unlock + services). The .deb replaces the old .run installer.
   # -------------------------------------------------------------------
   linux:
@@ -163,7 +163,7 @@ jobs:
             ```bash
             sudo apt install ./cmp50hx-unlock_*_amd64.deb
             ```
-            The package embeds the NVIDIA 610.43.03 driver (userland from the
+            The package embeds the pinned NVIDIA driver (userland from the
             official .run), the patched open kernel modules as a DKMS tree
             (auto-rebuild on every kernel update), the UEFI ESP unlock, the
             cmp50hx-boot boot-flow service, the optional idle governor and cmp-tune.
