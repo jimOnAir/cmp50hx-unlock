@@ -1,0 +1,31 @@
+Oct 31 12:41:03 llm2 kernel: acpi PNP0A03:03: _OSC: OS now controls [PCIeHotplug PME AER PCIeCapability]
+Oct 31 12:41:03 llm2 kernel: acpi PNP0A08:00: _OSC: OS now controls [PCIeHotplug PME AER PCIeCapability]
+Oct 31 12:41:03 llm2 kernel: pcieport 0000:00:01.0: AER: enabled with IRQ 27
+Oct 31 12:41:03 llm2 kernel: pcieport 0000:00:01.1: AER: enabled with IRQ 28
+Oct 31 12:41:03 llm2 kernel: pcieport 0000:00:02.0: AER: enabled with IRQ 30
+Oct 31 12:41:03 llm2 kernel: pcieport 0000:00:03.0: AER: enabled with IRQ 32
+Oct 31 12:41:03 llm2 gpu-unlock-w2: CWAIT-PROBE 2000ms-in-C delta=2s (sleep=sleep) [up=4s]
+Oct 31 12:41:03 llm2 gpu-unlock-w2: ladder cycle 1: insmod gu_window=0:6 [up=4s]
+Oct 31 12:41:03 llm2 kernel: gpu_unlock: loading out-of-tree module taints kernel.
+Oct 31 12:41:03 llm2 kernel: gpu_unlock: module verification failed: signature and/or required key missing - tainting kernel
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=claim device=0x220d family=GA102 CMP 90HX cmd=0x100 original=0x100 bar_len=0x1000000 region=1 enabled=1 master=0
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=layout fb=0x280000000 vga=0x27ff00000 frts=0x100000 wpr=0x275400000..0x27ff00000 boot=0x27fdfa000 gsp=0x27ada0000 heap=0x275500000
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=dma booter=60416 payload=0xfa00 pages=20606 meta=0x7762b000 sig=0x77640000 stock=0x7762c000 boot=0x777c8000
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=gfw plm=0xffffff8f ss0=0x0 ss1=0x0 wpr2_hi=0x0
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=fwsec version=3 fuse=0x3 ver=2 scratch=0x0 wpr2_raw=0x27fe000:0x27fee00 frts=0x27fe000:0x27fee00
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=publish meta=0x7762b000 sig=0x77640000 size=0xfa00 radix=0x7762d000
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: gu_window=0:6 reopen=0 entries=6 table=37
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=1/6 attempt=1 target=0x1fa7cc value=0xfffff0ff before=0x4cb8f after=0xfffff0ff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x7762b000 ret=0
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=2/6 attempt=1 target=0x823804 value=0xffffffff before=0x4cb8f after=0xffffffff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x7762b000 ret=0
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=3/6 attempt=1 target=0x88fe8 value=0xffffffff before=0x4cb8f after=0xffffffff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x7762b000 ret=0
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=4/6 attempt=1 target=0x88fec value=0xffffffff before=0x4cb8f after=0xffffffff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x7762b000 ret=0
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=5/6 attempt=1 target=0x88ff0 value=0xffffffff before=0x4cb8f after=0xffffffff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x7762b000 ret=0
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=6/6 attempt=1 target=0x88ff4 value=0xffffffff before=0x4cb8f after=0xffffffff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x7762b000 ret=0
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=host ss0=0x88888888 ss1=0x8 plm_feat=0xffffffff plm_wpr_cfg=0xfffff0ff
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=flr post_wpr2=0x1ffffe00:0x0 ss0=0x88888888 ss1=0x8 plm=0xffffffff cmd=0x102 devsta=0x0 chip=0xb72000a1
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=handoff ret=0 state=4 retained=0 pages=0/20606 cleanup=0
+Oct 31 12:41:03 llm2 kernel: pci 0000:03:00.0: gpu_unlock: unlocked
+Oct 31 12:41:03 llm2 gpu-unlock-w2: ladder cycle 1 (0:6): insmod_rc=0 rmmod_rc=0 wait=0s [up=6s]
+Oct 31 12:41:03 llm2 gpu-unlock-w2: LADDER STOP before cycle 2 (6:4): not re-ready in 45s (chip=0x00000000 cfg_vendor=0x220d10de) [up=51s]
+Oct 31 12:41:03 llm2 gpu-unlock-w2: ladder done after 2 cycle(s); production driver binds later [up=51s]
+Oct 31 12:41:03 llm2 gpu-unlock-w2: done; production driver binds later on the (re)locked-or-not state [up=51s]

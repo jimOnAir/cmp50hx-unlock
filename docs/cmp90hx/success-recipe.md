@@ -51,6 +51,8 @@ One row per `landed=true` line in `success.jsonl`:
 | 5 | 2026-10-31T11:49:46Z | `18d94504` | W3b | same launch | `0x00088fec` | `0xffffffff` | `0xffffffff` | FLR ✓ · production bind ✓ |
 | 6 | 2026-10-31T11:49:46Z | `18d94504` | W3b | same launch | `0x00088ff0` | `0xffffffff` | `0xffffffff` | FLR ✓ · production bind ✓ |
 | 7 | 2026-10-31T11:49:46Z | `18d94504` | W3b | same launch | `0x00088ff4` | `0xffffffff` | `0xffffffff` | second independent confirmation of row 3 |
+| 8–12 | 2026-10-31T12:04:22Z | `cdee788d` | W3c | ladder cycle 1 (`0:6`) | `0x823804`, `0x88fe8`, `0x88fec`, `0x88ff0`, `0x88ff4` | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — same set as rows 3–7: cycle-1 landing reproduced **identically** on independent boot (ladder determinism) |
+| 13–17 | 2026-10-31T12:42:48Z | `50c2df42` | W3d | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — third identical reproduction; W3d added certified C-side pacing (`CWAIT-PROBE delta=2s [up=4s]`) |
 
 Supporting (write verified in-boot, `landed=false` per §0 — re-locked at
 production init **by design**, documented upstream behavior, kept for
@@ -67,7 +69,12 @@ Evidence files (tracked): `evidence/w2-success.jsonl` (6 lines: 3 ×
 — the multi-launch law measurement), `evidence/w3b-success.jsonl` +
 `evidence/w3b-journal-18d94504.txt` (W3b: cycle 1 full success incl. four
 XVE landings; cycles 2–9 refused at gfw `-114` — the readiness-law
-measurement).
+measurement), `evidence/w3c-success.jsonl` + `evidence/w3c-journal-cdee788d.txt`
+(W3c: cycle-1 reproduction; poll-loop pacing bug exposed via
+short-monotonic stamps), `evidence/w3d-success.jsonl` +
+`evidence/w3d-journal-50c2df42.txt` + `evidence/w3d-mono-50c2df42.txt`
+(W3d: certified 45 s wait + `chip=0x00000000 cfg_vendor=0x220d10de` —
+the FLR-clears-MEM instrument finding).
 
 ## 3. Exact procedure
 
@@ -93,6 +100,15 @@ timings from the success journal (whole claim ~1 s, 10:39:07→:08).
    (+2 auto-reopened openers, port patch 0003 `gu_window`) *gated on device
    readiness* between loads (chip-id re-poll; or full driver init —
    jdowning's inter-cycle shape).
+   *Instrument caveat (W3d boot `50c2df42`):* a pre-claim chip-id poll is
+   **structurally blind** — FLR clears `COMMAND.MEM` (bit 1 of config 0x4)
+   and BAR0 then reads `0x00000000` even though config space answers fully
+   (`vendor/device = 0x10de:0x220d`); the module's own `pci_enable_device`
+   is why in-claim reads show the real sentinel `0xbadf5620` instead.
+   Any readiness gate must re-enable MEM decode first (`ss-relock en`:
+   config dword 0x4 |= 0x2, computed in-binary) or the wait certifies
+   nothing. Whether waiting alone (no driver init) restores re-fire
+   capability remains OPEN — W3d neither proves nor refutes it.
 2. **Stage** on target: ko → `/root/zagitta-port/gpu_unlock_diag.ko`; the 4
    ga102-suffix assets (§1) under `/root/.cache/gpu-unlock/assets/610.43.03/`.
 3. **Arm** (`l2-w2.sh arm`, deployed `/root/l2-w2/`): install initramfs
