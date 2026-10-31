@@ -1,5 +1,12 @@
 # Success recipe — VERIFIED unlock methods only (CMP 90HX @ llm2)
 
+> **FROZEN 2026-10-31 (615-port):** every address, canary and constant in this
+> recipe is measured on driver **610.43.03** and is **invalid on 615** until
+> re-baselined. The 90HX campaign is paused for the NVIDIA 615.78.08 port and
+> llm2 cutover — see `.scratch/90hx-gen2-p2p/freeze-615-port.md` and
+> `.scratch/615-port/spec.md`. Historical record below stays authoritative
+> for 610.43.03 boots only.
+
 **Status: ACTIVE — canonical method: the pre-driver first claim lands a
 5-write frame with strict persistence, reproduced 7/7 window boots.**
 The Zagitta-port ko (`gpu_unlock_full.ko`, `gu_window=0:6`) claimed once
