@@ -101,6 +101,22 @@ The former shared compatibility patch
 value, `snprintf` for the UVM chunk name; both strncpy-returning wrappers
 were deleted). See `patches/common/README.md` for the site-by-site evidence.
 
+**Why the fleet stays on `610.43.03` while `615.78.08` is packaged (2026-10-31).**
+The 615 port is compile- and DKMS-complete: the deb installs on the real
+serving host (kernel `7.0.0-38-generic`), builds and loads, zero Xid. The
+*unlock* does not survive 615's firmware: the signed Booter rejects the
+V244-era exploit signature (`booter error 0x1c @ tracepc 0x1b38`,
+deterministic, 3/3 cards) — the chain's revocation-table and gadget constants
+are calibrated to the 580.159.03-era Booter, and 615 moved the FWSEC/FRTS
+WPR2 window as well. Unlocking on 615 needs a booter re-benchmark research
+round (ticket 11 of the 615-port plan), not a re-port; until then serving
+hosts stay on `610.43.03` — that is a deliberate, evidence-backed hold, not
+neglect. Unrelated 615 note: `615.78.08` also cannot build against Ubuntu
+kernels ≥ `7.0.0-42-generic` (upstream CXL conftest gap — the
+`NV_CXL_CXL_H_PRESENT` probe reports the header present while `struct cxlds_device`
+stays incomplete after the kernel's CXL reorg; `610.43.03` is unaffected), so
+hold kernel upgrades on production hosts regardless of driver line.
+
 Historical kernel build results (driver `610.43.03` era):
 
 | Kernel | Build result |

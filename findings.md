@@ -512,3 +512,46 @@ llm2 boots fine on -38 forever; accepting `linux-image ≥7.0.0-42` after
 cutover would fail DKMS autorebuild and strand modules at next reboot.
 Runbook now says hold 7.0.0-42+ images/headers until NVIDIA fixes the
 conftest (or add a pre-upgrade `dkms build --force -k <new>` precheck).
+
+
+## 2026-10-31 (late) — 615.78.08 canary on llm2: deployed cleanly, died at the signed booter (firmware-blocked)
+
+Full cutover attempt executed per runbook-08 (evidence:
+`.scratch/615-port/logs/canary-fail-{dmesg,verify}-20261031.txt`,
+`rollback-run` transcript in ticket 08 comments, restore verify
+`logs/restore-coldboot-verify-20261031.txt`).
+
+**What the port proved at:** deb installs on the real host (after repairing
+ticket-12's upgrade-ordering bug live), **DKMS builds and installs
+615.78.08 on 7.0.0-38** — the user's explicit ask, fully verified — module
+loads, srcversion matches, zero Xid. The entire patched kernel flow runs
+correctly up to and including the Booter hand-off (armed state correct:
+RESET=0xff, PRE_RESET_SKIPPED_HALTED_PASS, bounded halt status=0x0).
+
+**Where 615 dies:** the 615.78.08 signed Booters (TU102 **and** GA10x) reject
+the V244-era exploit signature inside NVIDIA's own verifier:
+`s_executeBooterUcode_TU102: Booter failed with non-zero error code: 0x1c` →
+`SIGNED_EXACT_STATE_MISMATCH tracepc=0x00001b38 SS0=0 SS1=0` — deterministic,
+first attempt, 3/3 cards. The chain constants (LS ucode `version=0x344
+id=1`, gadget set 0x0cc8/0x0cbd/0x0c1d/0x1d62/0x1f89/0x5ff/0x64ec, token
+0xc2) are calibrated to the 580.159.03-era booter firmware. Before the
+overflow/ROP stage ever executes. Secondary: 615's FWSEC/FRTS reserves WPR2
+at `0x00277c00` (we arrive with `0x0027fe00`) — the ISSUE-15 re-arm path,
+though ported correctly, cannot recover a burned attempt on 615 by design.
+
+**Consequence:** 615 unlock needs a booter re-benchmark research round
+(ticket 11: diff `gsp_{tu10x,ga10x}.bin` booter ELFs 610 vs 615, identify
+which verifier check returns 0x1c@0x1b38, re-derive the revocation table +
+gadgets) — a 40HX-scale effort, not a port fix. Tickets 04/05 (porting)
+stand resolved; the port is *compile-and-load complete*, the *unlock* is
+firmware-gated. Fleet stays on 610.43.03; its constants remain valid, so the
+frozen 90HX campaign keeps its current baseline (ticket 10 re-scoped).
+
+**Host aftermath (all verified):** scripted rollback exit 0 → exact serving
+artifact (610.43.03-20261030.15) back on pkg/DKMS/stamp/pin; owner cold
+power-cycle → 610 canary full lineage census on 3/3 cards, Xid 0, 50HX Gen2
+preserved; +2 warm reboots PASS; serving healthy. Kernel -38 apt-held
+(GATE E — Ubuntu was pushing unbuildable -42). Two new engineering tickets:
+12 (deb in-place upgrade breaks DKMS hand-off — preinst `dkms remove`
+ordering fix + CI upgrade leg), 13 (bench-llama.sh must warm-up-gate pp
+sampling — cold-boot KV prewarm skews pp 20×).
