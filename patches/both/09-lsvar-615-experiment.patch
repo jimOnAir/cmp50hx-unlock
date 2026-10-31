@@ -1,0 +1,102 @@
+diff --git a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+--- a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
++++ b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+@@ -6555,6 +6555,53 @@
+     pBuffer[offset + 3] = (NvU8)(value >> 24);
+ }
+ 
++
++/*
++ * ticket-11 (615 LS-metadata experiment, research-11-booter-analysis.md):
++ * per-GPU override of the LS ucode version/id the crafted signature frames
++ * declare, plus an optional stock-looking header declaration for the GA102
++ * V67 frame (the TU102 frame always declares one). Keys come from
++ * NVreg_RegistryDwordsPerDevice ("pci=<bdf>,RmCmpLsVersion=0x441,..."),
++ * resolved per-GPU by osReadRegistryDword; absent = shipped defaults
++ * (TU102: 0x344/1; GA102: header/slots untouched). One log line per GPU
++ * records the effective values for the boot verdict: CMP50_LSV / CMP90_LSV.
++ */
++static void
++_kgspCmpLsVarOverride
++(
++    OBJGPU  *pGpu,
++    const char *tag,
++    NvU32  *pLsVersion,
++    NvU32  *pLsId,
++    NvBool *pDeclare
++)
++{
++    NvU32 v = 0;
++
++    if (osReadRegistryDword(pGpu, "RmCmpLsVersion", &v) == NV_OK && (v != 0))
++    {
++        *pLsVersion = v;
++    }
++
++    v = 0;
++    if (osReadRegistryDword(pGpu, "RmCmpLsId", &v) == NV_OK && (v != 0))
++    {
++        *pLsId = v;
++    }
++
++    v = 0;
++    if ((pDeclare != NULL) &&
++        (osReadRegistryDword(pGpu, "RmCmpLsDeclare", &v) == NV_OK) && (v != 0))
++    {
++        *pDeclare = NV_TRUE;
++    }
++
++    NV_PRINTF(LEVEL_ERROR,
++              "%s: effective ls_version=0x%x ls_id=0x%x declare=%d\n",
++              tag, *pLsVersion, *pLsId,
++              (pDeclare != NULL) ? (*pDeclare ? 1 : 0) : -1);
++}
++
+ static void
+ _kgspCmp90FillV67Signature
+ (
+@@ -6712,6 +6759,27 @@
+ 
+     _kgspCmp90FillV67Signature(pSignatureVa);
+ 
++    {
++        NvU32  lsVer = 0;
++        NvU32  lsId  = 0x00000001U;
++        NvBool declare = NV_FALSE;
++
++        _kgspCmpLsVarOverride(pGpu, "CMP90_LSV", &lsVer, &lsId, &declare);
++
++        if (declare || (lsVer != 0))
++        {
++            if (declare)
++            {
++                _kgspCmp90PutU32(pSignatureVa, 0x0000, 0x00020001U);
++            }
++            if (lsVer != 0)
++            {
++                _kgspCmp90PutU32(pSignatureVa, 0x0880, lsVer);
++                _kgspCmp90PutU32(pSignatureVa, 0x0884, lsId);
++            }
++        }
++    }
++
+     memdescUnmapInternal(pGpu, pNewSignatureMemdesc, 0);
+     pSignatureVa = NULL;
+     memdescFlushCpuCaches(pGpu, pNewSignatureMemdesc);
+@@ -6862,8 +6930,14 @@
+          * first-writer continuation at 0xff94.
+          */
+         _kgspCmp50PutU32(pSignatureVa, 0x0000, 0x00020001U); /* stock generic header/version 2 */
+-        _kgspCmp50PutU32(pSignatureVa, 0x0880, 0x00000344U); /* stock LS ucode version */
+-        _kgspCmp50PutU32(pSignatureVa, 0x0884, 0x00000001U); /* stock LS ucode id */
++        {
++            NvU32 lsVer = 0x00000344U;
++            NvU32 lsId  = 0x00000001U;
++
++            _kgspCmpLsVarOverride(pGpu, "CMP50_LSV", &lsVer, &lsId, NULL);
++            _kgspCmp50PutU32(pSignatureVa, 0x0880, lsVer); /* LS ucode version (RmCmpLsVersion overridable) */
++            _kgspCmp50PutU32(pSignatureVa, 0x0884, lsId);  /* LS ucode id (RmCmpLsId overridable) */
++        }
+         /*
+          * Signature offset 0x1100 lands at SEC2 DMEM 0x1700.  NVIDIA's
+          * booterCleanupAndHalt() restores RESET_PRIV_LEVEL_MASK[7:4] from
