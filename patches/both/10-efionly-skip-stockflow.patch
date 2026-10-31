@@ -10,7 +10,7 @@ diff --git a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/
 + * (via NVreg_RegistryDwordsPerDevice) disables the in-driver crafted
 + * signature transaction so the stock GSP boot runs unmodified; the
 + * compute unlock is then provided pre-OS by the 50HX Unlock EFI
-+ * application (V67 exploit against the card's own PROM/ucode —
++ * application (V67 exploit against the card's own PROM/ucode,
 + * independent of the driver's LibOS).  ReBar / RT-count / Gen2 /
 + * profiling patches stay active.
 + */
@@ -36,7 +36,7 @@ diff --git a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/
          return NV_OK;
      }
  
-+        if (_kgspCmpSkipStockflow(pGpu))
++    if (_kgspCmpSkipStockflow(pGpu))
 +    {
 +        return NV_OK;
 +    }
@@ -49,7 +49,7 @@ diff --git a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/
      NvBool bCmp50PcCanary =
          (pGpu->idInfo.PCIDeviceID == CMP50_PC_CANARY_PCI_DEVICE_ID) &&
 -        CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(pGpu->idInfo.PCISubDeviceID);
-+        CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(pGpu->idInfo.PCISubDeviceID
++        CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(pGpu->idInfo.PCISubDeviceID) &&
 +        !_kgspCmpSkipStockflow(pGpu);
      NvU64 signatureMemdescSize = bCmp50PcCanary ?
          CMP50_PC_CANARY_SIGNATURE_SIZE :
