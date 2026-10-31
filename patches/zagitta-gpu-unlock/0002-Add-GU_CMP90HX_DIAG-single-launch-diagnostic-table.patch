@@ -1,0 +1,50 @@
+From 196a45a4740e7be7ee93956dc8d5a02158bf4dc8 Mon Sep 17 00:00:00 2001
+From: Dmitry Belozerov <dmitrii.belozyorov@gmail.com>
+Date: Sat, 31 Oct 2026 13:20:24 +0300
+Subject: [PATCH 2/2] Add GU_CMP90HX_DIAG single-launch diagnostic table
+
+Build variant for the W2 window: the CMP 90HX privileged table collapses
+to one frame [WPR_CFG, FEAT, 0x823800]. On llm2 FEAT is already open at
+production boot, so 0x823800 (locked 0xffffff8f) is the write whose
+readback proves the chain fired pre-driver.
+---
+ kernel/gpu_unlock/recipes.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/kernel/gpu_unlock/recipes.c b/kernel/gpu_unlock/recipes.c
+index 9865eb3..f4adb1d 100644
+--- a/kernel/gpu_unlock/recipes.c
++++ b/kernel/gpu_unlock/recipes.c
+@@ -202,6 +202,21 @@ static const struct gu_reg_write ga10x_plm[] = {
+ 	{ GU_FEAT_PLM_OFFSET,    	0xffffffff },
+ };
+ 
++/* The CMP 90HX privileged table, two build variants.
++ *
++ * W2 diagnostic build (-DGU_CMP90HX_DIAG): one launch, one frame that
++ * opens WPR_CFG and FEAT and then writes 0x823800 — the write that was
++ * refused in the in-driver attempts. On a production-opened card FEAT
++ * already reads 0xffffffff, so 0x823800 is the observable that proves
++ * the chain fired.
++ */
++#ifdef GU_CMP90HX_DIAG
++static const struct gu_reg_write ga10x_cmp90hx_plm[] = {
++	{ GU_WPR_CFG_PLM_OFFSET,	0xfffff0ff },
++	{ GU_FEAT_PLM_OFFSET,		0xffffffff },
++	{ 0x00823800,			0xffffffff },
++};
++#else
+ /* CMP 90HX (GA102, 10de:220d) Gen2 experiment. Their GA10x opener pair,
+  * then the full rejoin16 mask set from jdowning100/cmpunlocker
+  * bench/rejoin16-apply-all.sh PAYLOAD_WRITES, in that file's order. The
+@@ -251,6 +266,7 @@ static const struct gu_reg_write ga10x_cmp90hx_plm[] = {
+ 	{ 0x00823800, 0xffffffff },
+ 	{ 0x00823b04, 0xffffffff },
+ };
++#endif
+ 
+ /* cmpunlocker 2d10f891, sec2-postbl-plm-ss-cfg.patch, plmTable.
+  * Order and WPR_CFG's source-control bits are significant. No geometry,
+-- 
+2.56.0
+

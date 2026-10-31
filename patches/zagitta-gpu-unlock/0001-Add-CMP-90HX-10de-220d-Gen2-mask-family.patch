@@ -1,0 +1,119 @@
+From a2ff9032106bf68569e44fb1fc566cf0c50808a7 Mon Sep 17 00:00:00 2001
+From: Dmitry Belozerov <dmitrii.belozyorov@gmail.com>
+Date: Sat, 31 Oct 2026 13:19:13 +0300
+Subject: [PATCH 1/2] Add CMP 90HX (10de:220d) Gen2 mask family
+
+GA102 firmware stack, privileged table = the GA10x WPR_CFG/FEAT opener
+followed by jdowning100/cmpunlocker's rejoin16 PAYLOAD_WRITES in shipped
+order (FEAT bootstrap first is the ordering law). OPTB entries are
+optional: they re-lock on warm reboot upstream and Gen2 was measured
+working with them locked.
+---
+ kernel/gpu_unlock/recipes.c | 70 ++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 69 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/gpu_unlock/recipes.c b/kernel/gpu_unlock/recipes.c
+index 21e4aca..9865eb3 100644
+--- a/kernel/gpu_unlock/recipes.c
++++ b/kernel/gpu_unlock/recipes.c
+@@ -202,6 +202,56 @@ static const struct gu_reg_write ga10x_plm[] = {
+ 	{ GU_FEAT_PLM_OFFSET,    	0xffffffff },
+ };
+ 
++/* CMP 90HX (GA102, 10de:220d) Gen2 experiment. Their GA10x opener pair,
++ * then the full rejoin16 mask set from jdowning100/cmpunlocker
++ * bench/rejoin16-apply-all.sh PAYLOAD_WRITES, in that file's order. The
++ * shipped order is the law: FEAT bootstrap before every masked write.
++ * XVE = PCIe/PLX feature masks (0x88fe8-0x88ff8, 0x88ab4), XP3G = pipe
++ * generation caps (0x8e1b0-0x8e1f0), OPTB = option-block masks
++ * (0x8200d0-0x8200f4), then the speed-select aperture pair 0x823800 and
++ * 0x823b04. OPTB re-locks on warm reboot upstream and Gen2 was measured
++ * working with it locked, so its readback is advisory: optional.
++ */
++static const struct gu_reg_write ga10x_cmp90hx_plm[] = {
++	{ GU_WPR_CFG_PLM_OFFSET, 	0xfffff0ff },
++	{ GU_FEAT_PLM_OFFSET,		0xffffffff },
++	{ 0x00088fe8, 0xffffffff },
++	{ 0x00088fec, 0xffffffff },
++	{ 0x00088ff0, 0xffffffff },
++	{ GU_XVE_PLM_OFFSET, 0xffffffff },
++	{ GU_XVE_C_PLM_OFFSET, 0xffffffff },
++	{ GU_XVE_B_PLM_OFFSET, 0xffffffff },
++	{ 0x0008e1b0, 0xffffffff },
++	{ 0x0008e1b4, 0xffffffff },
++	{ 0x0008e1b8, 0xffffffff },
++	{ 0x0008e1bc, 0xffffffff },
++	{ 0x0008e1c0, 0xffffffff },
++	{ 0x0008e1c4, 0xffffffff },
++	{ 0x0008e1c8, 0xffffffff },
++	{ 0x0008e1cc, 0xffffffff },
++	{ 0x0008e1d0, 0xffffffff },
++	{ 0x0008e1d4, 0xffffffff },
++	{ 0x0008e1d8, 0xffffffff },
++	{ 0x0008e1dc, 0xffffffff },
++	{ 0x0008e1e0, 0xffffffff },
++	{ 0x0008e1e4, 0xffffffff },
++	{ 0x0008e1e8, 0xffffffff },
++	{ 0x0008e1ec, 0xffffffff },
++	{ 0x0008e1f0, 0xffffffff },
++	{ 0x008200d0, 0xffffffff, 0, true },
++	{ 0x008200d4, 0xffffffff, 0, true },
++	{ 0x008200d8, 0xffffffff, 0, true },
++	{ 0x008200dc, 0xffffffff, 0, true },
++	{ 0x008200e0, 0xffffffff, 0, true },
++	{ 0x008200e4, 0xffffffff, 0, true },
++	{ 0x008200e8, 0xffffffff, 0, true },
++	{ 0x008200ec, 0xffffffff, 0, true },
++	{ 0x008200f0, 0xffffffff, 0, true },
++	{ 0x008200f4, 0xffffffff, 0, true },
++	{ 0x00823800, 0xffffffff },
++	{ 0x00823b04, 0xffffffff },
++};
++
+ /* cmpunlocker 2d10f891, sec2-postbl-plm-ss-cfg.patch, plmTable.
+  * Order and WPR_CFG's source-control bits are significant. No geometry,
+  * link retraining, ECC or GPC/TPC configuration is performed in Stage 1.
+@@ -342,6 +392,19 @@ static const struct gu_family ga10x = {
+ 	.feat_ss0 = GU_FEAT_SS0_OFFSET,
+ 	.feat_ss1 = GU_FEAT_SS1_OFFSET,
+ };
++/* CMP 90HX: GA102 firmware stack, wider privileged table (Gen2 masks). */
++static const struct gu_family ga10x_cmp90hx = {
++	.name = "GA102 CMP 90HX",
++	.privileged = GU_WRITE_TABLE(ga10x_cmp90hx_plm),
++	.host = GU_WRITE_TABLE(selectors),
++	.fw = &ga10x_fw,
++	.booter = &sec2_ga102,
++	.loader = NULL,
++	.fwsec_version = 3,
++	.feat_plm = GU_FEAT_PLM_OFFSET,
++	.feat_ss0 = GU_FEAT_SS0_OFFSET,
++	.feat_ss1 = GU_FEAT_SS1_OFFSET,
++};
+ static const struct gu_family ad10x = {
+ 	.name = "AD102/AD103/AD104/AD106/AD107",
+ 	.privileged = GU_WRITE_TABLE(ad102_plm),
+@@ -384,6 +447,11 @@ static const struct gu_family tu102 = {
+ #define GA104(id) { id, 0x174, &ga10x }
+ #define GA106(id) { id, 0x176, &ga10x }
+ 
++/* The CMP 90HX shares its device id with the GeForce RTX 3090. This build
++ * sends every 10de:220d card down the 90HX Gen2 recipe: experiment builds
++ * only, never a general-purpose one. */
++#define CMP90HX(id) { id, 0x172, &ga10x_cmp90hx }
++
+ static const struct gu_card cards[] = {
+ 	/* TU102: RTX 2080 Ti, Titan RTX */
+ 	TU102(0x1e03), TU102(0x1e04), TU102(0x1e07), TU102(0x1e2d),
+@@ -416,7 +484,7 @@ static const struct gu_card cards[] = {
+ 
+ 	GA102(0x2200), GA102(0x2203), GA102(0x2204), GA102(0x2205),
+ 	GA102(0x2206), GA102(0x2207), GA102(0x2208), GA102(0x220a),
+-	GA102(0x220d), GA102(0x2216), GA102(0x222b), GA102(0x222f),
++	CMP90HX(0x220d), GA102(0x2216), GA102(0x222b), GA102(0x222f),
+ 
+ 	GA103(0x2414),
+ 
+-- 
+2.56.0
+
