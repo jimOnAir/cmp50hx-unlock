@@ -115,6 +115,15 @@ Gen1 by the **locked-compute training clamp**, released only via the XP3G
 policy the compute unlock opens (`XP3G_PLM0=0xffffff8f` closed, `OVR0=0` —
 and our earlier `OVR0=1` write was rejected, confirming the gate is the wall).
 
+**Retrain confirmation (2026-11-01, serving down, idle `04:00.0`):** ran the one
+remaining untested sub-step in isolation — `probe-p104-gen2.sh --retrain`
+(config-space LNKCTL2 TLS + LNKCTL Retrain on both ports only, **no GPU BAR0
+writes**). Both ends already `TLS≥2` (endpoint 2, root port 3); retrain fired on
+both; `LNKSTA` **stayed SPD=1 (Gen1)**. The card remained healthy on-bus (no
+drop; serving resumed to health 200). So neither the write-group (already set)
+nor a bare retrain moves the 50HX to Gen2 — the clamp is the locked-compute
+policy (XP3G), not the declaration.
+
 So the P104 live-group is **inert on the 615-EFI 50HX**: it targets exactly the
 bits that are *already* set. This is the opposite of the P104 case, where the
 factory `LNKCAP2=0x2` (Gen1-only) genuinely needed the write-group to flip it to
@@ -163,8 +172,12 @@ XP3G-open; GA102 is PLM-armed and cannot reach Gen2 in software at all).
   0x8E1B0`, and `0x2241C` on the fuse page, for both 50HX + endpoint/root-port
   `LNKCAP/LNKCAP2/LNKSTA/LNKCTL2`. Answers risk #2 up front (does the field
   exist on TU102, is `0x88FE8` armed?).
-- `--write <bdf>` (explicit, single idle card, serving must be down): the TU102
-  live group with our Turing speed-field encodings + XP3G omitted, both-end TLS +
-  retrain, then 2 s of `LNKSTA` polling for `SPD[3:0]==2`; volatile, power-cycle
-  reverts. Only run after the read-only pass looks promising and serving is
-  stopped.
+- `--retrain <bdf>`: **config-space only** (LNKCTL2 TLS + LNKCTL Retrain on both
+  ports, no GPU BAR0 writes) — the isolated bare-retrain test that was run and
+  confirmed Gen1 (see §Retrain confirmation). Safe; run serving-down.
+- `--write <bdf> --yes` (explicit, single idle card, serving must be down;
+  REFUSED while CUDA compute apps are live): the TU102 live group with our
+  Turing speed-field encodings + XP3G omitted, both-end TLS + retrain, then 2 s
+  of `LNKSTA` polling. Kept for a future locked-vs-unlocked A/B, but the
+  read-only snapshot already shows its target bits are pre-set → inert on the
+  615-EFI host. Volatile: a power cycle reverts.
