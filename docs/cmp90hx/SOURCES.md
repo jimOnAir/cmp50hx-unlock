@@ -123,6 +123,24 @@ outcome. (Bash-greppable: one URL per bullet.)
   (fixes all-zero-fragment overcounting; benchmark-methodology caution).
 - https://huggingface.co/TOTORONG/AD103_win_unlocker — board-specific Ada
   UEFI research (adjacent; recorded for completeness).
+- https://github.com/physicsdolphin/nv-uefi-unlocker — HEAD `16e9dc5`
+  (2026-10-31, repo created 2026-10-26), GPL-2.0-only, 436★, Rust. UEFI
+  pre-driver unlock executor (USB-stick `BOOTX64.EFI`, Windows/Linux/
+  Hackintosh): SEC2 scrubber → FWSEC/WPR2 → signed Booter → V67 four-write
+  payload, read-back verified — the EFI pre-OS analogue of our `efi-unlock/`
+  and WildFlash's EFI work, transplanted from the Zagitta transaction chain.
+  **Not applicable to 90HX/50HX: compatibility matrix explicitly excludes
+  GA100** (supports GTX 16/RTX 20/30/40 only). Value to the campaign =
+  mechanism precedent (WPR2-up triage anchored on GFW-completed + GSP-not-
+  started, RTD3 power-loss caveat, re-apply every cold boot, no-retry-after-
+  STOP discipline) + lineage anchors below. Reflected: not yet analyzed in
+  depth — recorded 2026-10-31, user-provided pointer.
+- https://github.com/JustAResearcher/gpu-unlock-ada — GPL-2.0; AD10x
+  four-write chain source, per nv-uefi-unlocker credits (new via the entry
+  above).
+- https://github.com/Consensus-Protocol/cmp170hx — PLM semantics +
+  validation methodology, per nv-uefi-unlocker credits (distinct from the
+  cmp170hx-gen2 forks already cited in vendored upstream notes).
 
 ## NVIDIA firmware inputs (Zagitta build deps, pinned)
 
