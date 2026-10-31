@@ -1,0 +1,25 @@
+[    7.203374] llm2 gpu-unlock-w2: CWAIT-PROBE 2000ms-in-C delta=2s (sleep=sleep) [up=4s]
+[    7.203399] llm2 gpu-unlock-w2: pre-capture BAR0=0xf9000000 BAR1=0x0000000c [up=4s]
+[    7.203424] llm2 gpu-unlock-w2: ladder cycle 1: insmod gu_window=0:6 [up=4s]
+[    7.203432] llm2 kernel: gpu_unlock: loading out-of-tree module taints kernel.
+[    7.203440] llm2 kernel: gpu_unlock: module verification failed: signature and/or required key missing - tainting kernel
+[    7.203724] llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=claim device=0x220d family=GA102 CMP 90HX cmd=0x100 original=0x100 bar_len=0x1000000 region=1 enabled=1 master=0
+[    7.203862] llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=layout fb=0x280000000 vga=0x27ff00000 frts=0x100000 wpr=0x275400000..0x27ff00000 boot=0x27fdfa000 gsp=0x27ada0000 heap=0x275500000
+[    7.203999] llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=dma booter=60416 payload=0xfa00 pages=20606 meta=0x777c7000 sig=0x77640000 stock=0x777c8000 boot=0x77668000
+[    7.204207] llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=gfw plm=0xffffff8f ss0=0x0 ss1=0x0 wpr2_hi=0x0
+[    7.204407] llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=fwsec version=3 fuse=0x3 ver=2 scratch=0x0 wpr2_raw=0x27fe000:0x27fee00 frts=0x27fe000:0x27fee00
+[    7.204545] llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=publish meta=0x777c7000 sig=0x77640000 size=0xfa00 radix=0x777c9000
+[    7.204679] llm2 kernel: pci 0000:03:00.0: gpu_unlock: gu_window=0:6 reopen=0 entries=6 table=37
+[    7.204820] llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=1/6 attempt=1 target=0x1fa7cc value=0xfffff0ff before=0x4cb8f after=0xfffff0ff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x777c7000 ret=0
+[    7.204957] llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=2/6 attempt=1 target=0x823804 value=0xffffffff before=0x4cb8f after=0xffffffff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x777c7000 ret=0
+[    7.205149] llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=3/6 attempt=1 target=0x88fe8 value=0xffffffff before=0x4cb8f after=0xffffffff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x777c7000 ret=0
+[    7.205308] llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=4/6 attempt=1 target=0x88fec value=0xffffffff before=0x4cb8f after=0xffffffff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x777c7000 ret=0
+[    7.205511] llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=5/6 attempt=1 target=0x88ff0 value=0xffffffff before=0x4cb8f after=0xffffffff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x777c7000 ret=0
+[    7.205648] llm2 kernel: pci 0000:03:00.0: gpu_unlock: pass=6/6 attempt=1 target=0x88ff4 value=0xffffffff before=0x4cb8f after=0xffffffff wpr2=0x2754000:0x27fee00 reset_plm=0xffffffff mbox=0x0:0x777c7000 ret=0
+[    7.205783] llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=host ss0=0x88888888 ss1=0x8 plm_feat=0xffffffff plm_wpr_cfg=0xfffff0ff
+[    7.205925] llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=flr post_wpr2=0x1ffffe00:0x0 ss0=0x88888888 ss1=0x8 plm=0xffffffff cmd=0x102 devsta=0x0 chip=0xb72000a1
+[    7.206119] llm2 kernel: pci 0000:03:00.0: gpu_unlock: stage=handoff ret=0 state=4 retained=0 pages=0/20606 cleanup=0
+[    7.206279] llm2 kernel: pci 0000:03:00.0: gpu_unlock: unlocked
+[    7.206295] llm2 gpu-unlock-w2: ladder cycle 1 (0:6): insmod_rc=0 rmmod_rc=0 wait=0s [up=6s]
+[    7.206306] llm2 gpu-unlock-w2: ladder done after 1 cycle(s); production driver binds later [up=6s]
+[    7.206316] llm2 gpu-unlock-w2: done; production driver binds later on the (re)locked-or-not state [up=6s]

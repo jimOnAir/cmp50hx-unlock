@@ -63,6 +63,7 @@ One row per `landed=true` line in `success.jsonl`:
 | 23–27 | 2026-10-31T13:21:53Z | `38a6664d` | W3f | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — fifth identical reproduction; window finding: BARs survive FLR, pread accessor exposed (§3) |
 | 28–32 | 2026-10-31T13:31:04Z | `f60bf796` | W3g | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — sixth identical reproduction; window finding: healthy device still refuses re-claim (§3 law) |
 | 33–37 | 2026-10-31T14:05:23Z | `41ebb379` | W3h | user-ladder cycle 1 (`0:6`, jdowning-shape reload interleave) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — seventh identical reproduction; window finding: full driver init between loads STILL refuses re-claim (§3 law final); both 50HXes paid the warm-reload GSP cost (§3 known-bad), power-cycle done 14:52 (`5b05bf0d`) — 3/3 recovered, §6 cold row |
+| 38–42 | 2026-10-31T15:05:32Z | `6e35d708` | WD | route-D window, single-cycle ladder (`0:6`), no reload legs | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — **eighth** identical reproduction; window finding: RETRAIN=2 lever pulled live — card-side LNKCTL2 write NOT latched (`CAP_EXP+30=0001` after `0x0002`; RP holds `0002`), link stays Gen1, health 200 throughout (§5) |
 
 Supporting (write verified in-boot, `landed=false` per §0 — re-locked at
 production init **by design**, documented upstream behavior, kept for
@@ -98,7 +99,11 @@ masked-failure discovery), `evidence/w3g-success.jsonl` +
 `evidence/w3h-mono-41ebb379.txt`
 (W3h: jdowning-shape full driver-reload interleave — re-claim STILL
 refused; #5a and #6 both closed by measurement; warm-reload GSP cost
-documented).
+documented), `evidence/wd-success.jsonl` + `evidence/wd-journal-6e35d708.txt` +
+`evidence/wd-mono-6e35d708.txt`
+(WD route-D: eighth identical landing + RETRAIN=2 lever live — card-side
+LNKCTL2 write dropped with masks landed, Gen2 bound to deeper masks
+and/or kernel-context method; §5).
 
 ## 3. Exact procedure
 
@@ -237,9 +242,20 @@ Observed exactly so on every W3 window boot; canonical transcript
   `LnkSta` stays 2.5 GT/s x4 post-bind on every one of the seven landing
   boots (per-window `check` output). The earlier expectation that landing
   masks pre-driver would let production init finish the negotiation is
-  **measured false** — the remaining delta is the unlanded ladder targets
-  (XVE `0x88ff8`/`0x88ab4`, XP3G `0x8e1b0..0x8e1f0`, OPTB
-  `0x8200d0..0x8200f4`, `0x823b04`) and/or the retrain lever.
+  **measured false**.
+- The explicit retrain lever does **not** bridge the gap either (WD boot
+  `6e35d708`, route-D experiment): with the five masks landed and live
+  under production, `CAP_EXP+30.w=0x0002` latched the root port
+  (`0002`) but the **card-side write was dropped** (raw readback `0001`,
+  `Target Link Speed: 2.5GT/s`); the bridge RL retrain then kept the link
+  at Gen1. Zero Xid/DPC, health 200 uninterrupted — lever confirmed safe,
+  and TLS latch on this card evidently requires the speed-path masks
+  and/or the driver kernel-context method, not config-space writes.
+  (W3b-era companion datapoint: same non-latch even before any masks
+  landed.) The remaining delta for Gen2 is therefore the unlanded ladder
+  targets (XVE `0x88ff8`/`0x88ab4`, XP3G `0x8e1b0..0x8e1f0`, OPTB
+  `0x8200d0..0x8200f4`, `0x823b04`) plus whatever mechanism is needed to
+  latch card TLS — an open upstream question.
 - Does **not** land the full ladder. The once-per-boot law (§3) confines
   the standalone ko to a single ≤6-entry frame per boot; the 30+ targets
   of the rejoin16 apply-table proved unreachable through the ko by BOTH
