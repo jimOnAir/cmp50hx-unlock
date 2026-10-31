@@ -62,6 +62,19 @@ phase_offline_install() {
     dpkg -i "${deb}"
 }
 
+phase_offline_sequence() {
+    # full offline self-containment proof for --on-host use (self mode):
+    # install -> verify -> purge -> reinstall, all with the network cut by
+    # the caller (unshare -n or a disconnected container)
+    local deb="${1:?offline-sequence needs the deb path}"
+    phase_offline_install "${deb}"
+    phase_assert_install
+    phase_purge
+    phase_assert_removed --purged
+    phase_offline_install "${deb}"
+    phase_assert_install
+}
+
 phase_remove() {
     log "remove: apt-get remove -y ${pkg}"
     DEBIAN_FRONTEND=noninteractive apt-get remove -y "${pkg}"
@@ -274,14 +287,92 @@ phase_assert_removed() {
     fi
 }
 
+# --- self mode (CI): the same contract in the CURRENT environment ----------
+# No docker orchestrator: a CI container job preinstalls the deps and two
+# header sets, then runs `self`. Legs and assertions are identical to loop
+# mode; the offline leg uses unshare -n where the sandbox permits it and
+# SKIPS loudly where it does not (the docker-based loop mode run locally
+# and on real hosts keeps the hard --network-none proof).
+phase_self() {
+    local deb='' upgrade_from='' skip_offline=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --deb) deb="${2:?--deb needs a path}"; shift 2 ;;
+            --upgrade-from) upgrade_from="${2:?--upgrade-from needs a path}"; shift 2 ;;
+            --skip-offline) skip_offline=1; shift ;;
+            *) printf 'unknown self argument: %s\n' "$1" >&2; exit 2 ;;
+        esac
+    done
+    [[ -f "${deb}" ]] || { printf 'deb not found: %s\n' "${deb}" >&2; exit 1; }
+    deb="$(readlink -f "${deb}")"
+    if [[ -n "${upgrade_from}" ]]; then
+        [[ -f "${upgrade_from}" ]] || { printf 'deb not found: %s\n' "${upgrade_from}" >&2; exit 1; }
+        upgrade_from="$(readlink -f "${upgrade_from}")"
+        local from_ver to_ver
+        from_ver="$(dpkg-deb -f "${upgrade_from}" Version)"
+        to_ver="$(dpkg-deb -f "${deb}" Version)"
+        [[ "${from_ver}" != "${to_ver}" ]] || { printf 'upgrade-from must differ in Version (%s)\n' "${from_ver}" >&2; exit 2; }
+    fi
+    local SELF_SCRIPT LEGS_FAILED=0
+    SELF_SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
+    leg() {
+        local name="$1"; shift
+        log "=== leg: ${name} ==="
+        if bash "${SELF_SCRIPT}" --on-host "$@"; then
+            printf 'LIFECYCLE_LEG_%s_PASS\n' "${name}"
+        else
+            printf 'LIFECYCLE_LEG_%s_FAIL\n' "${name}"
+            LEGS_FAILED=$((LEGS_FAILED + 1))
+        fi
+    }
+    leg install1          install-online "${deb}"
+    leg assert1           assert-install
+    leg purge1            purge
+    leg assert_removed1   assert-removed --purged
+    leg reinstall         install-online "${deb}"
+    leg assert2           assert-install
+    leg remove            remove
+    leg purge2            purge
+    leg assert_removed2   assert-removed --purged
+    leg purge3_idempotent purge-idempotent
+    leg assert_removed3   assert-removed --purged
+
+    if [[ -n "${upgrade_from}" ]]; then
+        log "=== upgrade block: $(dpkg-deb -f "${upgrade_from}" Version) -> $(dpkg-deb -f "${deb}" Version) ==="
+        leg upgrade_base            install-online "${upgrade_from}"
+        leg upgrade_to              install-online "${deb}"
+        leg upgrade_assert          assert-install
+        leg upgrade_purge           purge
+        leg upgrade_assert_removed  assert-removed --purged
+    fi
+
+    if (( ! skip_offline )); then
+        if command -v unshare >/dev/null 2>&1 && unshare -n true >/dev/null 2>&1; then
+            log "=== leg: offline_sequence (unshare -n) ==="
+            if unshare -n bash "${SELF_SCRIPT}" --on-host offline-sequence "${deb}"; then
+                printf 'LIFECYCLE_LEG_offline_sequence_PASS\n'
+            else
+                printf 'LIFECYCLE_LEG_offline_sequence_FAIL\n'
+                LEGS_FAILED=$((LEGS_FAILED + 1))
+            fi
+        else
+            printf 'OFFLINE_LEG_SKIPPED unshare -n not permitted here; docker loop mode keeps the hard --network-none proof\n'
+        fi
+    fi
+    printf 'LIFECYCLE_LOOP_LEGS_FAILED=%d\n' "${LEGS_FAILED}"
+    printf 'SELF_LOOP_DONE deb=%s legs_failed=%d\n' "$(basename "${deb}")" "${LEGS_FAILED}"
+    (( LEGS_FAILED == 0 )) || return 1
+}
+
 # --- loop orchestrator (host mode, docker) --------------------------------
 
 phase_loop() {
-    local deb='' container="${LC_CONTAINER:-cmp-lifecycle-test}" skip_offline=0 keep=0
+    local deb='' container="${LC_CONTAINER:-cmp-lifecycle-test}" skip_offline=0 keep=0 upgrade_from=''
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --deb) deb="${2:?--deb needs a path}"; shift 2 ;;
             --container) container="${2:?}"; shift 2 ;;
+            --upgrade-from) upgrade_from="${2:?--upgrade-from needs a path}"; shift 2 ;;
             --skip-offline) skip_offline=1; shift ;;
             --keep) keep=1; shift ;;
             *) printf 'unknown loop argument: %s\n' "$1" >&2; exit 2 ;;
@@ -289,13 +380,17 @@ phase_loop() {
     done
     [[ -f "${deb}" ]] || { printf 'deb not found: %s\n' "${deb}" >&2; exit 1; }
     deb="$(readlink -f "${deb}")"
+    if [[ -n "${upgrade_from}" ]]; then
+        [[ -f "${upgrade_from}" ]] || { printf 'upgrade-from deb not found: %s\n' "${upgrade_from}" >&2; exit 1; }
+        upgrade_from="$(readlink -f "${upgrade_from}")"
+    fi
     local tools_dir image="${LC_IMAGE:-ubuntu:24.04}"
     tools_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     command -v docker >/dev/null || { printf 'docker not available\n' >&2; exit 3; }
     docker rm -f "${container}" >/dev/null 2>&1 || true
     log "creating container ${container} (${image})"
-    docker run -d --name "${container}" -v "${tools_dir}:/lc-tools:ro" -v "$(dirname "${deb}"):/lc-debs:ro" "${image}" sleep infinity >/dev/null
+    docker run -d --name "${container}" -v "${tools_dir}:/lc-tools:ro" -v "$(dirname "${deb}"):/lc-debs:ro" -v "$(dirname "${upgrade_from:-${deb}}"):/lc-up:ro" "${image}" sleep infinity >/dev/null
     # shellcheck disable=SC2317
     cleanup() { (( ${keep:-0} )) || docker rm -f "${container:-cmp-lifecycle-test}" >/dev/null 2>&1 || true; }
     trap cleanup EXIT
@@ -359,6 +454,17 @@ phase_loop() {
     run_leg "purge3_idempotent" purge-idempotent
     run_leg "assert_removed3" assert-removed --purged
 
+    if [[ -n "${upgrade_from}" ]]; then
+        local upname
+        upname="/lc-up/$(basename "${upgrade_from}")"
+        log "=== upgrade block: $(dpkg-deb -f "${upgrade_from}" Version 2>/dev/null || echo '?') -> $(basename "${deb}") ==="
+        run_leg "upgrade_base"           install-online "${upname}"
+        run_leg "upgrade_to"             install-online "${debname}"
+        run_leg "upgrade_assert"         assert-install
+        run_leg "upgrade_purge"          purge
+        run_leg "upgrade_assert_removed" assert-removed --purged
+    fi
+
     if (( ! skip_offline )); then
         log "=== offline leg: disconnecting container network ==="
         docker network disconnect bridge "${container}"
@@ -377,6 +483,7 @@ phase_loop() {
     # per-leg verdict lines above; final tally
     log "loop finished for $(basename "${deb}") in ${container} (keep=${keep})"
     printf 'LIFECYCLE_LOOP_LEGS_FAILED=%d\n' "${LEGS_FAILED}"
+    printf 'BASELINE_LOOP_DONE deb=%s legs_failed=%d\n' "$(basename "${deb}")" "${LEGS_FAILED}"
     (( LEGS_FAILED == 0 )) || return 1
 }
 
@@ -389,6 +496,7 @@ if [[ "${1:-}" == "--on-host" ]]; then
         kernels)        kernels_with_headers ;;
         install-online) phase_install_online "$@" ;;
         offline-install) phase_offline_install "$@" ;;
+        offline-sequence) phase_offline_sequence "$@" ;;
         remove)         phase_remove "$@" ;;
         purge)          phase_purge "$@" ;;
         purge-idempotent) phase_purge_idempotent "$@" ;;
@@ -408,5 +516,6 @@ cmd="${1:-}"
 shift
 case "${cmd}" in
     loop) phase_loop "$@" ;;
-    *) printf 'unknown command: %s (want: loop)\n' "${cmd}" >&2; exit 2 ;;
+    self) phase_self "$@" ;;
+    *) printf 'unknown command: %s (want: loop | self)\n' "${cmd}" >&2; exit 2 ;;
 esac
