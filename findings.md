@@ -372,3 +372,27 @@ card's live PCI ROM export at runtime, dissolving path #3's blocked "need
 PROMs hide NVIDIA extension images beyond the standard chain). New primary
 path = port their pre-driver initramfs executor with a 90HX Gen2 write table
 (#5a) — pure-Linux, GPL-2.0, pinned 610.43.03 assets we already hold.
+
+## jdowning's repo ships BOTH Gen2 generations, and his own notes measure
+our wall (corpus clone work/upstream @2cdc63cf, 2026-10-31): driver/patches/
+pcie-gen2.patch (still in build.sh PATCH_ORDER) performs 26 in-driver
+WPR2-restore+refill+ExecuteBooterLoad re-launches per boot with readback and
+soft-fail (logs "xp3g booter FAILED to set"), while bench/90HX-GEN2-RESEARCH-
+NOTES.md states "the chain re-fires only once per FLR-separated module load"
+as an author-measured GA102 fact — the shipped answer being the rejoin16
+ladder: run #1 of each load carries ONE arbitrary (addr,value) from
+/var/lib/cmpunlocker-rs/rejoin16-next-write.bin, systemd self-cycles 34
+loads, then speed-path regs (PRIV_MISC_1, CYA_0 bit2=DIS_G2, XP3G OVR/VAL,
+LINK_CONFIG_0 MAX_RATE=(2<<18), PL_LINK_RATE=0x240036, LTSSM 0x8872c=6,
+OPT_MAGIC 0x820520, VSEC) written from kernel context at two controlled
+points + bridge retrain; userspace speed writes called "coin flip on
+wedging". Consequences: (1) llm2's 0/49 run-#2 refusal REPRODUCES the
+author's own measurement — no contradiction to explain, and the b1 question
+sharpens to "do pcie-gen2 entries 2..26 ever land on your bench?"; (2) the
+proven mask set is 34 registers (XVE6+XP3G17+OPTB10+FEAT1), not our headline
+pair; (3) never tested on llm2: the author's pure per-load ladder (run #1
+carries each mask — the one execution shape llm2 lands 2/2 — self-cycling
+overnight) = new path #6, compressible to ~6 six-write launches if #5a's
+multi-launch pre-driver holds; (4) the RmForceEnableGen2/RMPcieLinkSpeed
+"mailbox1=0x6" landmine is carrier-specific (stockflow), jdowning's install.sh
+ships those keys on his tree — W-c reopened only there.

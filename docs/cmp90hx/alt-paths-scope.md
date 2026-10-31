@@ -199,3 +199,15 @@ Full analysis: `docs/cmp90hx/rm-levers-and-p2p.md`. Ranked consequences:
    our runbook verbatim.
 Path ranking unchanged (#5a primary) — these are additional carrier-agnostic
 levers, several of which ride in EXISTING windows at near-zero cost.
+
+**#6 (new, 2026-10-31 corpus-day) — author's shipped flow, untested on
+llm2:** jdowning's full `install.sh` product (his patched tree incl.
+pcie-gen2 + probe-retrain + booter-verify + persistent-sw-state,
+RegistryDwords modprobe conf, `90hx/build-candidate-with-rejoin16.sh`
+ladder, systemd auto-cycle write→reboot×34→retrain). Run #1 per load is the
+one shape llm2 lands 2/2 — so unlike our compressed variants this has no
+run-#2 dependency; cost = one unattended overnight window (host-driven,
+fail-closed checks between boots via existing L2 harness). Details +
+register map: `rm-levers-and-p2p.md` §7. Ranking: #5a still primary
+(structurally fewer boots + pre-driver evidence), #6 = most faithful
+reproduction & fallback; #3 unchanged (demoted); #5b unchanged.

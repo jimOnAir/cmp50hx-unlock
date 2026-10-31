@@ -150,7 +150,7 @@ answer is to be recorded on that ticket.
 | `0x820250`, `0x820580`, `0x820040` (170HX probe/OPT) | 50HX/TU102 | unmapped (read as unclaimed) | our capture `20260812T1317Z-170hx-regset` |
 | `DISABLE_SW_OVERRIDE 0x820084` (+ whole 170HX fuse-override class) | 90HX/GA102 | bit0 **burned** (=1); STATUS_OPT consumes fused OPT not `_CP` — guide's own guard refuses; not portable | llm2 live read 2026-10-30 (gen-feasibility.md deep dive) |
 | GA100 post-GSP PHY set `0x8841c/0x880a8/0x88610/0x8872c/0x8c040/0x8c1c0/0x8c2c0/0x8b8c0` | 90HX/GA102 | maps + reads GA100-consistent, but XVE block PLM-armed (`0x88fe8=0xffffffcf`): CPU-write privilege = same V67 run-#2 wall | llm2 live read 2026-10-30 |
-| `RmForceEnableGen2`/`RMPcieLinkSpeed` via `NVreg_RegistryDwords` | 90HX/GA102 | config channel itself breaks stockflow GSP boot (mailbox1=0x6) on our cards | findings 2026-08 (commit 55277f2) |
+| `RmForceEnableGen2`/`RMPcieLinkSpeed` via `NVreg_RegistryDwords` | 90HX/GA102 | breaks GSP boot **on the stockflow carrier** (mailbox1=0x6); nuance 2026-10-31: jdowning's `install.sh:229` ships the same keys with his own patched tree — untested there | findings 2026-08 (commit 55277f2); `rm-levers-and-p2p.md` §7.5 |
 | `OPT_GEN23 0x82057c`, `VSEC_DEVICE 0x8860c` | 90HX/GA102 | writes ignored even via V67 chain (fuse-shadow) | rejoin16 notes §Hazards |
 | GA100 PJTAG PLM `0xc840`/`0xc848` | 90HX/GA102 | region returns `0xbadf1xxx` — unmapped | rejoin16 notes §Open questions |
 | pre-OS retrain (any card) | both | host hang (X99/X299); retired | issue #25, README |
