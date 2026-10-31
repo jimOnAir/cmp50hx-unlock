@@ -21,15 +21,20 @@ each success; rules in ticket 11 (`Success logging`).
 
 ## 1. Preconditions (state required before running the method)
 
-*To be filled from W0 probe + first successful window (W2/#6).*
+*Filled from W0 probe (2026-11-01, boot `49066f2d-ce5a-4e58-95cf-db6a17714766`),
+full record `pre-driver-probe-w0.md`. These describe the llm2 platform as
+probed — still no method has run (see §2).*
 
 | Item | Required value | Evidence |
 |---|---|---|
-| Secure Boot state | | W0 |
-| iommu mode / group types | | W0 |
-| FLReset present on 03:00.0 | | W0 |
-| Card bound-to at claim time | (unbound / pci-stub) | |
-| Driver context | (pre-driver initramfs / in-driver) | |
+| Secure Boot state | disabled (Setup Mode) | W0.1 `mokutil --sb-state` |
+| iommu mode / group types | `iommu=pt`; card+bridge groups `identity` | W0.1 `/proc/cmdline` |
+| FLReset present on 03:00.0 | **yes** (DevCap FLReset+) | W0.1 `lspci -vv` |
+| Card bound-to at claim time | unbound through initramfs (cmdline blacklist; `cmp50hx-boot` binds only at multi-user) | W0.1 journal 10:01:47 |
+| Driver context | (pre-driver initramfs / in-driver) — TBD by first window | |
+| PROM/FWSEC availability | BAR0 `+0x300000` PROM window: FWSEC **v3, engine_mask 0x400**, ucode 9 (PCI ROM BAR irrelevant — zeroed by firmware) | W0.3 `tools/parse-prom-fwsec.py` on md5 `ac0752e8…` |
+| FEAT bootstrap state at boot | `0x823804 = 0xffffffff` OPEN (production canary opens it every boot) | W0.4 BAR0 read |
+| Speed-path baseline | CYA_0 `0x8c2c0` bit2 DIS_G2=**1**; masks `…8f`/`…cf` locked bits present | W0.4 BAR0 read |
 
 ## 2. Landed writes (successes only)
 
