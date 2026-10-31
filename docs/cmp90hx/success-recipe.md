@@ -95,36 +95,35 @@ timings from the success journal (whole claim ~1 s, 10:39:07→:08).
    that order: WPR_CFG first is required by the executor (its own
    `ga10x_plm` opener), and FEAT must precede `0x823800` (PLM law). 3
    entries ≤ 6-slot DMA frame ⇒ **exactly one launch**.
-   *Measured law (W3a boot `6b8b83b1`, W3b boot `18d94504`):* **the V67
-   chain fires once per load whose device completed re-initialization** —
-   a second SEC2 launch inside one load times out (`completion error=-110`,
-   `fhstate=0xfff8 csberr=0x400000`), and a re-claim right after a load's
-   terminal FLR is refused (`gfw error=-114`, reads `0xbadf5620` = device
-   still in reset). Ladders therefore need one claim-load per ≤4 targets
-   (+2 auto-reopened openers, port patch 0003 `gu_window`) *gated on device
-   readiness* between loads (chip-id re-poll; or full driver init —
-   jdowning's inter-cycle shape).
-   *Instrument caveat (W3d boot `50c2df42`):* a pre-claim chip-id poll is
-   **structurally blind** — FLR clears `COMMAND.MEM` (bit 1 of config 0x4)
-   and BAR0 then reads `0x00000000` even though config space answers fully
-   (`vendor/device = 0x10de:0x220d`); the module's own `pci_enable_device`
-   is why in-claim reads show the real sentinel `0xbadf5620` instead.
-   Any readiness gate must re-enable MEM decode first (`ss-relock en`:
-   config dword 0x4 |= 0x2, computed in-binary) — MEM did demonstrably set
-   in W3e (`en_rc=0`) yet reads still failed; **and the accessor must be
-   the mmap one**: on kernel 7.0.0-38 sysfs `pread` of `resource0` returns
-   EIO even on a healthy bound card (maskread's 16 MiB `mmap` succeeds;
-   W3f boot `38a6664d` proved the ladder's `chip=0x00000000` values were
-   wait-rd printing its zero-init after failed preads — masked failures,
-   not device zeros). **Trustworthy device datapoints, both in-kernel
-   iomap: `chip=0xb72000a1` alive ~100 ms after `pcie_flr()`
-   (`stage=flr`, every launch) and `0xbadf5620` poison at the +1 s W3b
-   re-claim. The window between is unobserved** (H1 fabric-death vs
-   later recovery OPEN). FLR additionally clears COMMAND.MEM but does NOT
-   clear device-side BARs (W3f: `BAR0=0xf9000000` bit-exact after FLR).
-   W3g: mmap-based `ss-relock` v4 with stage-named failures
-   (`ERR_OPEN`/`ERR_MMAP`, never a fabricated value) re-runs the same
-   gated poll to get the real timeline.
+   *Measured law (final form; W3a `6b8b83b1`, W3b `18d94504`, W3g
+   `f60bf796`):* **the V67 chain fires once per FLR-separated load, and a
+   re-claim only succeeds if a full driver initialization ran between
+   loads.** A second SEC2 launch inside one load times out
+   (`completion error=-110`, `fhstate=0xfff8 csberr=0x400000`); a re-claim
+   without driver-init is refused (`gfw error=-114`) **even when the
+   device is chip-id-healthy from t0 with bit-exact BARs and live config
+   space** (W3g: `ready after 5s chip_seq[t0=0xb72000a1]` yet `ret=-114`,
+   twice, two-strike stop). Gating on CPU-visible readiness (chip-id poll,
+   MEM re-enable, BAR replay) is *insufficient by physics* — the
+   GFW/FWSEC chain needs the driver's boot handshake to re-arm. Ladders
+   therefore need one claim-load per ≤4 targets (+2 auto-reopened openers,
+   port patch 0003 `gu_window`) with a **driver unbind/re-bind cycle
+   between loads** (jdowning's inter-cycle shape) — the initramfs
+   reload-ladder (#5a) is closed by the W3g measurement.
+   *Instrument caveat (W3d→W3g, resolved):* a pre-claim chip-id poll via
+   the module-style path is **structurally blind** twice over — (a) FLR
+   clears `COMMAND.MEM` (bit 1 of config 0x4), so decode must be
+   re-enabled first (`ss-relock en`: dword 0x4 |= 0x2, in-binary; W3e
+   `en_rc=0`); (b) on kernel 7.0.0-38 sysfs **`pread`** of `resource0`
+   returns EIO even on a healthy bound card, and old `wait-rd` printed its
+   zero-init after a failed pread — the W3d/W3e `chip=0x00000000` were
+   masked failures, not device values. Truthful accessor = maskread's
+   16 MiB `mmap` (`ss-relock` v4, `ERR_OPEN`/`ERR_MMAP` on failure, never
+   a fabricated value). With v4, **W3g `f60bf796` saw the device
+   chip-id-healthy from t0, BARs bit-exact, config alive** — so there is
+   no observable "death timeline"; the refusal (`-114`) is purely the
+   GFW needing driver init, per the §3 law above. FLR clears COMMAND.MEM
+   but does NOT clear device-side BARs (W3f: `BAR0=0xf9000000` bit-exact).
 2. **Stage** on target: ko → `/root/zagitta-port/gpu_unlock_diag.ko`; the 4
    ga102-suffix assets (§1) under `/root/.cache/gpu-unlock/assets/610.43.03/`.
 3. **Arm** (`l2-w2.sh arm`, deployed `/root/l2-w2/`): install initramfs
