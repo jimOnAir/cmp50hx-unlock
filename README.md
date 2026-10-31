@@ -108,13 +108,15 @@ serving host (kernel `7.0.0-38-generic`), builds and loads, zero Xid. The
 V244-era exploit signature (`booter error 0x1c @ tracepc 0x1b38`,
 deterministic, 3/3 cards). Follow-up analysis
 (`.scratch/615-port/research-11-booter-analysis.md`) established the Booter
-image itself is **byte-identical** 610↔615 — every gadget/ROP constant of the
-chain remains valid; what changed is the signed LS-manifest the crafted
-signature must declare (`+0x880`: `0x401`→`0x441`) while the chain still
-declares the 580-era `0x344`. The fix is a bounded two-dword experiment
-(ticket 11, re-scoped down from a booter re-benchmark), not a re-port; until
-it lands serving hosts stay on `610.43.03` — a deliberate, evidence-backed
-hold, not neglect. Unrelated 615 note: `615.78.08` also cannot build against Ubuntu
+image itself is **byte-identical** 610↔615 (also GA102/GA100/AD102 — only
+Blackwell's booter moved); a live 3-card experiment ruled out the bumped LS
+manifest as the gate and localized the failure to the verifier's DMEM state
+over **moved LibOS task instances** (`rm_elf_text` base `0x4bf7000→0x4588000`,
+rm-stack pointer embedded in the walked `.manifest` — 8 bytes changed there,
+all pointers). Unlocking on 615 = re-calibrating the frame to those pointers
+(ticket 11 phase 2 — bounded RE with the exact seed values known), not a
+re-port; until it lands serving hosts stay on `610.43.03` — a deliberate,
+evidence-backed hold, not neglect. Unrelated 615 note: `615.78.08` also cannot build against Ubuntu
 kernels ≥ `7.0.0-42-generic` (upstream CXL conftest gap — the
 `NV_CXL_CXL_H_PRESENT` probe reports the header present while `struct cxlds_device`
 stays incomplete after the kernel's CXL reorg; `610.43.03` is unaffected), so
