@@ -148,7 +148,8 @@ case "${card}" in
                  "${script_dir}/patches/cmp50hx/06-aikitoria-p2p.patch" \
                  "${script_dir}/patches/cmp50hx/07-turing-p2p.patch" \
                  "${script_dir}/patches/cmp50hx/08-cmp50-driver-profiling.patch" \
-                 "${script_dir}/patches/both/09-lsvar-615-experiment.patch"; do
+                 "${script_dir}/patches/both/09-lsvar-615-experiment.patch" \
+                 "${script_dir}/patches/both/10-efionly-skip-stockflow.patch"; do
             [[ -f "$p" ]] || { printf 'missing patch: %s\n' "$p" >&2; exit 5; }
             patch_files+=("$p")
         done

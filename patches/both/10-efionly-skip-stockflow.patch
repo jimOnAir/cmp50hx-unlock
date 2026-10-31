@@ -1,0 +1,56 @@
+diff --git a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+--- a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
++++ b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+@@ -6566,6 +6566,30 @@
+  * (TU102: 0x344/1; GA102: header/slots untouched). One log line per GPU
+  * records the effective values for the boot verdict: CMP50_LSV / CMP90_LSV.
+  */
++/*
++ * ticket-11 EFI-only mode: per-GPU registry key RmCmpSkipStockflow=1
++ * (via NVreg_RegistryDwordsPerDevice) disables the in-driver crafted
++ * signature transaction so the stock GSP boot runs unmodified; the
++ * compute unlock is then provided pre-OS by the 50HX Unlock EFI
++ * application (V67 exploit against the card's own PROM/ucode —
++ * independent of the driver's LibOS).  ReBar / RT-count / Gen2 /
++ * profiling patches stay active.
++ */
++static NvBool
++_kgspCmpSkipStockflow(OBJGPU *pGpu)
++{
++    NvU32 v = 0;
++
++    if ((osReadRegistryDword(pGpu, "RmCmpSkipStockflow", &v) == NV_OK) && (v != 0))
++    {
++        NV_PRINTF(LEVEL_ERROR,
++                  "CMP_EFI_ONLY: RmCmpSkipStockflow set - stock GSP boot, "
++                  "compute unlock expected from pre-OS EFI unlocker\n");
++        return NV_TRUE;
++    }
++    return NV_FALSE;
++}
++
+ static void
+ _kgspCmpLsVarOverride
+ (
+@@ -6705,6 +6729,11 @@
+         return NV_OK;
+     }
+ 
++        if (_kgspCmpSkipStockflow(pGpu))
++    {
++        return NV_OK;
++    }
++
+     cmp90GpuSlot = _kgspCmp90Rejoin14GpuSlot(pGpu);
+ 
+     {
+@@ -6843,7 +6872,8 @@
+     NvU64 i;
+     NvBool bCmp50PcCanary =
+         (pGpu->idInfo.PCIDeviceID == CMP50_PC_CANARY_PCI_DEVICE_ID) &&
+-        CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(pGpu->idInfo.PCISubDeviceID);
++        CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(pGpu->idInfo.PCISubDeviceID
++        !_kgspCmpSkipStockflow(pGpu);
+     NvU64 signatureMemdescSize = bCmp50PcCanary ?
+         CMP50_PC_CANARY_SIGNATURE_SIZE :
+         NV_ALIGN_UP(pGspFw->signatureSize, 256);
