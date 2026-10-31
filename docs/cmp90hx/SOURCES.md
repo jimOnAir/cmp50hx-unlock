@@ -142,6 +142,22 @@ outcome. (Bash-greppable: one URL per bullet.)
   validation methodology, per nv-uefi-unlocker credits (distinct from the
   cmp170hx-gen2 forks already cited in vendored upstream notes).
 
+## Found 2026-11-01 (user-provided pointer → material discovery)
+
+- https://github.com/skbskhud/p104-unlock-v3 — HEAD tool v1.2 (2026-10-31),
+  "full open source". **GP104 P104-100 (`10DE:1B87`) PCIe Gen2 x4 LIVE unlock**
+  — the first lever in our corpus that reaches Gen2 **without writing XP3G**
+  (no compute exploit, no `0x8E1B0` gate). Adds `0x2241C` **NV_PTOP_FS4**
+  ("live declaration switch", bits[0],[7]=1) which appears nowhere else in our
+  docs; reuses the XVE/XP_PL set we already hold (`0x8841C/0x8C040/0x8C1C0/
+  0x8C2C0/0x8872C`) plus `0x8C300` CYA1 + `0x88610` VSEC_HIER, then TLS=2 both
+  ends + root-port retrain. Measured GP104: Gen1 0.78 → Gen2 1.55/1.69 GB/s,
+  volatile (20 ms watchdog). Full register cross-map + TU102 port notes + risk
+  analysis + read-only probe: **`docs/cmp90hx/upstream/p104-unlock-v3/README.md`**.
+  **Candidate lever for the CMP 50HX 615-EFI-only Gen2 gap** (ticket 11 §9):
+  untested on Turing; GA102 (`0x88fe8=0xffffffcf`, `VSEC_DEVICE` fuse-shadow) is
+  the negative control — probe `0x88fe8`/`0x2241C` on TU102 before any write.
+
 ## NVIDIA firmware inputs (Zagitta build deps, pinned)
 
 - https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-610.43.03.tar.xz

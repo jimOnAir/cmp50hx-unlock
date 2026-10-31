@@ -128,7 +128,11 @@ in-driver unlock): the **CMP 90HX stays compute-locked** (the EFI unlocker is
 `10de:1e09`-only, no `220d` payload), and **PCIe Gen2 is not applied** (the
 XP3G privilege-gate-open write lives inside the skipped signature table; the
 host-side `XP3G OVERRIDE0` write is rejected while the gate is closed, so the
-Gen2 kick no-ops). A single-CMP-50HX inference host sees neither gap. Until
+Gen2 kick no-ops; the GP104 P104-100 live-declaration lever
+(`docs/cmp90hx/upstream/p104-unlock-v3/`) was investigated and is inert on
+TU102 — those declaration bits are already set on the 50HX yet the link still
+trains Gen1, confirming XP3G is the wall). A single-CMP-50HX inference host sees
+neither gap. Until
 the in-driver unlock returns on a *locked-90HX* multi-GPU box, the llama.cpp
 `-tb 32` slice lands on the locked 90HX and prompt throughput drops (≈ −74 %);
 that is the only serving regression and the reason a 90HX-heavy host would
