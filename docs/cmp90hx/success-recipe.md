@@ -129,12 +129,21 @@ Observed exactly so on boot `da354d66…` (2026-10-31 10:39–10:42 UTC) —
   opener only; LnkSta stayed 2.5 GT/s x4 during and after the success boot
   (observed). The Gen2 ladder (XVE×6 + XP3G×17 + OPTB×10 + `0x823b04`) is
   W3, untested.
+- Context for W3 expectations (observed, `da354d66` dmesg): the production
+  campaign driver already attempts a Gen2 retrain at every init
+  (`CMP90 Gen2: retrain completed without Gen2 link status=0x1041`) — it
+  fails only because the masks are locked at that point. If W3 lands the
+  ladder pre-driver, production init itself may complete the negotiation;
+  check `LnkSta` before using the manual retrain lever.
 - Does **not** claim power-off persistence (untested; cold boot expected to
   reset — §6).
 - Warm-reboot persistence of `0x823800` is **not yet proven** — only
-  same-boot checkpoints (FLR + production bind). Free observation planned:
-  W3 local-top will read `0x823804`/`0x823800` *before* insmod on the next
-  warm reboot.
+  same-boot checkpoints (FLR + production bind). Observation method: on the
+  first NORMAL (unflagged) warm reboot, read
+  `sudo python3 /root/l2-w2/maskread.py 0000:03:00.0 0x823804 0x823800`
+  before any experiment code runs (initramfs pre-reads are infeasible:
+  executor `before=` values are selector-page garbage, and /dev/mem→ECAM
+  is silently unreliable — see ticket 11 gotchas).
 - The write does not make runtime userspace BAR0 pokes safe or necessary;
   do not add runtime pokers (ticket 11 prohibition stands).
 - OPTB/XVE/XP3G untouched by this frame; upstream note that OPTB re-locks
@@ -148,7 +157,7 @@ Observed exactly so on boot `da354d66…` (2026-10-31 10:39–10:42 UTC) —
 |---|---|---|---|
 | module reload (FLR) | `0x823800` ✓ (`0x823804` ✓; WPR_CFG re-locked by design) | n/a — Gen1 before/after | W2 `stage=flr` line + production reads (`da354d66`) |
 | production driver bind | `0x823800` ✓ | Gen1 (never raised) | W2 jsonl line 6 checkpoint |
-| warm reboot | TBD | TBD | observe pre-insmod at W3 |
+| warm reboot | TBD — read via `maskread.py` on first unflagged boot | TBD | plan: W3 disarm reboot |
 | cold boot (power cycle) | TBD | TBD | — |
 | runtime D3 round-trip | TBD | TBD | — |
 
