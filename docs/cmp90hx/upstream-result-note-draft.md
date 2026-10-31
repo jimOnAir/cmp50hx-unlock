@@ -62,11 +62,17 @@ a cold boot that followed an unlocked one.)
 
 **Not achieved here:** Gen2 (`5.0 GT/s`) on the 90HX. With FEAT+XVE×4
 landed pre-driver, production init still logs `retrain completed without
-Gen2` and `LnkSta` stays 2.5 GT/s x4 — so the remaining delta is the
-unlanded ladder targets (XP3G/OPTB/more XVE + `0x823b04`) and/or the
-retrain lever, not these five masks. Root-port-side retrain itself works
-on this host (same-generation cards reach 5.0 GT/s every boot through the
-upstream-bridge TLS+retrain flow).
+Gen2` and `LnkSta` stays 2.5 GT/s x4 — the remaining delta is not these
+five masks. The manual lever experiment is also negative and sharp:
+writing LNKCTL2 (`CAP_EXP+30`, target=Gen2) **latches fine on the root
+port but the card-side write is silently dropped** (raw readback stays
+`0x0001`) — measured both with and without the five masks live under the
+bound driver. Bridge Retrain then harmlessly keeps Gen1. So on this
+card/host, what actually latches the GPU-side Target Link Speed: the
+speed-path mask family (XP3G/OPTB) open first, the rejoin16-style write
+from kernel context inside the driver, or both? Root-port-side retrain
+itself works on this host (same-generation cards reach 5.0 GT/s every
+boot through the upstream-bridge TLS+retrain flow).
 
 **Hardware hazard worth documenting for anyone reload-cycling the ko
 next to the stock driver:** the driver's per-GPU RM init is serialized,
