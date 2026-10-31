@@ -62,7 +62,7 @@ One row per `landed=true` line in `success.jsonl`:
 | 18–22 | 2026-10-31T12:56:03Z | `c211e3a9` | W3e | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — fourth identical reproduction; gate finding: `en_rc=0` (MEM enable proven; chip reading later exposed as accessor artifact, §3) |
 | 23–27 | 2026-10-31T13:21:53Z | `38a6664d` | W3f | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — fifth identical reproduction; window finding: BARs survive FLR, pread accessor exposed (§3) |
 | 28–32 | 2026-10-31T13:31:04Z | `f60bf796` | W3g | ladder cycle 1 (`0:6`) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — sixth identical reproduction; window finding: healthy device still refuses re-claim (§3 law) |
-| 33–37 | 2026-10-31T14:05:23Z | `41ebb379` | W3h | user-ladder cycle 1 (`0:6`, jdowning-shape reload interleave) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — seventh identical reproduction; window finding: full driver init between loads STILL refuses re-claim (§3 law final); both 50HXes paid the warm-reload GSP cost (§3 known-bad), power-cycle pending |
+| 33–37 | 2026-10-31T14:05:23Z | `41ebb379` | W3h | user-ladder cycle 1 (`0:6`, jdowning-shape reload interleave) | same five addresses | `0xffffffff` ×5 | `0xffffffff` ×5 | FLR ✓ · production bind ✓ — seventh identical reproduction; window finding: full driver init between loads STILL refuses re-claim (§3 law final); both 50HXes paid the warm-reload GSP cost (§3 known-bad), power-cycle done 14:52 (`5b05bf0d`) — 3/3 recovered, §6 cold row |
 
 Supporting (write verified in-boot, `landed=false` per §0 — re-locked at
 production init **by design**, documented upstream behavior, kept for
@@ -251,10 +251,9 @@ Observed exactly so on every W3 window boot; canonical transcript
   `da354d66`). The current `0:6` frame does not target it and later-boot
   post-bind checks read `0xffffff8f` (not landed); no reproduction claim
   is made for that address.
-- Does **not** survive reboots: warm reset is MEASURED (§6), cold reset
-  expected (pending power-cycle verification). A fleet re-apply must run
-  the claim on every boot; upstream's warm-boot "skip if sample masks read
-  open" fast path never fires here.
+- Does **not** survive reboots: warm AND cold reset both MEASURED (§6).
+  A fleet re-apply must run the claim on every boot; upstream's warm-boot
+  "skip if sample masks read open" fast path never fires here.
 - The write does not make runtime userspace BAR0 pokes safe or necessary;
   do not add runtime pokers (ticket 11 prohibition stands).
 - OPTB and XP3G remain untouched by any landed frame; the upstream note
@@ -270,7 +269,7 @@ Observed exactly so on every W3 window boot; canonical transcript
 | module reload (FLR) | ✓ the landed frame — `0x823804` + XVE `0x88fe8/8fec/8ff0/8ff4` (`0x823800` ✓ W2 only); WPR_CFG re-locked by design | n/a — Gen1 before/after | jsonl `post-flr-post-production-bind` checkpoints, §2 rows 1–37; W2 `stage=flr` line |
 | production driver bind | ✓ same set, 7/7 boots strict (`landed=true`) | Gen1 (never raised) | per-window `check` `persisted post-production-bind: 5/7`; §2 rows 4–37 |
 | warm reboot | ✗ **RESET** — every ladder boot's first pre-driver ko read of each target is the locked `0x4cb8f`, although the previous boot ended at `0xffffffff` (final window checks) | n/a | all seven boots W3a `6b8b83b1` … W3h `41ebb379`: `grep 'pass=2/6'`/`pass=3/6` in `evidence/w3*-journal*`/`w3*-mono*` |
-| cold boot (power cycle) | predicted RESET (same register class); **untested** — verification due on the pending post-W3h power cycle: `sudo python3 /root/l2-w2/maskread.py 0000:03:00.0 0x823804 0x88fe8 0x823800` early on the first cold boot (read-only 16 MiB mmap accessor; locked fingerprint `0x4cb8f`) | n/a | — (record result here when taken) |
+| cold boot (power cycle) | ✗ **RESET — measured 2026-10-31** (cold boot `5b05bf0d` after W3h): all four XVE addresses read post-bind at the production partial baseline (`0xffffffcf/0xffffff8f`), **zero `0xffffffff`**, although the previous boot ended with `0xffffffff` held at every one through production bind | n/a | `maskread.py 0x823804 0x88fe8 0x88fec 0x88ff0 0x88ff4 0x823800` post-cold-boot; FEAT `0xffffffff` = production canary, not carried-over (§1 row) |
 | runtime D3 round-trip | n/a — this host never D3s the card: `nvidia-persistenced` masked, `gputempd`/`cmp-idle-governor` hold it; `power_state=D0` in every window read | n/a | W3h `pre-state … power=D0`; production topology notes, ticket 11 |
 
 ## 7. Rollback

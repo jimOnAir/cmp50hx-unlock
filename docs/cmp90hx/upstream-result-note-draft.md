@@ -56,8 +56,9 @@ route (~34 boots) or can be compressed.
 `0x4cb8f` (7/7 boots re-read locked at first pre-write read although the
 previous boot ended open; checkpoint reads `0xffffffff` every time). A
 "skip if sample masks read open" warm-boot fast path would never fire on
-this hardware. Re-apply must run every boot. (Cold/power-cycle reset
-assumed, verification pending.)
+this hardware. Re-apply must run every boot. (Cold power-cycle reset now
+also measured: masks re-read at the locked/production-partial baseline on
+a cold boot that followed an unlocked one.)
 
 **Not achieved here:** Gen2 (`5.0 GT/s`) on the 90HX. With FEAT+XVE×4
 landed pre-driver, production init still logs `retrain completed without
