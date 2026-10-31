@@ -1,11 +1,12 @@
 # Success recipe — VERIFIED unlock methods only (CMP 90HX @ llm2)
 
-**Status: EMPTY.** No method has landed a privileged write on llm2 yet
-(run-#2 record 0/49, window #10 last attempt). This file is the canonical,
-reproduction-grade log of unlock methods that are **proven on real
-hardware** — fleet rollout, cold-boot re-apply logic, and any upstream
-result-note all derive from it. Populated during the same work cycle as
-each success; rules in ticket 11 (`Success logging`).
+**Status: ACTIVE — 1 attributable landed write.** W2 diagnostic window
+(2026-10-31, boot `da354d66-dce9-44c2-ba0f-c20c5840a9cf`) landed
+`0x823800 = 0xffffffff` with strict persistence (post-FLR + post-production
+bind). This file is the canonical, reproduction-grade log of unlock methods
+that are **proven on real hardware** — fleet rollout, cold-boot re-apply
+logic, and any upstream result-note all derive from it. Populated during the
+same work cycle as each success; rules in ticket 11 (`Success logging`).
 
 ## 0. Evidence rules
 
@@ -21,9 +22,9 @@ each success; rules in ticket 11 (`Success logging`).
 
 ## 1. Preconditions (state required before running the method)
 
-*Filled from W0 probe (2026-11-01, boot `49066f2d-ce5a-4e58-95cf-db6a17714766`),
-full record `pre-driver-probe-w0.md`. These describe the llm2 platform as
-probed — still no method has run (see §2).*
+*Filled from W0 probe (boot `49066f2d-ce5a-4e58-95cf-db6a17714766`), full
+record `pre-driver-probe-w0.md`. Confirmed sufficient by the W2 success
+boot (§2).*
 
 | Item | Required value | Evidence |
 |---|---|---|
@@ -31,10 +32,11 @@ probed — still no method has run (see §2).*
 | iommu mode / group types | `iommu=pt`; card+bridge groups `identity` | W0.1 `/proc/cmdline` |
 | FLReset present on 03:00.0 | **yes** (DevCap FLReset+) | W0.1 `lspci -vv` |
 | Card bound-to at claim time | unbound through initramfs (cmdline blacklist; `cmp50hx-boot` binds only at multi-user) | W0.1 journal 10:01:47 |
-| Driver context | (pre-driver initramfs / in-driver) — TBD by first window | |
-| PROM/FWSEC availability | BAR0 `+0x300000` PROM window: FWSEC **v3, engine_mask 0x400**, ucode 9 (PCI ROM BAR irrelevant — zeroed by firmware) | W0.3 `tools/parse-prom-fwsec.py` on md5 `ac0752e8…` |
+| Driver context | pre-driver, initramfs `local-top`, module loaded `targets=… resume=0` | W2 success (2) |
+| PROM/FWSEC availability | BAR0 `+0x300000` PROM window: FWSEC **v3, engine_mask 0x400**, ucode 9 (PCI ROM BAR irrelevant — zeroed by firmware); Zagitta resolves it | W0.3 `tools/parse-prom-fwsec.py`; W2 `stage=fwsec version=3` |
 | FEAT bootstrap state at boot | `0x823804 = 0xffffffff` OPEN (production canary opens it every boot) | W0.4 BAR0 read |
 | Speed-path baseline | CYA_0 `0x8c2c0` bit2 DIS_G2=**1**; masks `…8f`/`…cf` locked bits present | W0.4 BAR0 read |
+| Assets staged pre-arm | `gsp_ga10x.bin`, `gsp_boot_desc_ga102.bin`, `gsp_boot_ga102.bin`, `booter_load_ga102.bin` (610.43.03) readable by the initramfs hook | W1/§3 step 1 |
 
 ## 2. Landed writes (successes only)
 
@@ -42,69 +44,162 @@ One row per `landed=true` line in `success.jsonl`:
 
 | # | ts | boot_id | window | context | addr | value | readback | survived |
 |---|---|---|---|---|---|---|---|---|
+| 1 | 2026-10-31T10:40:05Z | `da354d66` | W2 | pre-driver initramfs | `0x00823800` | `0xffffffff` | `0xffffffff` (in-boot `after=` + production runtime read) | FLR ✓ · production nvidia bind ✓ (jsonl line 6: `landed=true`, `checkpoint_attributable=true`) |
+| 2 | 2026-10-31T10:40:05Z | `da354d66` | W2 | pre-driver initramfs | `0x00823804` (FEAT) | `0xffffffff` | `0xffffffff` | FLR ✓ · production bind ✓ — **non-attributable**: production canary opens FEAT every boot (W0.4), so the write is a no-op-safe idempotent opener, not independent proof |
+
+Supporting (write verified in-boot, `landed=false` per §0 — re-locked at
+production init **by design**, documented upstream behavior, kept for
+completeness): `0x001fa7cc` (WPR_CFG) `→0xfffff0ff`, in-boot readback exact,
+survived FLR (`stage=flr … plm_wpr_cfg=0xfffff0ff`), then re-locked to
+`0x0004cb8f` when the production driver initialized — expected every boot.
+
+Evidence files (tracked): `evidence/w2-success.jsonl` (6 lines: 3 ×
+`status=absent` from harness-bug attempt `0cdbe414`, 3 × `ok` from
+`da354d66`), `evidence/w2-journal-da354d66.txt` (raw journal incl. all three
+`pass=…/3 … ret=0` lines and `stage=flr`/`stage=handoff`),
+`evidence/w2-journal-0cdbe414-abort.txt`.
 
 ## 3. Exact procedure
 
-*Reproducible step list, in order — geometry (frames/launches, ordering
-constraints like FEAT-first), timings, command lines. Written from the
-journ + success.jsonl, then re-checked against a later reproduction boot.*
+Reproduces the W2 diagnostic frame (the *speed* ladder is W3 — §5). Geometry
+from code (`work/zagitta-port` `unlock_610.c run_privileged_writes`),
+timings from the success journal (whole claim ~1 s, 10:39:07→:08).
+
+1. **Build** (pinned, §8): Zagitta fork `7eb51bcc` + port series
+   `patches/zagitta-gpu-unlock/000{1,2}-*.patch`, DIAG variant:
+   `make -C kernel KCFLAGS='-DCONFIG_DRM_GPU_UNLOCK -DGU_DRIVER_VERSION="610.43.03" -DGU_CMP90HX_DIAG'`
+   → `gpu_unlock.ko` (md5 `c237dd5f0ce953b92a6cdd65225376e4`). The diag
+   table is exactly the 3-entry frame
+   **[0x1fa7cc=0xfffff0ff, 0x823804=0xffffffff, 0x823800=0xffffffff]** in
+   that order: WPR_CFG first is required by the executor (its own
+   `ga10x_plm` opener), and FEAT must precede `0x823800` (PLM law). 3
+   entries ≤ 6-slot DMA frame ⇒ **exactly one launch**.
+2. **Stage** on target: ko → `/root/zagitta-port/gpu_unlock_diag.ko`; the 4
+   ga102-suffix assets (§1) under `/root/.cache/gpu-unlock/assets/610.43.03/`.
+3. **Arm** (`l2-w2.sh arm`, deployed `/root/l2-w2/`): install initramfs
+   hook + `local-top/gpu-unlock-w2`; `update-initramfs` bakes ko + 4 assets;
+   clone the real menu entry into `/etc/grub.d/40_custom` appending cmdline
+   flag `cmp90hx_w2=1` (deliberately not `gpu_unlock.*` — unknown
+   module-prefixed params would go to the module parser); `grub-editenv
+   set next_entry=…` (one-shot; default entry untouched); write `state`
+   (md5s, boot_id).
+4. **Reboot (warm)**. On the armed boot only, `local-top` fires: guard
+   `[ -L /sys/bus/pci/devices/0000:03:00.0/driver ]` must show *unbound*
+   (NOT `readlink -f` — it prints paths for absent links, see Gotchas in
+   ticket 11), then `insmod gpu_unlock.ko targets=0000:03:00.0 resume=0`.
+   Executor pipeline runs: claim → fwsec (PROM via BAR0 `+0x300000`) → gfw
+   → publish → privileged launch (per-entry `pass=N/M … after=` log) →
+   host CPU writes SS0=`0x88888888`/SS1=`0x8` → function-level reset →
+   handoff `ret=0`.
+5. **Verify**: production boots normally (`cmp50hx-boot` binds nvidia at
+   multi-user); `l2-w2.sh check` → post-boot BAR0 reads + LnkSta + health,
+   parses journal slice, appends `success.jsonl` (idempotent per boot_id),
+   prints verdict.
+6. **Pull** evidence off-host (`l2-w2.sh pull`), then **disarm** (remove
+   hook/local-top, `update-initramfs`, delete custom entry, clear env) and
+   verify clean state. Never leave armed.
 
 ## 4. Verification commands + expected outputs
 
 ```
-# e.g.
-LnkSta:  (lspci -vv -s 0000:03:00.0 | grep LnkSta)      -> Speed 5GT/s, Width x4
-readback: (bar0 read of each §2 addr)                   -> 0xffffffff
-serving:  (curl -s -o /dev/null -w '%{http_code}' <health>) -> 200
+# all on llm2, post-window:
+boot flag seen      grep cmp90hx_w2=1 /proc/cmdline
+chain fired         sudo journalctl -k -b <id> | grep 'gpu_unlock: pass='
+                    -> 3 lines "pass=1/3|2/3|3/3 … ret=0", after= matching value
+FLR survival        sudo journalctl -k -b <id> | grep 'stage=flr'
+                    -> "… plm=0xffffffff …"   (FEAT mask survived reset)
+handoff             grep 'stage=handoff'  -> "ret=0 state=4 retained=0"
+                    + line "gpu_unlock: unlocked"
+landed readback     sudo python3 /root/l2-w2/maskread.py 0000:03:00.0 0x823800
+                    -> 0xffffffff             (in production runtime)
+speed (NOT expected to change with diag frame):
+                    sudo lspci -vv -s 0000:03:00.0 | grep LnkSta
+                    -> "Speed 2.5GT/s, Width x4"  (retrain is W3's job)
+serving             curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/health -> 200
+disarmed            sudo grep -c CMP90HX /boot/grub/grub.cfg -> 0
+                    sudo lsinitramfs /boot/initrd.img-$(uname -r) | grep -c gpu_unlock -> 0
 ```
+
+Observed exactly so on boot `da354d66…` (2026-10-31 10:39–10:42 UTC) —
+`evidence/w2-journal-da354d66.txt` is the raw transcript.
 
 ## 5. Boundary — what the method does NOT do
 
-*Known non-goals and unfought walls (e.g. does not survive power-off;
-does not make userspace speed writes safe; OPTB re-lock behavior…).
-Upstream-copied expectations live here until locally reproduced.*
+- Does **not** change link speed: diag frame lands the FEAT-adjacent mask
+  opener only; LnkSta stayed 2.5 GT/s x4 during and after the success boot
+  (observed). The Gen2 ladder (XVE×6 + XP3G×17 + OPTB×10 + `0x823b04`) is
+  W3, untested.
+- Does **not** claim power-off persistence (untested; cold boot expected to
+  reset — §6).
+- Warm-reboot persistence of `0x823800` is **not yet proven** — only
+  same-boot checkpoints (FLR + production bind). Free observation planned:
+  W3 local-top will read `0x823804`/`0x823800` *before* insmod on the next
+  warm reboot.
+- The write does not make runtime userspace BAR0 pokes safe or necessary;
+  do not add runtime pokers (ticket 11 prohibition stands).
+- OPTB/XVE/XP3G untouched by this frame; upstream note that OPTB re-locks
+  per init is unreproduced here (no OPTB write attempted).
+- `10de:220d` is rewired from `GA102()` in the port — 0x220d also names the
+  RTX 3090; these builds are experiment-only, never fleet builds.
 
 ## 6. Persistence matrix
 
 | Event | Masks held? | Speed held? | Evidence |
 |---|---|---|---|
-| module reload (FLR) | | | |
-| warm reboot | | | |
-| cold boot (power cycle) | | | |
-| runtime D3 round-trip | | | |
+| module reload (FLR) | `0x823800` ✓ (`0x823804` ✓; WPR_CFG re-locked by design) | n/a — Gen1 before/after | W2 `stage=flr` line + production reads (`da354d66`) |
+| production driver bind | `0x823800` ✓ | Gen1 (never raised) | W2 jsonl line 6 checkpoint |
+| warm reboot | TBD | TBD | observe pre-insmod at W3 |
+| cold boot (power cycle) | TBD | TBD | — |
+| runtime D3 round-trip | TBD | TBD | — |
 
 ## 7. Rollback
 
-*Exact steps to return to the known-good serving state if the method or a
-future host/driver change breaks it (driver reinstall, cmdline revert,
-power-cycle-to-stock).*
+- **Unplug/reboot-to-stock is unnecessary**: the armed state is one-shot by
+  construction (next_entry consumed; local-top inert without the cmdline
+  flag). Post-disarm the machine carries zero experiment state — verified
+  2026-10-31: hook/script gone, initrd md5 `216312a6…` (no ko inside),
+  grub entry 0, `next_entry=` empty, module not loaded, health 200.
+- If a future normal boot ever misbehaves: power cycle (restores BAR0 masks
+  to stock), then `sudo apt reinstall` of the nvidia driver package is
+  *not* needed — driver was never touched.
+- Staged artifacts to delete if abandoning the experiment: `/root/l2-w2/`,
+  `/root/zagitta-port/`, `/etc/grub.d/40_custom` W2 block, the
+  `/boot/initrd.img-*` (rebuild via `update-initramfs -u`), `/root/l2/`.
+  `success.jsonl` copies live in this repo (`evidence/`) and scratch
+  `l2/w2-out/`.
 
 ## 8. Version pins
 
 | Component | Value | Provenance |
 |---|---|---|
 | card VBIOS | 94.02.74.00.01 | ticket 01 |
-| kernel | 7.0.0-38 (Ubuntu 26.04) | |
-| unlock module srcversion | | |
-| driver build | (campaign 610.43.03 / Zagitta / jdowning candidate) | |
-| repo commit under test | | local-only |
+| kernel | 7.0.0-38-generic (Ubuntu 26.04, uutils coreutils) | `uname -r` |
+| unlock module srcversion | `C46DB4B43EEECB86EE15E91` (both variants) | W1 build |
+| diag ko md5 | `c237dd5f0ce953b92a6cdd65225376e4` | `l2-w2.sh state` |
+| full ko md5 (W3, unused so far) | `02ccc795cee548f90ea5e009b8624f6b` | `l2-w2.sh state` |
+| Zagitta base + port | upstream `7eb51bcc` + series `patches/zagitta-gpu-unlock/000{1,2}` (`-DGU_CMP90HX_DIAG`) | commit `140d000` |
+| production driver | campaign build 610.43.03 (`cmp50hx-boot` binds at multi-user) | pre-existing |
+| repo commit under test | `140d000` + working docs | local-only, never pushed |
 
 ## Appendix A — `success.jsonl` schema
 
 Location on host: `/root/l2/success.jsonl` (created by `l2-w2.sh`; the
 contingency #6 wrapper appends to the same file). Copies: scratch mirror
-`/tmp/90hx-gen2-p2p-scratch/` + repo `cache/`. One JSON object per
-privileged-write **attempt** (failures included; the record is
+`/tmp/90hx-gen2-p2p-scratch/` + repo `docs/cmp90hx/evidence/`. One JSON
+object per privileged-write **attempt** (failures included; the record is
 self-contained):
 
 ```json
-{"ts":"2026-11-XX…Z","boot_id":"…","window":"W2|W3|#6",
- "context":"pre-driver|initramfs|kernel|cpu-poke","bdf":"0000:03:00.0",
+{"ts":"2026-10-31T10:40:05Z","boot_id":"…","window":"W2|W3|#6",
+ "context":"pre-driver-initramfs|kernel|cpu-poke","bdf":"0000:03:00.0",
  "addr":"0x00823804","value":"0xffffffff","readback":"0x…",
- "status":"…","landed":true,
- "lnksta_speed":"2.5GT/s|5GT/s","lnksta_width":"x4",
- "wpr2_health":"ok|…","module_srcversion":"…","cmdline_targets":"…"}
+ "status":"ok|absent|readback-mismatch|…","landed":true,
+ "lnksta_speed":"2.5|5","lnksta_width":"x4",
+ "wpr2_health":"ok|…","module_srcversion":"…","cmdline_targets":"…",
+ "checkpoint_readback":"0x…","checkpoint_kind":"post-flr-post-production-bind",
+ "checkpoint_attributable":true}
 ```
 
 `landed` is set by the harness per §0 rules (readback match + checkpoint
-survival), never manually.
+survival), never manually. `checkpoint_attributable=false` marks writes
+whose survival is indistinguishable from platform baseline (FEAT canary).

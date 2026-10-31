@@ -1,0 +1,8 @@
+Oct 31 10:34:02 llm2 kernel: acpi PNP0A03:03: _OSC: OS now controls [PCIeHotplug PME AER PCIeCapability]
+Oct 31 10:34:02 llm2 kernel: acpi PNP0A08:00: _OSC: OS now controls [PCIeHotplug PME AER PCIeCapability]
+Oct 31 10:34:02 llm2 kernel: pcieport 0000:00:01.0: AER: enabled with IRQ 27
+Oct 31 10:34:02 llm2 kernel: pcieport 0000:00:01.1: AER: enabled with IRQ 28
+Oct 31 10:34:02 llm2 kernel: pcieport 0000:00:02.0: AER: enabled with IRQ 30
+Oct 31 10:34:02 llm2 kernel: pcieport 0000:00:03.0: AER: enabled with IRQ 32
+Oct 31 10:34:02 llm2 gpu-unlock-w2: ABORT: card already bound to driver (blacklist failed?) - no claim
+Oct 31 10:34:03 llm2 kernel: nvidia: loading out-of-tree module taints kernel.
