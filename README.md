@@ -103,22 +103,36 @@ The former shared compatibility patch
 value, `snprintf` for the UVM chunk name; both strncpy-returning wrappers
 were deleted). See `patches/common/README.md` for the site-by-site evidence.
 
-**Why the fleet stays on `610.43.03` while `615.78.08` is packaged (2026-10-31).**
-The 615 port is compile- and DKMS-complete: the deb installs on the real
-serving host (kernel `7.0.0-38-generic`), builds and loads, zero Xid. The
-*unlock* does not survive 615's firmware: the signed Booter path rejects the
-V244-era exploit signature (`booter error 0x1c @ tracepc 0x1b38`,
-deterministic, 3/3 cards). Follow-up analysis
-(`.scratch/615-port/research-11-booter-analysis.md`) established the Booter
-image itself is **byte-identical** 610↔615 (also GA102/GA100/AD102 — only
-Blackwell's booter moved); a live 3-card experiment ruled out the bumped LS
-manifest as the gate and localized the failure to the verifier's DMEM state
-over **moved LibOS task instances** (`rm_elf_text` base `0x4bf7000→0x4588000`,
-rm-stack pointer embedded in the walked `.manifest` — 8 bytes changed there,
-all pointers). Unlocking on 615 = re-calibrating the frame to those pointers
-(ticket 11 phase 2 — bounded RE with the exact seed values known), not a
-re-port; until it lands serving hosts stay on `610.43.03` — a deliberate,
-evidence-backed hold, not neglect. Unrelated 615 note: `615.78.08` also cannot build against Ubuntu
+**`615.78.08` is deployed (2026-11-01) via the pre-OS EFI unlock.** The 615
+port is compile- and DKMS-complete: the deb installs on the real serving host
+(kernel `7.0.0-38-generic`), builds and loads, zero Xid. The **in-driver**
+exploit does not survive 615's firmware — the signed Booter path rejects the
+V244-era crafted signature (`booter error 0x1c @ tracepc 0x1b38`,
+deterministic, all cards): the Booter image is byte-identical 610↔615, but
+NVIDIA **moved the LibOS task instances** (`rm_elf_text` base
+`0x4bf7000→0x4588000`, and 3 pointers inside the walked `.manifest`), so the
+verifier's DMEM-state trajectory no longer matches the frame. Re-calibrating
+that frame is bounded RE with the exact seed values known (ticket 11 phase 2)
+and is the path back to full in-driver unlock.
+
+The interim production path does not need it: the **`615.78.08` rc3c build
+runs 615's *stock* GSP-RM boot** (per-device `RmCmpSkipStockflow=1`, registry
+`NVreg_RegistryDwordsPerDevice`, skips the crafted-signature transaction and
+every CMP50-instrumented GSP gate) while the compute unlock is supplied
+**pre-OS** by the UEFI unlocker, which attacks each card's own PROM/FWSEC and
+is therefore independent of the driver's LibOS geometry. On the serving host
+both CMP 50HX boot on 615 stock GSP-RM with `ss0=0x88888888 ss1=0x00000008`
+surviving GSP-RM init and full `rm-issue-rate`; ReBAR/RT-count/idle-governor
+are unaffected. Two features are not in this interim mode (both wait on the
+in-driver unlock): the **CMP 90HX stays compute-locked** (the EFI unlocker is
+`10de:1e09`-only, no `220d` payload), and **PCIe Gen2 is not applied** (the
+XP3G privilege-gate-open write lives inside the skipped signature table; the
+host-side `XP3G OVERRIDE0` write is rejected while the gate is closed, so the
+Gen2 kick no-ops). A single-CMP-50HX inference host sees neither gap. Until
+the in-driver unlock returns on a *locked-90HX* multi-GPU box, the llama.cpp
+`-tb 32` slice lands on the locked 90HX and prompt throughput drops (≈ −74 %);
+that is the only serving regression and the reason a 90HX-heavy host would
+still prefer `610.43.03`. Unrelated 615 note: `615.78.08` also cannot build against Ubuntu
 kernels ≥ `7.0.0-42-generic` (upstream CXL conftest gap — the
 `NV_CXL_CXL_H_PRESENT` probe reports the header present while `struct cxlds_device`
 stays incomplete after the kernel's CXL reorg; `610.43.03` is unaffected), so
