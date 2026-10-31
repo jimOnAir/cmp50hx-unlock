@@ -1,0 +1,66 @@
+diff --git a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
+--- a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
++++ b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
+@@ -108,6 +108,24 @@
+            CMP50_PC_CANARY_PCI_SUBDEVICE_MATCHES(pGpu->idInfo.PCISubDeviceID);
+ }
+ 
++/*
++ * rc3c: quiet per-query reader of the EFI-only switch (RmCmpSkipStockflow;
++ * see kernel_gsp.c for the mode documentation). With the switch set, ALL
++ * CMP50-instrumented GSP verification paths must behave exactly like stock:
++ * 615's stock Booter handoff places WPR2 lo at 0x277e000 (measured), not
++ * the 610-era constant the V274/V551 expectations compare against.
++ */
++static NvBool
++s_cmp50EfiOnlyQ
++(
++    OBJGPU *pGpu
++)
++{
++    NvU32 v = 0;
++
++    return ((osReadRegistryDword(pGpu, "RmCmpSkipStockflow", &v) == NV_OK) && (v != 0));
++}
++
+ static void
+ s_cmp50ApplyGen2Policy
+ (
+@@ -918,7 +936,8 @@
+     // V274 commits after FWSEC/FRTS but before switching GSP into RISC-V mode.
+     if ((bootMode == KGSP_BOOT_MODE_NORMAL) &&
+         s_isCmp50ComputeUnlock(pGpu) &&
+-        g_cmp50V274FwsecReady[cmp50StateIndex])
++        g_cmp50V274FwsecReady[cmp50StateIndex] &&
++        !s_cmp50EfiOnlyQ(pGpu))
+     {
+         NvU32 wpr2Lo = GPU_REG_RD32(pGpu, NV_PFB_PRI_MMU_WPR2_ADDR_LO);
+         NvU32 wpr2Hi = GPU_REG_RD32(pGpu, NV_PFB_PRI_MMU_WPR2_ADDR_HI);
+@@ -1211,7 +1230,7 @@
+              * target for one bounded replay after the signed WPR-down
+              * transaction. Other devices keep the stock lifetime.
+              */
+-            if (!s_isCmp50ComputeUnlock(pGpu))
++            if (!s_isCmp50ComputeUnlock(pGpu) || s_cmp50EfiOnlyQ(pGpu))
+             {
+                 portMemFree(pKernelGsp->pPreparedFwsecCmd);
+                 pKernelGsp->pPreparedFwsecCmd = NULL;
+@@ -1220,7 +1239,7 @@
+             NV_ASSERT_OK_OR_RETURN(status);
+         }
+ 
+-        if (s_isCmp50ComputeUnlock(pGpu))
++        if (s_isCmp50ComputeUnlock(pGpu) && !s_cmp50EfiOnlyQ(pGpu))
+         {
+             g_cmp50V274FwsecReady[cmp50StateIndex] = NV_TRUE;
+             NV_PRINTF(LEVEL_ERROR,
+@@ -1240,7 +1259,8 @@
+     // Execute stock Booter Load in the same RM/WPR-metadata context.
+     if ((bootMode == KGSP_BOOT_MODE_NORMAL) &&
+         s_isCmp50ComputeUnlock(pGpu) &&
+-        !bCmp50RetryRejoin)
++        !bCmp50RetryRejoin &&
++        !s_cmp50EfiOnlyQ(pGpu))
+     {
+         status = _kgspCmp50ExecuteBooterFreshMeta(pGpu, pKernelGsp);
+     }
