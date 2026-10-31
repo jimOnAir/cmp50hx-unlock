@@ -156,9 +156,11 @@ outcome. (Bash-greppable: one URL per bullet.)
   `06-aikitoria-p2p`, `07-turing-p2p` and `docs/P2P.md`.
 - https://github.com/iatethelogs/cmp90hx_pwner/issues (2, 5, 7) — apply
   automation reports.
-- (2026-10-31, unresolved) `google.com/goto?url=CAESZAHrOzAV…` — opaque
-  Google redirect token from the user's message; no target URL recoverable
-  client-side. If still needed, ask the user to paste the final URL.
+- https://github.com/iatethelogs/cmp90hx_pwner — resolved target of the
+  opaque `google.com/goto?url=CAESZAHrOzAV…` redirect in the user's
+  2026-10-31 (late) message (user clarified 2026-10-31); same repo as the
+  HEAD-`73bc5ea` entry above — no new content beyond what is already
+  analyzed in `docs/cmp90hx/rm-levers-and-p2p.md` §2.
 
 ## Where the campaign record lives
 
