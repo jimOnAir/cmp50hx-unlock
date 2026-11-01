@@ -1,0 +1,157 @@
+diff --git a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+--- a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
++++ b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+@@ -6859,6 +6859,53 @@
+     pBuffer[offset + 3] = (NvU8)(value >> 24);
+ }
+ 
++/*
++ * 615-gen2-h2 ticket-03: per-device frame-variant selector
++ * (NVreg_RegistryDwordsPerDevice key RmCmpFrameVariant; absent/0 keeps the
++ * stock 610-era frame = V3 control).  Applied AFTER the normal signature
++ * table build so a variant always wins.  Values per
++ * .scratch/615-gen2-h2/research/manifest-tlv-dmem.md section 6:
++ *   V1 (1): faithful stock-615 static descriptor (gate-reads-statics test)
++ *   V2 (2): V1 + verifier spilled task state rebuilt with 615 values
++ *   V5:     V1b, hdr length field = 0xFA00 instead of 0x8C8 (one-dword A/B)
++ * Any tracepc moving off 0x1b38 means the new 615 data gate was passed.
++ */
++static void
++_kgspCmp50ApplyFrameVariant(OBJGPU *pGpu, NvU8 *pSignatureVa)
++{
++    NvU32 v = 0;
++
++    if ((osReadRegistryDword(pGpu, "RmCmpFrameVariant", &v) != NV_OK) || (v == 0U))
++    {
++        return;
++    }
++
++    if ((v == 1U) || (v == 2U) || (v == 5U))
++    {
++        _kgspCmp50PutU32(pSignatureVa, 0x0004, (v == 5U) ? 0x000FA00U : 0x000008C8U);
++        _kgspCmp50PutU32(pSignatureVa, 0x0008, 0x0000000CU);
++        _kgspCmp50PutU32(pSignatureVa, 0x000C, 0x00000101U);
++        _kgspCmp50PutU32(pSignatureVa, 0x0010, 0x00000200U);
++        _kgspCmp50PutU32(pSignatureVa, 0x0814, 0x00010001U);
++        _kgspCmp50PutU32(pSignatureVa, 0x0818, 0x00010001U);
++        _kgspCmp50PutU32(pSignatureVa, 0x081C, 0x00000001U);
++        _kgspCmp50PutU32(pSignatureVa, 0x087C, 0x00000001U);
++        _kgspCmp50PutU32(pSignatureVa, 0x0880, 0x00000441U);
++    }
++
++    if (v == 2U)
++    {
++        /* spilled verifier locals: task_init/task_rm stack_top + entry_pc */
++        _kgspCmp50PutU32(pSignatureVa, 0xF914, 0x05646000U);
++        _kgspCmp50PutU32(pSignatureVa, 0xF918, 0x05656000U);
++        _kgspCmp50PutU32(pSignatureVa, 0xF91C, 0x04018DC0U);
++        _kgspCmp50PutU32(pSignatureVa, 0xF920, 0x05503850U);
++    }
++
++    NV_PRINTF(LEVEL_ERROR,
++              "CMP50_FRAMEVAR: RmCmpFrameVariant=%u applied\n", v);
++}
++
+ static NV_STATUS
+ _kgspCreateSignatureMemdesc
+ (
+@@ -6968,6 +7015,9 @@
+             _kgspCmp50PutU32(pSignatureVa, 0x0880, lsVer); /* LS ucode version (RmCmpLsVersion overridable) */
+             _kgspCmp50PutU32(pSignatureVa, 0x0884, lsId);  /* LS ucode id (RmCmpLsId overridable) */
+         }
++
++        /* 615-gen2-h2 ticket-03: per-device frame-variant matrix */
++        _kgspCmp50ApplyFrameVariant(pGpu, pSignatureVa);
+         /*
+          * Signature offset 0x1100 lands at SEC2 DMEM 0x1700.  NVIDIA's
+          * booterCleanupAndHalt() restores RESET_PRIV_LEVEL_MASK[7:4] from
+diff --git a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
+--- a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
++++ b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
+@@ -126,6 +126,57 @@
+     return ((osReadRegistryDword(pGpu, "RmCmpSkipStockflow", &v) == NV_OK) && (v != 0));
+ }
+ 
++/*
++ * 615-gen2-h2 ticket-03: true when this device carries the frame-variant
++ * experiment key (RmCmpFrameVariant, see kernel_gsp.c builder).
++ */
++static NvBool
++s_cmp50FrameVariantActiveQ
++(
++    OBJGPU *pGpu
++)
++{
++    NvU32 v = 0;
++
++    return ((osReadRegistryDword(pGpu, "RmCmpFrameVariant", &v) == NV_OK) && (v != 0));
++}
++
++/*
++ * 615 stock FWSEC keeps the same WPR2 reservation (capture is live and
++ * valid), but the stock BOOTER hands off WPR2 lo 0x80000 lower than the
++ * capture (measured 0x27fe000 -> 0x277e000; 615-gen2-h2 ticket-01 section
++ * 7).  The stock-equality guards below predate that measurement; tolerate
++ * the down-extension ONLY while the frame-variant experiment is armed on
++ * this device, and log which value matched so the boot verdict stays
++ * attributable.  Production paths (no variant key) are untouched.
++ */
++static NvBool
++s_cmp50WprLoTolerated
++(
++    OBJGPU *pGpu,
++    NvU32  idx,
++    NvU32  lo
++)
++{
++    NvU32 stock = g_cmp50StockWprLo[idx];
++
++    if (lo == stock)
++    {
++        return NV_TRUE;
++    }
++
++    if (s_cmp50FrameVariantActiveQ(pGpu) && (stock != 0U) &&
++        (lo == (stock - 0x00080000U)))
++    {
++        NV_PRINTF(LEVEL_ERROR,
++                  "CMP50_FRAMEVAR: 615 WPR2-lo down-extension tolerated "
++                  "lo=0x%08x stock=0x%08x\n", lo, stock);
++        return NV_TRUE;
++    }
++
++    return NV_FALSE;
++}
++
+ static void
+ s_cmp50ApplyGen2Policy
+ (
+@@ -883,7 +934,7 @@
+             speed1 = GPU_REG_RD32(pGpu, CMP50_FECS_SM_SPEED_OVERRIDE_1);
+             if ((g_cmp50StockWprLo[cmp50StateIndex] == 0U) ||
+                 (g_cmp50StockWprHi[cmp50StateIndex] == 0U) ||
+-                (retryWprLo != g_cmp50StockWprLo[cmp50StateIndex]) ||
++                (!s_cmp50WprLoTolerated(pGpu, cmp50StateIndex, retryWprLo)) ||
+                 (retryWprHi != g_cmp50StockWprHi[cmp50StateIndex]) ||
+                 (plm != CMP50_FECS_FEATURE_PLM_POSTLOCK) ||
+                 (speed0 != CMP50_FECS_SM_SPEED_FULL_0) ||
+@@ -1135,7 +1186,7 @@
+         handoffWprHi = GPU_REG_RD32(pGpu, NV_PFB_PRI_MMU_WPR2_ADDR_HI);
+         speed0 = GPU_REG_RD32(pGpu, CMP50_FECS_SM_SPEED_OVERRIDE_0);
+         speed1 = GPU_REG_RD32(pGpu, CMP50_FECS_SM_SPEED_OVERRIDE_1);
+-        if ((handoffWprLo != g_cmp50StockWprLo[cmp50StateIndex]) ||
++        if ((!s_cmp50WprLoTolerated(pGpu, cmp50StateIndex, handoffWprLo)) ||
+             (handoffWprHi != g_cmp50StockWprHi[cmp50StateIndex]) ||
+             (plm != CMP50_FECS_FEATURE_PLM_POSTLOCK) ||
+             (speed0 != CMP50_FECS_SM_SPEED_FULL_0) ||
+@@ -1163,8 +1214,8 @@
+         NV_ASSERT_OK_OR_RETURN(
+             kflcnResetIntoRiscv_HAL(pGpu, pKernelFalcon));
+         kgspProgramLibosBootArgsAddr_HAL(pGpu, pKernelGsp);
+-        if ((GPU_REG_RD32(pGpu, NV_PFB_PRI_MMU_WPR2_ADDR_LO) !=
+-             g_cmp50StockWprLo[cmp50StateIndex]) ||
++        if ((!s_cmp50WprLoTolerated(pGpu, cmp50StateIndex,
++                                    GPU_REG_RD32(pGpu, NV_PFB_PRI_MMU_WPR2_ADDR_LO))) ||
+             (GPU_REG_RD32(pGpu, NV_PFB_PRI_MMU_WPR2_ADDR_HI) !=
+              g_cmp50StockWprHi[cmp50StateIndex]) ||
+             (GPU_REG_RD32(pGpu, CMP50_FECS_FEATURE_PLM) !=
