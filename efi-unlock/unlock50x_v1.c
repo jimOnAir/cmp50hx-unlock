@@ -3047,6 +3047,113 @@ pcie_gen_unlock_debug(UINT64 wprMetaPhys, UINT64 ucodePhys, UINT64 v67Phys)
 }
 #endif /* PCIE_GEN_EXPERIMENT */
 
+/* ==== 615-gen2-h2 ticket 13: XP3G Gen2 via booter-privileged writes ====
+ * Issue #25 established CPU-direct BAR0 writes to the XP3G priv domain do
+ * NOT stick pre-OS; the proven 610 mechanism writes them through the SEC2
+ * booter (kernel stage gadget {0xffffffff -> 0x8E1B0}, {OVR0 -> 0x8E110}).
+ * This ESP module already drives the same booter class (its own NVIDIA-
+ * signed 610-era ucode blob, accepted by 615's FWSEC - that is why the
+ * EFI-only compute unlock works on 615 at all) and v2.97 proved the
+ * payload-slot patch + booter re-run mechanism ({value,addr} at payload
+ * 0xf948/0xf960).  Re-run once per {value,addr} pair, then do the pure
+ * config-space half (TLS=2 both ends + upstream Retrain + LNKSTA poll),
+ * mirroring nv_cmp50hx_retrain_gen2 in the kernel module.  Survivability
+ * across the 615 stock GSP boot is the open bench question this measures;
+ * nv.c (patched module, any 615 rev) polls PLM0 for 2 s at first device
+ * open and completes Gen2 retrain if open - zero OS-side changes needed.
+ */
+#define XPG_PLM0   0x0008E1B0u
+#define XPG_OVR0   0x0008E110u
+#define XPG_VAL0   0x0008E120u
+#define PCIE_CAP_ID 0x10u
+
+static UINTN
+pcie_cap_walk_idx(INTN idx, UINTN bus, UINTN dev, UINTN fn)
+{
+    UINTN off = pci_cfg_rd_idx(idx, bus, dev, fn, 0x34) & 0xFFu;
+    UINTN guard = 0;
+    while (off >= 0x40 && off < 0x100 && (guard++) < 48) {
+        if ((pci_cfg_rd_idx(idx, bus, dev, fn, off) & 0xFFu) == PCIE_CAP_ID)
+            return off;
+        off = (pci_cfg_rd_idx(idx, bus, dev, fn, off) >> 8) & 0xFFu;
+    }
+    return 0;
+}
+
+static UINTN
+pcie_cap_walk_gpu(void)
+{
+    UINTN off = pci_cfg_rd_bdf(gBus, gDev, gFn, 0x34) & 0xFFu;
+    UINTN guard = 0;
+    while (off >= 0x40 && off < 0x100 && (guard++) < 48) {
+        if ((pci_cfg_rd_bdf(gBus, gDev, gFn, off) & 0xFFu) == PCIE_CAP_ID)
+            return off;
+        off = (pci_cfg_rd_bdf(gBus, gDev, gFn, off) >> 8) & 0xFFu;
+    }
+    return 0;
+}
+
+static void
+xp3g_gen2_booter_phase(UINT64 wprMetaPhys, UINT64 ucodePhys, UINT64 v67Phys)
+{
+    static const struct { UINT32 addr; UINT32 val; CONST CHAR16 *nm; } wr[] = {
+        { XPG_PLM0, 0xFFFFFFFFu, L"XP3G_PLM0" },
+        { XPG_OVR0, 0x00000001u, L"XP3G_OVR0" },
+        { XPG_VAL0, 0x00000000u, L"XP3G_VAL0" },
+    };
+    UINTN i, gcap, bcap, bb, bd, bf;
+    UINT32 v;
+    EFI_STATUS st;
+
+    Print(L"\n=== xp3g-gen2: booter-privileged XP3G + retrain (ticket 13) ===\n");
+    for (i = 0; i < sizeof(wr) / sizeof(wr[0]); i++) {
+        volatile UINT32 *pv, *pa;
+        if (!v67Phys || !ucodePhys) {
+            Print(L"xp3g-gen2: no booter context - write %s skipped\n", wr[i].nm);
+            break;
+        }
+        pv = (volatile UINT32 *)(UINTN)(v67Phys + 0xf948);
+        pa = (volatile UINT32 *)(UINTN)(v67Phys + 0xf960);
+        *pv = wr[i].val;
+        *pa = wr[i].addr;
+        __asm__ volatile("wbinvd" ::: "memory");
+        st = booter_load_v67(wprMetaPhys, ucodePhys);
+        Print(L"xp3g-gen2: booter-write %s=0x%08x st=%r rdback=0x%08x\n",
+              wr[i].nm, wr[i].val, st, mmio_read32(wr[i].addr));
+    }
+    Print(L"xp3g-gen2: PLM0=0x%08x OVR0=0x%08x post\n",
+          mmio_read32(XPG_PLM0), mmio_read32(XPG_OVR0));
+
+    /* config-space half: TLS=2 both ends + upstream retrain + poll */
+    gcap = pcie_cap_walk_gpu();
+    if (!gcap) { Print(L"xp3g-gen2: GPU PCIe cap not found\n"); return; }
+    v = pci_cfg_rd_bdf(gBus, gDev, gFn, gcap + 0x30);
+    pci_cfg_wr_bdf(gBus, gDev, gFn, gcap + 0x30, (v & ~0xFu) | 2u);
+    if (!find_bridge_to(gBus, &bb, &bd, &bf)) {
+        Print(L"xp3g-gen2: no upstream bridge\n");
+        return;
+    }
+    bcap = pcie_cap_walk_idx(gBrIdx, bb, bd, bf);
+    if (!bcap) { Print(L"xp3g-gen2: bridge PCIe cap not found\n"); return; }
+    v = pci_cfg_rd_idx(gBrIdx, bb, bd, bf, bcap + 0x30);
+    pci_cfg_wr_idx(gBrIdx, bb, bd, bf, bcap + 0x30, (v & ~0xFu) | 2u);
+    v = pci_cfg_rd_idx(gBrIdx, bb, bd, bf, bcap + 0x10);
+    pci_cfg_wr_idx(gBrIdx, bb, bd, bf, bcap + 0x10, v | 0x20u); /* Retrain Link */
+    for (i = 0; i < 20; i++) {
+        uefi_call_wrapper(BS->Stall, 1, 100000);
+        v = pci_cfg_rd_bdf(gBus, gDev, gFn, gcap + 0x12);
+        if (((v >> 16) & 0xFu) >= 2u) {
+            Print(L"xp3g-gen2: LINK speed=Gen%d width=%d ADOPTED @%u\n",
+                  (v >> 16) & 0xF, (v >> 4) & 0x3F, i);
+            return;
+        }
+    }
+    v = pci_cfg_rd_bdf(gBus, gDev, gFn, gcap + 0x12);
+    Print(L"xp3g-gen2: LINKSTA=0x%08x speed=%d (not Gen2 pre-OS; OS-side\n",
+          v, (v >> 16) & 0xF);
+    Print(L"xp3g-gen2:   nv.c gate may still catch PLM0-open window)\n");
+}
+
 /* ==== gsp_ga10x.bin loader via SimpleFileSystem (LEGACY helper) ====
  * The main flow reads the firmware with raw BlockIo instead — SFS
  * operations hang on some AMI firmwares (see preload_bootmgfw). */
@@ -4898,6 +5005,10 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         else
             Print(L"[50HX] PLM closed — no booter effect observed\n");
     }
+    /* ---------- [10b] 615-gen2-h2 ticket 13: XP3G Gen2 via booter ---------- */
+    if (is_unlocked())
+        xp3g_gen2_booter_phase(wprMetaPhys, ucodePhys, v67Phys);
+
     if (warm_attempted) {
     /* v89: SEC2 Sanitize（cyridd kgspCmp40SanitizeSec2AfterExploit 简版——
      * unlock后 SEC2 回冷态：engine reset + MB 清——verify黑屏=非冷态，sanitize 解） */
