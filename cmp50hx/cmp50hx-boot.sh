@@ -168,4 +168,17 @@ if [ -n "${CMP_BOOT_PROFILE}" ]; then
     fi
 fi
 
+# --- phase 5: CMP 90HX Gen2 truth line (report-only, NEVER gates) -----------
+# The boot-2 lesson (2026-11-01): the in-unit claim verdict is ko-log-based;
+# the authoritative LINK truth is observable only after the nvidia bind ran
+# the in-kernel speed path (0016+0019). A fallback here is loud but harmless:
+# serving continues at Gen1, next boot re-claims from POST state (ADR-0001).
+for cmp90_bdf in $(lspci -Dn 2>/dev/null | awk '/10de:220d/ {print $1}'); do
+    cmp90_spd="$(cat "/sys/bus/pci/devices/${cmp90_bdf}/current_link_speed" 2>/dev/null || echo unknown)"
+    case "${cmp90_spd}" in
+        5.0*) echo "cmp90hx-gen2: ${cmp90_bdf} landed ${cmp90_spd}" ;;
+        *)    echo "cmp90hx-gen2: ${cmp90_bdf} FALLBACK ${cmp90_spd} (claim unit journal + gen2-trace knob)" ;;
+    esac
+done
+
 exit 0

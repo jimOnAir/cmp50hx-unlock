@@ -42,8 +42,16 @@ except Exception:
 PY
 }
 
+bar0_reads_trustworthy() { # wedge guard: after a reboot the card's memory
+    # decode is off and EVERY BAR0 offset reads 0xffffffff — indistinguishable
+    # from "open" (success-recipe §0 lesson). PMC_BOOT_0 is a constant; if it
+    # reads correctly, other readbacks mean what they say.
+    [[ "$(bar0_read 0x0)" == "0xb72000a1" ]]
+}
+
 claim_done() { # masks the config pass needs are already open (idempotency guard)
-    [[ "$(bar0_read 0x823800)" == "0xffffffff" && "$(bar0_read 0x88fe8)" == "0xffffffff" ]]
+    bar0_reads_trustworthy \
+        && [[ "$(bar0_read 0x823800)" == "0xffffffff" && "$(bar0_read 0x88fe8)" == "0xffffffff" ]]
 }
 
 if disabled; then say "gen2-claim: disabled (boot.conf GEN2_90HX=disabled)"; exit 0; fi
@@ -53,11 +61,15 @@ if claim_done; then say "gen2-claim: already-open (idempotent skip)"; exit 0; fi
 
 mkdir -p "$STATE"
 if insmod "$KO" targets="$BDF" resume=0 2>/tmp/cmp90hx-claim.insmod; then
-    # ko logs pass= lines + stage=handoff; verify the two decisive masks
-    if claim_done; then
-        say "gen2-claim: landed bdf=$BDF"
+    # The ko synchronously verifies every write (pass=… ret=0) and prints
+    # "unlocked" before handoff — that IS the authoritative verdict: the ko
+    # restores the command register afterwards, so a BAR0 re-read from here
+    # would hit the all-FF-unreadable pattern (boot 2 lesson, 2026-11-01).
+    landed="$(dmesg | grep -ac 'gpu_unlock: pass=.*ret=0' || true)"
+    if dmesg | grep -aq 'gpu_unlock: unlocked' && [ "${landed:-0}" -ge 6 ]; then
+        say "gen2-claim: claim-ok ${landed}/6 landed (link truth: boot digest cmp90hx-gen2 line)"
     else
-        say "gen2-claim: gen1-fallback claim ran but readback not open (see insmod log + dmesg)"
+        say "gen2-claim: gen1-fallback claim incomplete ${landed:-0}/6 landed (see dmesg + /tmp/cmp90hx-claim.insmod)"
     fi
 else
     say "gen2-claim: gen1-fallback insmod failed: $(tail -1 /tmp/cmp90hx-claim.insmod 2>/dev/null)"

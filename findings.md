@@ -832,3 +832,27 @@ claim tree — smoke caught it); kbuild leaves `.*.cmd` dotfile residue that
 zstd (build-time extractor). Next: llm2 acceptance matrix (install → 3 cold
 + 2 warm unattended boots, per-boot P2P/coexistence/Xid gates, rollback
 rehearsal) — owner-gated.
+
+## 2026-11-01 — product Gen2-at-boot lands unattended (rev .17→.19); two verdict-path lessons
+
+Boot `b7fa41a3` (warm, rev18): first UNATTENDED product-path Gen2 —
+`claim 6/6 after=0xffffffff` from POST-locked state (`before=0x4cb8f`),
+LnkSta `1042`, nvidia-smi gen=2, Xid 0, serving 200. Boot `fb9ff23e` (rev19,
+warm): clean double-verdict — unit: `gen2-claim: claim-ok 6/6 landed`;
+boot digest phase 5: `cmp90hx-gen2: 0000:03:00.0 landed 5.0 GT/s PCIe`.
+
+Two verdict bugs, both mine, both caught by honest grading:
+1. rev .17 unit claimed "already-open (idempotent skip)" — the BAR0 read of a
+   freshly-rebooted card (memory-decode off) reads all-FF, indistinguishable
+   from open. The map glossary literally defines **mask open = 0xffffffff
+   WITH an independent wedge guard**; fixed with a `PMC_BOOT_0 == 0xb72000a1`
+   trust control (.18).
+2. rev .18's post-insmod readback then misreported fallback: the ko restores
+   the command register at handoff, so decode is off again the moment insmod
+   returns — the ko's own SYNCHRONOUS log (`pass=… ret=0` ×6 + `unlocked`) is
+   the authoritative verdict; the LINK truth is observable only post-bind, so
+   rev .19 splits verdicts: unit = log-based `claim-ok`, boot digest
+   (`cmp50hx-boot.sh` phase 5, report-only, never gates) = `cmp90hx-gen2:
+   landed|FALLBACK`. Matrix progress: 2 warm boots landed; 3 cold boots to
+   go (owner power-cycles). revs: .17 install ok; .18 wedge-guard; .19 verdict
+   split. deb shas in repo root .sha256 files.
