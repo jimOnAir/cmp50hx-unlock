@@ -42,18 +42,11 @@ sweep_claim() { # gpu-unlock-claim: DKMS registration, module copies, firmware
 case "${1:-remove}" in
     remove|purge)
         ;;
-    upgrade|failed-upgrade)
-        # Downgrade to a revision without gpu-unlock-claim: dpkg deletes
-        # /usr/src/gpu-unlock-claim-* but leaves the DKMS registration, and
-        # every later dkms run dies on "broken" (rollback-rehearsal lesson,
-        # 2026-11-01). Sweep only when the source tree is really gone.
-        if ! ls /usr/src/gpu-unlock-claim-*/dkms.conf >/dev/null 2>&1 \
-                && [[ -d /var/lib/dkms/gpu-unlock-claim ]]; then
-            log "claim source gone (downgrade to a claim-less revision): sweeping gpu-unlock-claim state"
-            sweep_claim
-        fi
-        exit 0
-        ;;
+    # NOTE: no `upgrade` branch here on purpose. On the upgrade/downgrade
+    # flow dpkg executes the postrm of the INCOMING version (2026-11-01
+    # --debug=777 trace), so the outgoing package cannot self-sweep from
+    # here — the claim-downgrade sweep lives in prerm's `upgrade` branch
+    # instead (bug report .scratch/90hx-gen2-610/issues/10).
     *)
         exit 0
         ;;

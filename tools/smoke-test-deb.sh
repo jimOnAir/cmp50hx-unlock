@@ -97,7 +97,7 @@ for spec in \
         "postrm:initrd-kernels:postrm must rebuild every recorded kernel's initramfs" \
         "postrm:cmp50-bak:postrm purge must remove the initrd rollback backups" \
         "postrm:firmware-copies.txt:postrm must clean the fallback firmware copies" \
-        "postrm:claim source gone:postrm must sweep gpu-unlock-claim DKMS state on downgrade to a claim-less revision" \
+        "prerm:predates gpu-unlock-claim:prerm must sweep gpu-unlock-claim DKMS state when downgrading to a claim-less revision (postrm cannot: dpkg runs the INCOMING version's postrm)" \
         "postrm:install_dir}/logs:postrm must remove the untracked logs dir" \
         "postinst:firmware-copies.txt:postinst must record fallback firmware copies" \
         "postinst:nvidia-peermem:postinst must verify all five modules per kernel" \

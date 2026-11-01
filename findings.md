@@ -890,3 +890,33 @@ branch) closed never-triggered, 08 (6.12 discriminator) closed
 off-critical-path. README EN carries the shipped-state section;
 `docs/cmp90hx/success-recipe.md` unfrozen with the Gen2-at-boot product
 section (610-only constants rule permanent). Nothing pushed anywhere.
+
+## 2026-11-01 — "is it fixed?" was right: the .20 downgrade-fix was dead code; maintainer-script truth is `dpkg --debug=777`, three fix revisions later
+
+The user asked "is it fixed?" after bug-report #10 was filed against rev
+`.20`. Re-testing proved it was NOT: downgrading `.20 → .15` orphaned the
+`gpu-unlock-claim` DKMS registration again. A `dpkg --debug=777` trace ended
+the debate: on downgrade dpkg runs **`prerm upgrade <incoming>` of the
+OUTGOING version** but the trailing **`postrm upgrade` executes from
+/var/lib/dpkg/info — already replaced by the INCOMING version's scripts**.
+A claim-less revision's postrm has no sweep code, so an outgoing claim-aware
+deb can ONLY self-protect from its prerm `upgrade` branch. Fix arc:
+`.20` postrm branch = dead code (its earlier "verification" was the
+postinst `dkms remove`-first self-heal — never re-run the downgrade
+scenario itself; lesson: a fix is proven on its failure path, not by the
+symptom going away on a different path). `.21` prerm sweep with
+`dpkg --compare-versions "$2" lt 610.43.03-20261101.17` guard — sweep fired,
+but its extra `systemctl disable cmp90hx-claim` poisoned the
+deb-systemd-helper manual-disable state and re-upgrades left the unit
+**disabled = silent Gen2 loss** (caught by checking is-enabled AFTER the
+round-trip, not just after the downgrade). `.22` FINAL: sweep without
+disable (dpkg deletes the unit file anyway; dangling wants symlink proven
+harmless), helper-compatible teardown (disable+purge) moved to the proper
+remove path only. Proof on llm2 (no reboot needed — files-only cycle):
+normal upgrade misfires nothing; downgrade = clean `dkms status`, zero
+orphan paths; re-upgrade = registered + fw 16 files + **is-enabled
+enabled**; boot `92e27c54` on `.22` lands Gen2 (`claim-ok 6/6`,
+`landed 5.0 GT/s`, Xid 0, serving 200). Host final state = `.22`.
+Boundary stated honestly: outgoing revs `.17–.20` carry no self-protection —
+downgrading from them still orphans until a ≥`.22` reinstall self-heals;
+documented in bug report #10.

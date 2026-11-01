@@ -33,6 +33,49 @@ command -v logger >/dev/null 2>&1 && logger -t cmp50hx-unlock "prerm: $*" || tru
 case "${1:-remove}" in
     remove|deconfigure|failed-upgrade)
         ;;
+    upgrade)
+        # Downgrade (and ordinary upgrade) arrives here as `prerm upgrade
+        # <incoming-version>` on the OUTGOING package — this is the last
+        # script of ours dpkg runs: the postrm that follows at the end of
+        # the transaction executes from /var/lib/dpkg/info, which by then
+        # holds the INCOMING version's scripts (dpkg --debug=777 trace,
+        # 2026-11-01). A claim-less revision's postrm cannot sweep OUR
+        # gpu-unlock-claim registration, so downgrading away un-swept
+        # leaves /var/lib/dkms/gpu-unlock-claim orphaned and every later
+        # dkms run dies ("broken", Manual intervention required).
+        # Self-protect here when the incoming version predates the claim
+        # module (introduced 20261101.17). Upgrades to claim-aware
+        # revisions: no-op; their postinst rebuilds the registration.
+        incoming="${2:-}"
+        if [[ -n "${incoming}" ]] \
+                && dpkg --compare-versions "${incoming}" lt "610.43.03-20261101.17" 2>/dev/null; then
+            log "incoming ${incoming} predates gpu-unlock-claim: sweeping claim DKMS state"
+            # Do NOT `systemctl disable` here: plain systemctl disable marks
+            # the unit user-disabled, and deb-systemd-helper (which the
+            # postinst uses) then refuses to re-enable it on re-upgrade —
+            # silent Gen2 loss after upgrade-back (`.21` self-test lesson).
+            # dpkg deletes the unit file moments later; a dangling wants
+            # symlink is proven harmless (rev15 rehearsal boots).
+            if command -v dkms >/dev/null 2>&1; then
+                for ver_dir in /var/lib/dkms/gpu-unlock-claim/*/; do
+                    [[ -d "${ver_dir}" ]] || continue
+                    dkms_ver="${ver_dir#/var/lib/dkms/gpu-unlock-claim/}"
+                    dkms_ver="${dkms_ver%/}"
+                    run_cmd dkms remove -m gpu-unlock-claim -v "${dkms_ver}" --all
+                done
+            fi
+            for kernel_dir in /lib/modules/*/; do
+                k="${kernel_dir#/lib/modules/}"; k="${k%/}"
+                rm -f "/lib/modules/${k}/updates/dkms/gpu_unlock.ko" \
+                      "/lib/modules/${k}/updates/dkms/gpu_unlock.ko.xz" \
+                      "/lib/modules/${k}/updates/dkms/gpu_unlock.ko.zst" 2>/dev/null || true
+            done
+            command -v depmod >/dev/null 2>&1 && run_cmd depmod -a || true
+            rm -rf /var/lib/dkms/gpu-unlock-claim
+            rm -rf /lib/firmware/gpu-unlock
+        fi
+        exit 0
+        ;;
     *)
         exit 0
         ;;
@@ -88,8 +131,12 @@ fi
 # --- services ----------------------------------------------------------------
 if command -v systemctl >/dev/null 2>&1; then
     if command -v deb-systemd-helper >/dev/null 2>&1; then
-        deb-systemd-helper disable cmp50hx-boot.service cmp-idle-governor.service cmp50hx-gen2.service cmp-governor-check.service cmp-governor-check.timer >/dev/null 2>&1 || true
-        deb-systemd-helper purge cmp50hx-boot.service cmp-idle-governor.service cmp50hx-gen2.service cmp-governor-check.service cmp-governor-check.timer >/dev/null 2>&1 || true
+        deb-systemd-helper disable cmp50hx-boot.service cmp-idle-governor.service cmp50hx-gen2.service cmp-governor-check.service cmp-governor-check.timer cmp90hx-claim.service >/dev/null 2>&1 || true
+        deb-systemd-helper purge cmp50hx-boot.service cmp-idle-governor.service cmp50hx-gen2.service cmp-governor-check.service cmp-governor-check.timer cmp90hx-claim.service >/dev/null 2>&1 || true
+        # plain systemctl too: cmp90hx-claim was enabled via the helper at
+        # install; drop any live symlink a helper-only pass might miss
+        systemctl disable cmp90hx-claim.service >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/*.wants/cmp90hx-claim.service 2>/dev/null || true
     fi
     systemctl daemon-reload >/dev/null 2>&1 || true
 fi
