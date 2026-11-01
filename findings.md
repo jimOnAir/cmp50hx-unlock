@@ -748,3 +748,39 @@ Probe `../.scratch/90hx-gen2-610/logs/t01-baseline-20261101.txt` (host up,
   `update-initramfs -u` (and the same on rollback) or image and disk diverge.
 - L1b fuse regs `0x820040/0x820084` = `0x1`: GA102 semantics unconfirmed →
   micro-test declined, fog patch closed without graduating.
+
+## 2026-11-01 — 🎉 Gen2 LANDED on the 90HX at llm2 (ticket 09): the W3-era mystery was a gate-skip, the fix was table order
+
+Boot `d43c2d99` (`cmp90hx_w2=1` one-shot, ko `c65a5226` = T09 data-variant of the proven Zagitta-port ko, window module `5A79A82F…`):
+claim 6/6 first-attempt incl. **`0x823800`** → `nv_cmp90hx_gen2_config` **ran** (first
+real execution beyond W2-era) → `LnkSta 5GT/s x4`, `nvidia-smi gen=2 x4`, held under
+live serving, Xid 0, health 200, fleet intact, `topo -p2p` unaffected.
+
+What the two-attempt window established, in order:
+1. **The famous 7/7 `0:6` set never contained the module's own config gate** —
+   `0x823800` is index 36 of the 37-entry jdowning-ordered table. Gate history:
+   `0x823800` in *every* version of 0016 (git -S over all 4 commits touching it);
+   the rev15 code path silently skipped on every W3-era boot. The
+   retrain-retry lever was pulled for the first time EVER on this host.
+2. **Wh1stle05's model validated on our card**: minimal-2 `{0x823800, 0x88fe8}` +
+   in-module config pass = Gen2; the **XP3G declarations dropped (locked group)
+   and were not needed** (decl-readback: LINKCFG0 MAX_RATE=2, PRIV_MISC1, CYA0,
+   LTSSM, both-end TLS=5GT all sticky; XP3G OVR0/VAL0/OVR3/VAL3 all 0 = dropped).
+3. Build gotchas (both caught by verification, neither by hope): kbuild ≥6.16
+   **ignores `EXTRA_CFLAGS`** for external modules (`KCFLAGS=` works) — first T09
+   build silently shipped the 37-entry table, `objdump -t` symbol size (0x250 vs
+   0x60) caught it; and `/root` being 700 breaks scp even after chmod-ing the
+   subdir — stage evidence via `/tmp`.
+4. **`cudabw` HtoD is platform-capped** (1.6/1.7 GB/s identical on Gen2-proven
+   50HXes) — destination item 7's bar must be redefined (serving pp-rate or a
+   bench that separates Gen1/Gen2 on this platform, validated on the 50HX pair).
+5. History correction: route-package §1's "retrain completed without Gen2 on all
+   7 boots" cannot be attributed to the nv.c config pass (gate skipped; W3-era
+   journals rotated away); most plausibly described W2/WD-era boots where the
+   DIAG-ko table did land `0x823800`.
+Host state after window: **disarmed**, window module loaded; normal boots
+re-lock at POST → safe Gen1 fallback until ticket 05/06 automate the claim.
+Evidence: `.scratch/90hx-gen2-610/logs/` (journal slice, reconstructed jsonl
+flagged in-row, arm state, manifest, diff). Next: ticket 05 design grilling —
+automation of a proven effect, in-OS primary, pre-OS (04) demoted to
+alternative route, 08 off critical path.
