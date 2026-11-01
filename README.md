@@ -106,14 +106,19 @@ were deleted). See `patches/common/README.md` for the site-by-site evidence.
 **`615.78.08` is deployed (2026-11-01) via the pre-OS EFI unlock.** The 615
 port is compile- and DKMS-complete: the deb installs on the real serving host
 (kernel `7.0.0-38-generic`), builds and loads, zero Xid. The **in-driver**
-exploit does not survive 615's firmware — the signed Booter path rejects the
-V244-era crafted signature (`booter error 0x1c @ tracepc 0x1b38`,
-deterministic, all cards): the Booter image is byte-identical 610↔615, but
-NVIDIA **moved the LibOS task instances** (`rm_elf_text` base
-`0x4bf7000→0x4588000`, and 3 pointers inside the walked `.manifest`), so the
-verifier's DMEM-state trajectory no longer matches the frame. Re-calibrating
-that frame is bounded RE with the exact seed values known (ticket 11 phase 2)
-and is the path back to full in-driver unlock.
+exploit does not survive 615's firmware — NVIDIA **recompiled and hardened
+the signed Booter ucode** the exploit chain targets: the TU102
+`BooterLoadUcode` image grew `0xe700→0xe900` with the app code shifted
+`+0x200` (GA102 likewise; GA100 kept size, matching community 615 frames
+reusing 610-era PCs there). The V244-era crafted signature is now refused by
+a **pre-ROP data gate** (`booter error 0x1c @ tracepc 0x1b38`, deterministic,
+LS-version independent), and the 615 Booter's app region is encrypted —
+static decode is impossible, so the gate is probeable only by on-hardware
+frame variants. (An earlier "byte-identical Booter" note conflated it with
+the 4 KB GspRmBoot *monitor*, which is indeed unchanged; corrected by the
+2026-11-01 manifest-decode analysis, effort `.scratch/615-gen2-h2` ticket
+01.) Getting past that gate with the pre-planned frame variants is the
+tracked path back to full in-driver unlock.
 
 The interim production path does not need it: the **`615.78.08` rc3c build
 runs 615's *stock* GSP-RM boot** (per-device `RmCmpSkipStockflow=1`, registry
