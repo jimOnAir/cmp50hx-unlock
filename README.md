@@ -89,6 +89,19 @@ The packed values are used by RM/GSP code. The Linux module uses the split
 vendor, device, and subsystem fields. The two forms must not be mixed when a
 new patch is made.
 
+## Driver 615.78.08 status (investigated 2026-11-01: stay on 610)
+
+The in-driver unlock does **not** work on 615.78.08: its recompiled SEC2
+booter rejects every crafted transaction-frame *shape* before parsing —
+proven with a genuine-stock-frame control that passes while forged and
+even *authentic-record* frames fail bit-identically (full mechanism
+attribution in `docs/CMP50HX-615-UNLOCK-INVESTIGATION.md`, including the
+pre-OS EFI interim mode: compute survives, Gen2 and issue-rate do not).
+Stay pinned to **610.43.03** (this package). Before trying any future
+driver bump, run the six-step re-derivation checklist in that document —
+this class of breakage is invisible to normal porting because it lives
+inside NVIDIA-signed firmware.
+
 ## Kernel API compatibility
 
 Kernel-version compatibility is maintained separately from CMP50HX features.
