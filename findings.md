@@ -784,3 +784,20 @@ Evidence: `.scratch/90hx-gen2-610/logs/` (journal slice, reconstructed jsonl
 flagged in-row, arm state, manifest, diff). Next: ticket 05 design grilling —
 automation of a proven effect, in-OS primary, pre-OS (04) demoted to
 alternative route, 08 off critical path.
+
+## 2026-11-01 — ticket 05 design record v1 adopted (Gen2-at-boot): claim unit + DKMS claim module + series 0019/0020, default-on with kill-switch
+
+Owner approved all six decisions as recommended. Shape: `cmp90hx-claim.service`
+(oneshot, `Before=cmp50hx-boot.service`, never `After=multi-user.target` —
+Wh1stle05 ordering-cycle lesson codified; always exit 0) → sibling DKMS module
+`gpu-unlock-claim` (blacklist + `autoinstall=no`, unit insmods; proven 6-entry
+T09 table; fw at `/lib/firmware/gpu-unlock/610.43.03/` W3h-style) → production
+series gains `0019` (Wh1stle05 retry hunk — we ship what won; first-round-vs-retry
+win is indistinguishable at default log level, so we ship the whole winning flow)
+and `0020` (decl-readback behind `RegistryDwords RmCmp90Gen2Trace=1`, default
+byte-identical). Posture: default-on (consistent with the shipped compute unlock
+already running V67 on every 90HX) + `boot.conf GEN2_90HX` kill-switch.
+Verdict line `gen2=landed|fallback` in the boot digest. ADR-0001: one claim per
+boot, POST re-lock (now measured on both t09 boots) makes every-boot re-claim
+mandatory and accumulation impossible by physics. Pre-OS EFI (04) remains the
+recorded alternative route. Next: ticket 06 implementation + acceptance matrix.
