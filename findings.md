@@ -730,3 +730,21 @@ Gotcha for future builds: on the GitHub-tag source tree,
 `make -C kernel-open module` fails (`No rule to make target
 nv-kernel.o_binary`) — build must run top-level `make modules KERNEL_UNAME=…`
 exactly as dkms.conf does. Window itself awaits user power-on + go/no-go.
+
+## 2026-11-01 — ticket 01 baseline: llm2 runs the deb rev15 (`20261030.15`), and three runbook-relevant truths
+
+Probe `../.scratch/90hx-gen2-610/logs/t01-baseline-20261101.txt` (host up,
+610 already restored, fleet 3/3, Xid 0, `topo -p2p r/w` all-OK, 90HX cold row
+3/35 open, ladder HALT clean):
+- dpkg truth vs prose: installed is **rev15**, module srcversion
+  `2EF347F7FE3B03C0BEA611C`; the "serving 20261101.16" notes described the
+  rev-16 *contract work + module restore*, not a dpkg upgrade. All window
+  rollback targets keyed to the srcversion, not the deb label.
+- **`/sys/.../0000:03:00.0/rom` attribute absent** on the 90HX — Zagitta's
+  live-ROM-BAR FWSEC read is structurally unavailable on CMP cards; cached
+  BAR0-`0x300000` PROM dump is the only FWSEC source (port plan already
+  assumes it).
+- **initramfs embeds `nvidia.ko`** (count 1) — any `.ko` swap must
+  `update-initramfs -u` (and the same on rollback) or image and disk diverge.
+- L1b fuse regs `0x820040/0x820084` = `0x1`: GA102 semantics unconfirmed →
+  micro-test declined, fog patch closed without graduating.
