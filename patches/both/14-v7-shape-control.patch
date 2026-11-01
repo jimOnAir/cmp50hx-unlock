@@ -1,0 +1,105 @@
+diff --git a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+--- a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
++++ b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+@@ -6902,7 +6902,7 @@
+         _kgspCmp50PutU32(pSignatureVa, 0xF920, 0x05503850U);
+     }
+ 
+-    if ((v == 4U) || (v == 6U))
++    if ((v == 4U) || (v == 6U) || (v == 7U))
+     {
+         /*
+          * V4 record-trust probe (615-gen2-h2 ticket 10): overlay the head
+@@ -6940,7 +6940,7 @@
+         portMemCopy(&hdr0, sizeof(hdr0), pSignatureVa, sizeof(hdr0));
+         NV_PRINTF(LEVEL_ERROR,
+                   "CMP50_FRAMEVAR: V4%cs overlay n=%u hdr0=0x%08x\n",
+-                  (v == 6U) ? 'b' : 'a', n, hdr0);
++                  (v == 7U) ? 'c' : (v == 6U) ? 'b' : 'a', n, hdr0);
+         return;
+     }
+ 
+@@ -7457,6 +7457,34 @@
+ 
+     newSize = bSecondExploit ? CMP50_PC_CANARY_SIGNATURE_SIZE :
+         NV_ALIGN_UP(pKernelGsp->stockSignatureSize, 256);
++
++    /*
++     * V7 (615-gen2-h2 ticket 12): the DEFINITIVE shape-control.  Advertise
++     * and fetch exactly the stock-size frame (0x1000, genuine-records
++     * overlay applied by the builder) through our own fresh-metadata re-run
++     * path — tail/stage content truncated past the boundary, zero crafted
++     * shape.  Outcome discriminates the last two live models:
++     *   accepted (halt pc moves / MAILBOX1 path)  -> gate keys on frame
++     *       SHAPE (advertised size/tail region), path provenance is fine;
++     *       no useful tail size survives under the cap, in-kernel ROP
++     *       closes with mechanism attribution.
++     *   rejected 0x1c@0x1b38                     -> gate keys on the PATH
++     *       itself (fresh metadata / second-launch provenance), NO frame
++     *       design can pass; in-kernel H2 closes decisively.
++     */
++    {
++        NvU32 v7 = 0;
++
++        if ((osReadRegistryDword(pGpu, "RmCmpFrameVariant", &v7) == NV_OK) &&
++            (v7 == 7U) && (pKernelGsp->stockSignatureSize != 0U))
++        {
++            newSize = NV_ALIGN_UP(pKernelGsp->stockSignatureSize, 256);
++            NV_PRINTF(LEVEL_ERROR,
++                      "CMP50_FRAMEVAR: V7 stock-shape frame newSize=0x%llx\n",
++                      (unsigned long long)newSize);
++        }
++    }
++
+     NV_CHECK_OK_OR_GOTO(status, LEVEL_ERROR,
+         memdescCreate(&pNewMemdesc, pGpu, newSize, 256,
+             NV_TRUE, ADDR_SYSMEM, NV_MEMORY_CACHED, flags), fail);
+diff --git a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
+--- a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
++++ b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_tu102.c
+@@ -141,6 +141,19 @@
+     return ((osReadRegistryDword(pGpu, "RmCmpFrameVariant", &v) == NV_OK) && (v != 0));
+ }
+ 
++/* Value of RmCmpFrameVariant for this device (0 when absent). */
++static NvU32
++s_cmp50FrameVariantValue
++(
++    OBJGPU *pGpu
++)
++{
++    NvU32 v = 0;
++
++    (void) osReadRegistryDword(pGpu, "RmCmpFrameVariant", &v);
++    return v;
++}
++
+ /*
+  * 615 stock FWSEC keeps the same WPR2 reservation (capture is live and
+  * valid), but the stock BOOTER hands off WPR2 lo 0x80000 lower than the
+@@ -1707,6 +1720,25 @@
+     {
+         pWprMeta->sysmemAddrOfSignature = memdescGetPhysAddr(pKernelGsp->pSignatureMemdesc, AT_GPU, 0);
+         pWprMeta->sizeOfSignature = memdescGetSize(pKernelGsp->pSignatureMemdesc);
++
++        /*
++         * V7 stock-shape control (615-gen2-h2 ticket 12/13, patch 14 v2):
++         * advertise the genuine stock size (0x1000) through our own
++         * fresh-metadata re-run path.  The buffer head already carries the
++         * card's byte-exact genuine 615 records (patch 13 overlay); bytes
++         * beyond the advertised size are simply never fetched.  One bit of
++         * difference from every prior 615 attempt: frame SHAPE = stock.
++         */
++        if ((s_cmp50FrameVariantValue(pGpu) == 7U) &&
++            (pKernelGsp->stockSignatureSize != 0U))
++        {
++            pWprMeta->sizeOfSignature =
++                NV_ALIGN_UP(pKernelGsp->stockSignatureSize, 256);
++            NV_PRINTF(LEVEL_ERROR,
++                      "CMP50_FRAMEVAR: V7 stock-shape advertised size=0x%016llx "
++                      "at live WprMeta population\n",
++                      (unsigned long long)pWprMeta->sizeOfSignature);
++        }
+     }
+ 
+     // CrashCat queue (if allocated in sysmem)
