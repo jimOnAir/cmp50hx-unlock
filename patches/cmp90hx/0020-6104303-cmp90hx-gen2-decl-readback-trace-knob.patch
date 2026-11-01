@@ -1,0 +1,88 @@
+diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -68,6 +68,63 @@
+ #include <linux/io.h>
+ #include <linux/pci.h>
+ #include <uapi/linux/pci_regs.h>
++#include <linux/namei.h>
++
++static bool
++nv_cmp90hx_gen2_trace_enabled(void)
++{
++    struct path trace_path;
++
++    if (kern_path("/var/lib/cmpunlocker-rs/gen2-trace", LOOKUP_FOLLOW, &trace_path) == 0)
++    {
++        path_put(&trace_path);
++        return true;
++    }
++    return false;
++}
++
++/*
++ * CMP90 T09 window add-on: read back every declaration the Gen2 speed path
++ * pokes, plus both LNKCTL2 and LNKSTA, so a no-Gen2 outcome is attributable
++ * on the graded boot: sticky values point at retrain mechanics, dropped
++ * values point at per-card mask insufficiency. Printed at error level for
++ * guaranteed dmesg visibility.
++ */
++static void
++nv_cmp90hx_gen2_decl_dump(nv_state_t *nv, struct pci_dev *gpu,
++                          struct pci_dev *upstream)
++{
++    void __iomem *bar0;
++    u16 gpu_ctl2 = 0, up_ctl2 = 0, link_status = 0;
++    u32 misc1 = 0, cya0 = 0, val0 = 0, ov0 = 0, val3 = 0, ov3 = 0;
++    u32 linkcfg = 0, ltssm = 0;
++
++    if (!nv_cmp90hx_gen2_trace_enabled())
++        return;
++
++    bar0 = ioremap(pci_resource_start(gpu, 0), 0x1000000);
++    if (bar0 != NULL)
++    {
++        misc1   = readl(bar0 + 0x8841c);   /* PRIV_MISC_1 */
++        cya0    = readl(bar0 + 0x8c2c0);   /* CYA_0 */
++        val0    = readl(bar0 + 0x8e120);   /* XP3G_VAL0 */
++        ov0     = readl(bar0 + 0x8e110);   /* XP3G_OVR0 */
++        val3    = readl(bar0 + 0x8e12c);   /* XP3G_VAL3 */
++        ov3     = readl(bar0 + 0x8e11c);   /* XP3G_OVR3 */
++        linkcfg = readl(bar0 + 0x8c040);   /* LINK_CONFIG_0 */
++        ltssm   = readl(bar0 + 0x8872c);   /* XVE_LTSSM */
++        iounmap(bar0);
++    }
++    (void)pcie_capability_read_word(gpu, PCI_EXP_LNKCTL2, &gpu_ctl2);
++    (void)pcie_capability_read_word(upstream, PCI_EXP_LNKCTL2, &up_ctl2);
++    (void)pcie_capability_read_word(gpu, PCI_EXP_LNKSTA, &link_status);
++
++    NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
++                  "CMP90 Gen2 decl-readback: BAR0=%s PRIV_MISC1=0x%08x CYA0=0x%08x XP3G_OVR0=0x%08x XP3G_VAL0=0x%08x XP3G_OVR3=0x%08x XP3G_VAL3=0x%08x LINKCFG0=0x%08x LTSSM=0x%08x LNKCTL2_gpu=0x%04x LNKCTL2_up=0x%04x LNKSTA=0x%04x\n",
++                  (bar0 != NULL) ? "ok" : "unmapped",
++                  misc1, cya0, ov0, val0, ov3, val3, linkcfg, ltssm,
++                  gpu_ctl2, up_ctl2, link_status);
++}
+ 
+ /*
+  * CMP90_STOCKFLOW_REJOIN16: apply the PCIe Gen2 speed-path configuration and
+@@ -169,6 +226,7 @@
+             {
+                 NV_DEV_PRINTF(NV_DBG_INFO, nv, "CMP90 Gen2: PCIe link trained to Gen%u\n",
+                               link_status & PCI_EXP_LNKSTA_CLS);
++                nv_cmp90hx_gen2_decl_dump(nv, gpu, upstream);
+                 return;
+             }
+         }
+@@ -176,10 +234,12 @@
+                       "CMP90 Gen2: retrain round %d still Gen1 (status=0x%04x), re-toggling RL\n",
+                       attempt, link_status);
+     }
++    nv_cmp90hx_gen2_decl_dump(nv, gpu, upstream);
+     return;
+ capability_error:
+     NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
+                   "CMP90 Gen2: PCIe capability access failed (%d); skipping\n", ret);
++    nv_cmp90hx_gen2_decl_dump(nv, gpu, upstream);
+ }
+ 
+ static DEFINE_MUTEX(cmp90_rejoin15_start_lock);
