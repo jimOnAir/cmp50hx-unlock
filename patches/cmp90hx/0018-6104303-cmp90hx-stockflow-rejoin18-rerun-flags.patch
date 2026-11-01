@@ -1,6 +1,6 @@
-diff --git a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
---- a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
-+++ b/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
+diff -ruN a18/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c b18/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
+--- a18/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c	2026-10-30 18:43:15.273180261 +0300
++++ b18/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c	2026-10-30 18:43:15.273634513 +0300
 @@ -45,6 +45,7 @@
  #define CMP90_PC_EXACT_SS1_FULL                  0x00000008U
  #define CMP90_REJOIN16_WRITE_SPEC_PATH           "/var/lib/cmpunlocker-rs/rejoin16-next-write.bin"
@@ -64,7 +64,7 @@ diff --git a/src/nvidia/src/kernel/gpu/gsp/arch/turing/kernel_gsp_booter_tu102.c
 +                                "skipped (flags bit0)\n");
 +                        }
 +                        else if (pKernelGsp->pFwsecUcode != NULL &&
-                             pKernelGsp->pWprMetaV1 != NULL)
+                             pKernelGsp->pWprMeta != NULL)
                          {
                              KernelGspPreparedFwsecCmd *pFwsecCmd =
 @@ -389,7 +426,8 @@

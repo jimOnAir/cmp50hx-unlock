@@ -126,12 +126,10 @@ case "${card}" in
         ;;
     both)
         # Mixed CMP fleet (90HX GA102 + 50HX TU102): the cmp90 rejoin series
-        # applies to stock first, then the rebased cmp50 stockflow (regenerated
-        # 2026-10-31 as a tree-diff over the 615.78.08 rejoin series; rebase it
+        # applies to stock first, then the rebased cmp50 stockflow (generated
+        # 2026-10-27 as git-diff of the conflict-resolved tree; rebase it
         # again whenever either stockflow series changes), then the rest of
-        # the cmp50 series which stacks cleanly on top — except 04 (PCIe Gen2),
-        # whose include block rebases onto the identical includes 0016 already
-        # added to nv.c (both/04-…-rebased: hunks 2+3, deduplicated).
+        # the cmp50 series which stacks cleanly on top.
         readonly source_url="https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/${driver_version}.tar.gz"
         readonly source_sha256="${SOURCE_SHA256}"
         patch_files=()
@@ -143,17 +141,11 @@ case "${card}" in
                  "${script_dir}/patches/both/01-cmp50-stockflow-rebased-on-cmp90hx.patch" \
                  "${script_dir}/patches/cmp50hx/02-cmp50-rt-core-count.patch" \
                  "${script_dir}/patches/cmp50hx/03-cmp50-rebar.patch" \
-                 "${script_dir}/patches/both/04-cmp50-pcie-gen2-rebased-on-cmp90hx.patch" \
+                 "${script_dir}/patches/cmp50hx/04-cmp50-pcie-gen2.patch" \
                  "${script_dir}/patches/cmp50hx/05-rtx2080ti-rebar.patch" \
                  "${script_dir}/patches/cmp50hx/06-aikitoria-p2p.patch" \
                  "${script_dir}/patches/cmp50hx/07-turing-p2p.patch" \
-                 "${script_dir}/patches/cmp50hx/08-cmp50-driver-profiling.patch" \
-                 "${script_dir}/patches/both/09-lsvar-615-experiment.patch" \
-                 "${script_dir}/patches/both/10-efionly-skip-stockflow.patch" \
-                 "${script_dir}/patches/both/11-efionly-stock-boot.patch" \
-                 "${script_dir}/patches/both/12-frame-variant-matrix.patch" \
-                 "${script_dir}/patches/both/13-v4-record-trust.patch" \
-                 "${script_dir}/patches/both/14-v7-shape-control.patch"; do
+                 "${script_dir}/patches/cmp50hx/08-cmp50-driver-profiling.patch"; do
             [[ -f "$p" ]] || { printf 'missing patch: %s\n' "$p" >&2; exit 5; }
             patch_files+=("$p")
         done
@@ -194,11 +186,12 @@ for patch_name in "${patch_order[@]}"; do
     patch_files+=("${patch_file}")
 done
 fi
-# patches/common/01-nvidia-kernel-string-api.patch was retired for the
-# 615.78.08 port: upstream fixed every site it carried (strscpy in
-# os_get_current_process_name, memcpy for nvswitch regkeys, snprintf in
-# uvm_pmm, and the two strncpy-return helpers were deleted outright).
-# See patches/common/README.md and 615-port ticket 04.
+common_patch_file="${script_dir}/patches/common/01-nvidia-kernel-string-api.patch"
+[[ -f "${common_patch_file}" ]] || {
+    printf 'missing common patch: %s\n' "${common_patch_file}" >&2
+    exit 5
+}
+patch_files+=("${common_patch_file}")
 if [[ -z "${prepare_source}" ]]; then
 [[ ! -e "${artifact_dir}" ]] || {
     printf 'artifact directory already exists: %s\n' "${artifact_dir}" >&2

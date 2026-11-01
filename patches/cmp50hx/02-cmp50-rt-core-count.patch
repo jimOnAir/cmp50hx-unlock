@@ -1,7 +1,8 @@
 diff --git a/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c b/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c
+index 18accf8..ec28e99 100644
 --- a/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c
 +++ b/src/nvidia/src/kernel/gpu/gr/kernel_graphics.c
-@@ -1250,6 +1250,13 @@
+@@ -1247,6 +1247,13 @@ kgraphicsLoadStaticInfo_KERNEL
                      NV0080_CTRL_GR_INFO_MAX_SIZE * sizeof(*pPrivate->staticInfo.pGrInfo->infoList),
                      pParams->info.engineInfo[grIdx].infoList,
                      NV0080_CTRL_GR_INFO_MAX_SIZE * sizeof(*pParams->info.engineInfo[grIdx].infoList));

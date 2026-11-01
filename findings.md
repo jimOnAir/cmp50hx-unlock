@@ -801,3 +801,15 @@ Verdict line `gen2=landed|fallback` in the boot digest. ADR-0001: one claim per
 boot, POST re-lock (now measured on both t09 boots) makes every-boot re-claim
 mandatory and accumulation impossible by physics. Pre-OS EFI (04) remains the
 recorded alternative route. Next: ticket 06 implementation + acceptance matrix.
+
+## 2026-11-01 — master flipped back to the 610 product pin (owner call A, ticket 06 prerequisite)
+
+`patches/`, `driver-pin.env`, `build.sh`, `install.sh` restored from `249de11^`
+(the last 610-pinned state); the seven 615-tree patches moved to
+`patches/experiments/615/` with a README (archaeological input for the next
+bump — not built by any profile); post-port tooling/docs/CI kept. Proof:
+`prepare-source --card both` PASS + `PASS_FLIP_610_SERIES_COMPILE` (full
+nvidia/uvm/modeset build, noble container, production dkms command shape).
+Rationale: the closure verdict was "stay on 610" but the repo still built the
+615 deb whose unlock is firmware-blocked; the product surface must match the
+verdict. Six-step re-derivation checklist governs any future flip forward.

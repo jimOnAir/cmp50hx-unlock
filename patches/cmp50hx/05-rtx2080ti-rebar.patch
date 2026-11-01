@@ -1,10 +1,7 @@
 diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
 --- a/kernel-open/nvidia/nv-pci.c
 +++ b/kernel-open/nvidia/nv-pci.c
-@@ -620,6 +620,93 @@
-     return 0;
- }
- 
+@@ -340,3 +340,90 @@
 +/*
 + * TU102 (GeForce RTX 2080 Ti, PCI 1e04/1e07): BAR1 size is selected by the
 + * "PSTRAPS" override in BAR0.  STRAPS1 bits[22:20] hold the size code
@@ -95,13 +92,10 @@ diff --git a/kernel-open/nvidia/nv-pci.c b/kernel-open/nvidia/nv-pci.c
  static int nv_resize_pcie_bars(struct pci_dev *pci_dev) {
  #if defined(NV_PCI_REBAR_GET_POSSIBLE_SIZES_PRESENT)
      u16 cmd;
-@@ -2493,6 +2580,9 @@
-         !nv_pci_validate_bars(pci_dev, /* only_bar0 = */ NV_FALSE))
-         goto err_zero_dev;
- 
+@@ -2091,3 +2178,6 @@
 +    /* TU102 (RTX 2080 Ti): arm large-BAR1 straps (fail-soft) */
 +    (void)nv_tu102_set_bar1_size(pci_dev, regs_bar_index);
 +
      if (nv_resize_pcie_bars(pci_dev)) {
-         nv_printf(NV_DBG_ERRORS,
-             "NVRM: Fatal Error while attempting to resize PCIe BARs.\n");
+         nv_printf(NV_DBG_ERRORS, "NVRM: Fatal Error while attempting to resize PCIe BARs.\n");
+         goto err_zero_dev;

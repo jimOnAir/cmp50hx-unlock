@@ -1,17 +1,11 @@
-diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
 --- a/kernel-open/nvidia/nv.c
 +++ b/kernel-open/nvidia/nv.c
-@@ -64,6 +64,8 @@
- #endif
- 
+@@ -66,2 +66,4 @@
  #include <linux/firmware.h>
 +static DEFINE_MUTEX(cmp90_rejoin15_start_lock);
 +
  #include <linux/cdev.h>
- 
- #include <sound/core.h>             /* HDA struct snd_card */
-@@ -1850,6 +1852,19 @@
-             return -EBUSY;
+@@ -1693,5 +1695,18 @@
          }
  
 +        if ((nv->pci_info.device_id == 0x220d) &&
@@ -30,8 +24,7 @@ diff --git a/kernel-open/nvidia/nv.c b/kernel-open/nvidia/nv.c
          rc = nv_start_device(nv, sp);
          if ((rc != 0) &&
              (nv->pci_info.device_id == 0x220d) &&
-@@ -1868,6 +1883,16 @@
-                           "completed rc=%d flags=0x%x\n",
+@@ -1711,5 +1725,15 @@
                            rc, nv->flags);
          }
 +        if ((nv->pci_info.device_id == 0x220d) &&

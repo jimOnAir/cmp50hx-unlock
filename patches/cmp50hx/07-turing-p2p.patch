@@ -1,7 +1,8 @@
 diff --git a/src/nvidia/generated/g_kern_bus_nvoc.c b/src/nvidia/generated/g_kern_bus_nvoc.c
+index 69fe272..4f4bdb6 100644
 --- a/src/nvidia/generated/g_kern_bus_nvoc.c
 +++ b/src/nvidia/generated/g_kern_bus_nvoc.c
-@@ -340,7 +340,7 @@
+@@ -327,7 +327,7 @@ void __nvoc_init_dataField_KernelBus(KernelBus *pThis, GpuHalspecOwner *pGpuhals
      }
  
      // NVOC Property Hal field -- PDB_PROP_KBUS_SUPPORT_BAR1_P2P_BY_DEFAULT
@@ -11,9 +12,10 @@ diff --git a/src/nvidia/generated/g_kern_bus_nvoc.c b/src/nvidia/generated/g_ker
          pThis->setProperty(pThis, PDB_PROP_KBUS_SUPPORT_BAR1_P2P_BY_DEFAULT, NV_TRUE);
      }
 diff --git a/src/nvidia/generated/g_virt_mem_allocator_nvoc.c b/src/nvidia/generated/g_virt_mem_allocator_nvoc.c
+index f5ced59..bdd6e55 100644
 --- a/src/nvidia/generated/g_virt_mem_allocator_nvoc.c
 +++ b/src/nvidia/generated/g_virt_mem_allocator_nvoc.c
-@@ -339,7 +339,7 @@
+@@ -338,7 +338,7 @@ static void __nvoc_init_funcTable_VirtMemAllocator_1(VirtMemAllocator *pThis, Gp
      // default
      else
      {
@@ -22,7 +24,7 @@ diff --git a/src/nvidia/generated/g_virt_mem_allocator_nvoc.c b/src/nvidia/gener
      }
  
      // dmaFreeBar1P2PMapping -- halified (2 hals) body
-@@ -351,7 +351,7 @@
+@@ -350,7 +350,7 @@ static void __nvoc_init_funcTable_VirtMemAllocator_1(VirtMemAllocator *pThis, Gp
      // default
      else
      {
@@ -32,9 +34,10 @@ diff --git a/src/nvidia/generated/g_virt_mem_allocator_nvoc.c b/src/nvidia/gener
  
      // dmaIsDefaultGpuUncached -- halified (2 hals) body
 diff --git a/src/nvidia/src/kernel/gpu/bus/arch/turing/kern_bus_tu102.c b/src/nvidia/src/kernel/gpu/bus/arch/turing/kern_bus_tu102.c
+index f06fb09..9c35277 100644
 --- a/src/nvidia/src/kernel/gpu/bus/arch/turing/kern_bus_tu102.c
 +++ b/src/nvidia/src/kernel/gpu/bus/arch/turing/kern_bus_tu102.c
-@@ -366,34 +366,32 @@
+@@ -366,34 +366,32 @@ kbusGetBar1ResvdVA_TU102
  NV_STATUS
  kbusIsStaticBar1Supported_TU102
  (
@@ -83,7 +86,7 @@ diff --git a/src/nvidia/src/kernel/gpu/bus/arch/turing/kern_bus_tu102.c b/src/nv
      {
          return NV_ERR_NOT_SUPPORTED;
      }
-@@ -416,101 +414,96 @@
+@@ -416,101 +414,96 @@ kbusIsStaticBar1Supported_TU102
          return NV_ERR_NOT_SUPPORTED;
      }
  
@@ -128,17 +131,22 @@ diff --git a/src/nvidia/src/kernel/gpu/bus/arch/turing/kern_bus_tu102.c b/src/nv
 -                                           "%lld to force static BAR1\n",
 -                                            bar1VASizeAligned, bar1MapSize);
 -                    DBG_BREAKPOINT();
+-
+-                    return NV_ERR_INVALID_REGISTRY_KEY;
+-                }
+-
+-                return NV_OK;
 +                NV_PRINTF(LEVEL_ERROR,
 +                          "BAR1 size %lld is not large enough to map FB size"
 +                          "%lld to force static BAR1\n",
 +                          bar1VASizeAligned,
 +                          bar1MapSize);
 +                return NV_ERR_INVALID_REGISTRY_KEY;
-+            }
+             }
 +            return NV_OK;
 +        }
 +
-+        case NV_REG_STR_RM_FORCE_STATIC_BAR1_AUTO:
+         case NV_REG_STR_RM_FORCE_STATIC_BAR1_AUTO:
 +        {
 +            //
 +            // Auto-enable if there is enough space to map
@@ -159,29 +167,9 @@ diff --git a/src/nvidia/src/kernel/gpu/bus/arch/turing/kern_bus_tu102.c b/src/nv
 +            kfifoGetUserdSizeAlign_HAL(pKernelFifo, &userdSize, NULL);
 +            dynamicBar1Size = (NvU64)userdSize * numChannels +
 +                                  mmioPrivSize + doorbellSize;
- 
--                    return NV_ERR_INVALID_REGISTRY_KEY;
--                }
++
 +            // The static window must cover the client-visible FB range.
 +            if (maxStaticMapSize < clientFbSizeAligned)
-+            {
-+                return NV_ERR_NOT_SUPPORTED;
-+            }
- 
--                return NV_OK;
-+            // Dynamic mappings can also use the alignment gap.
-+            alignmentPadding = staticBar1Offset - reservedSize;
-+            requiredAutoBar1Size = clientFbSizeAligned + staticBar1Offset;
-+            if (dynamicBar1Size > alignmentPadding &&
-+                !portSafeAddU64(requiredAutoBar1Size,
-+                                dynamicBar1Size - alignmentPadding,
-+                                &requiredAutoBar1Size))
-+            {
-+                return NV_ERR_NOT_SUPPORTED;
-             }
--        case NV_REG_STR_RM_FORCE_STATIC_BAR1_AUTO:
-+
-+            if (bar1VASizeAligned >= requiredAutoBar1Size)
              {
 -                //
 -                // GPU BAR1 supports the SYSMEM mapping for the bar1 doorbell, RM needs
@@ -244,9 +232,25 @@ diff --git a/src/nvidia/src/kernel/gpu/bus/arch/turing/kern_bus_tu102.c b/src/nv
 -                {
 -                    return NV_ERR_NOT_SUPPORTED;
 -                }
++                return NV_ERR_NOT_SUPPORTED;
+             }
++
++            // Dynamic mappings can also use the alignment gap.
++            alignmentPadding = staticBar1Offset - reservedSize;
++            requiredAutoBar1Size = clientFbSizeAligned + staticBar1Offset;
++            if (dynamicBar1Size > alignmentPadding &&
++                !portSafeAddU64(requiredAutoBar1Size,
++                                dynamicBar1Size - alignmentPadding,
++                                &requiredAutoBar1Size))
++            {
++                return NV_ERR_NOT_SUPPORTED;
++            }
++
++            if (bar1VASizeAligned >= requiredAutoBar1Size)
++            {
 +                NV_PRINTF(LEVEL_INFO, "Enabling static BAR1 automatically!\n");
 +                return NV_OK;
-             }
++            }
 +            return NV_ERR_NOT_SUPPORTED;
 +        }
 +
@@ -260,9 +264,10 @@ diff --git a/src/nvidia/src/kernel/gpu/bus/arch/turing/kern_bus_tu102.c b/src/nv
   * @brief Setup static Bar1 mapping.
   *
 diff --git a/src/nvidia/src/kernel/platform/p2p/p2p_caps.c b/src/nvidia/src/kernel/platform/p2p/p2p_caps.c
+index 8b1679b..8b50ae2 100644
 --- a/src/nvidia/src/kernel/platform/p2p/p2p_caps.c
 +++ b/src/nvidia/src/kernel/platform/p2p/p2p_caps.c
-@@ -924,6 +924,21 @@
+@@ -905,6 +905,21 @@ p2pGetCapsStatus
      if (_kp2pCapsGetStatusOverPcie(gpuMask, pP2PWriteCapStatus,
                                    pP2PReadCapStatus, &bCommonSwitchFound) == NV_OK)
      {
