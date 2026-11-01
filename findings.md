@@ -711,3 +711,22 @@ XP3G `0x8e110/120/11c/12c`, `0x8c040`, `0x8872c`, both `LNKCTL2`, `LNKSTA`)
 race exonerated; drops = per-card mask insufficiency. Decision: vendored
 patch stays under `docs/cmp90hx/upstream/wh1stle05/patches/` — production
 series untouched until a LANDED verdict.
+
+## 2026-11-01 — ticket 09 window kit ready (offline): retry + decl-readback module PASSES build
+
+`.scratch/90hx-gen2-610/kit/t09/` — `patches/0001` (Wh1stle05
+retrain-retry, verbatim) + `patches/0002` (new `decl-readback` line dumping
+every speed-path declaration + both LNKCTL2 + LNKSTA at all exits of
+`nv_cmp90hx_gen2_config`). Reproducible from the 610-pinned tree
+(`249de11^`): `prepare-source + p01 + p02` = byte-identical authored tree
+(REPRO-PASS). Compile proof `PASS_CMP90HX_T09_MODULE_BUILD` in ubuntu:24.04
+with `linux-headers-6.8.0-147-generic`, production `dkms.conf` command shape,
+`nvidia.ko` srcversion `9ED3DAA351CCB6892046DCF` (rev16 is `2EF347F7…` by
+design — window swap is one `.ko`, backup+rollback, built from the HOST's own
+`/usr/src/cmp50hx-610.43.03` at window time: the `50HXUNLK.EFI` sha drift and
+absent rev16 deb made any deb path a drift vector; single-module swap keeps
+the 50HXes on byte-identical rev16 code and touches no ESP/dpkg state).
+Gotcha for future builds: on the GitHub-tag source tree,
+`make -C kernel-open module` fails (`No rule to make target
+nv-kernel.o_binary`) — build must run top-level `make modules KERNEL_UNAME=…`
+exactly as dkms.conf does. Window itself awaits user power-on + go/no-go.
