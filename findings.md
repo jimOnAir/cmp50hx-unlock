@@ -626,3 +626,57 @@ assertion caught only during close-out review, not by any run. Lesson:
 an assertion must FAIL when it matches nothing; both harness and window
 scans now count matches and hard-fail on zero, and the grub check was
 unit-proven positive+negative afterwards.
+
+## 2026-11-01 — 90HX success-corpus audit: what every "successfully unlocked" report actually proves (map 90hx-gen2-610)
+
+Full ledger lives on the map's tickets; the load-bearing facts, so no future
+session re-derives them:
+
+**Tier 0 — verified on OUR card (llm2, 610.43.03), code in-tree:**
+- Compute unlock: `patches/cmp90hx/0014/0015` (pearlfortune v0.1.28 stockflow,
+  sha256-pinned bundle) — `SS0=0x88888888` every boot, probe-cross-verified.
+- 5 Gen2 masks LAND: FEAT + `0x823800` + XVE `0x88fe8/fec/ff0/ff4` = `0xffffffff`,
+  survived FLR + production bind, **7/7 boots** (`docs/cmp90hx/success-recipe.md`
+  §2 rows 1–37, boot_ids). Zagitta-port pre-driver ko. Masks ≠ Gen2 — no speed
+  change ever followed them here.
+
+**Tier 1 — verified elsewhere, code vendored, NOT reproducible on llm2 (all Gen2):**
+- jdowning100 (rejoin16 author): 34/34 + `PASS_CMP90HX_ALL_TARGETS_FULL_SPEED`
+  on bench, kernel ≤6.12, x4. Refuted here on his own byte-identical lineage
+  (RF: cycle-1 lands, `0x88fe8` run-2 NO-EFFECT). Clone `work/upstream/jdowning100-cmpunlocker/`.
+- **Wh1stle05 — strongest corpus member**: Gen2 x16/x8 with REAL DMA (H2D 3.08→6.29,
+  D2H 3.35→6.70 GB/s), 2×90HX, Jingyue X99, kernel **6.8.0-139**, driver 610.43.03.
+  Two transferable findings vendored under `docs/cmp90hx/upstream/wh1stle05/`:
+  (a) `masks/minimal-2.txt` — Gen2 on **2 masks only** `{0x823800, 0x88fe8}`,
+  independently corroborating the map's decisive payload; (b) `patches/0017-…-retrain-retry`
+  — one-poll retrain ALWAYS loses the race vs GSP-RM link mgmt and prints
+  `retrain completed without Gen2 (status=0x1101)`: llm2's verbatim 7/7 log line.
+  Their fake-success rule adopted: post-RM-init config-space `5.0 GT/s` is
+  cosmetic — acceptance needs `nvidia-smi` gen=2 + copy-bandwidth doubling.
+- iatethelogs (Habr 3+4, `upstream/iatethelogs/cmp90hxpwner.sh`): Gen2 **x16 only
+  after soldering lane capacitors**; P2P recipe incl. (`ForceP2P=0x111;
+  RMForceP2PType=1;RMForceStaticBar1=1;PeerMappingOverride=1`, 3.08/3.35 GB/s
+  at Gen1, 6.70 at Gen2). Dual-Xeon, ≤6.8.
+- Zagitta/gpu-unlock: "Stable, 100+ user reports" = **consumer** GA102; the
+  `GA102(0x220d)` table entry (`recipes.c:419`) is identity mapping — no CMP
+  success report exists in their tracker. The 6-write frame mechanism is their
+  proven shape; its application to CMP Gen2 is precisely our unclaimed bet.
+
+**Tier 2 — claimed, no code:** jdowning's warm mask-preservation (refuted on
+llm2 7/7, success-recipe §6); WildFlash `unlock_v3f.efi` Gen2 EFI variant
+(binary claimed, source not shipped — their own gen2 is the de-scoped,
+unre-proofed part).
+
+**Consequences for the map (new frontier tickets):**
+1. **Nobody anywhere has published pre-OS 90HX Gen2** — ticket 04 explores
+   genuinely unclaimed territory. ✔ already its spine.
+2. **100 % kernel correlation**: every Gen2 success ≤6.12, llm2 alone 7.0.0-38;
+   `kernel-hypothesis.md` killed it statically but the live discriminator
+   (window #11) was never run → **ticket 08** (boot 6.12.95, re-run the staged
+   alternation at `/opt/cmp90hx-gen2-l2/`; one reboot, no new code).
+3. **retrain-retry never pulled on llm2 with landed masks** — route D was
+   single-shot (its own "do not re-pull" closed only that form) → **ticket 09**
+   (port Wh1stle05 0017 + arm the 7/7 set; static preflight first: reconcile
+   their minimal-2 claim with our `0016` call-site gate `0x0008e1b0` — if their
+   lineage carries the same gate, their success landed more masks than
+   documented).
