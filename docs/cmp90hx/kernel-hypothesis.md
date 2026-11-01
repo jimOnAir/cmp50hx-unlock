@@ -136,3 +136,32 @@ One more mechanical note: his bench consumes artifacts keyed
 for 7.0.0-38, so his flow cannot run as-shipped on llm2 without a build pass
 (window #11 on 6.12.95, where a matching build is possible, remains the
 alternative discriminator).
+
+---
+
+## CORRECTION 2026-11-01 (map 90hx-gen2-610, ticket 09 static preflight)
+
+The sweep bullet "`nv_cmp90hx_gen2_config` … never engages on llm2 — it is
+gated on `0x0008e1b0 == 0xffffffff`" **misidentifies the gate**. Patch 0016
+contains TWO Gen2 config sites with different gates and different histories:
+
+- **`kernel-open/nvidia/nv.c` `nv_cmp90hx_gen2_config`** — gates on device
+  identity + `0x823800 == 0xffffffff` only; runs after the `nv_start_device`
+  retry, i.e. *after* GSP-RM already began managing the link; writes the
+  speed-path BAR0 declarations, both-end LNKCTL2 TLS, upstream RL, then a
+  **single** 20×100 ms LNKSTA poll. **This one HAS engaged on llm2** — the
+  verbatim `retrain completed without Gen2 (status=0x1101)` on all 7 W3-era
+  landed-mask boots (success-recipe §2; route-decision-package §1) is its
+  output.
+- **`kernel_gsp_booter_tu102.c` "late Gen2 config"** — gated on
+  `status == NV_OK && bCmp90PcCanary && 0x0008e1b0 == 0xffffffff`
+  (booter context, before GSP link management starts). This is the site that
+  never engages here (XP3G_PLM `0x8e1b0` never opens on llm2).
+
+Consequence: "the config path never engages" is wrong precisely for the
+7/7 landed-mask boots. The live explanation for those seven negatives is now
+Wh1stle05's single-poll **retrain race** (their `0017-…-retrain-retry`, 5 RL
+re-assert rounds — applies cleanly to our series output, `patch --dry-run`
+PASS on `work/build.1vZgdr/source`), pending the register-readback window of
+map ticket 09. The kernel-static verdict itself (run-2 refusal is
+kernel-independent) is untouched.

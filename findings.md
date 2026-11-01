@@ -680,3 +680,34 @@ unre-proofed part).
    their minimal-2 claim with our `0016` call-site gate `0x0008e1b0` — if their
    lineage carries the same gate, their success landed more masks than
    documented).
+
+## 2026-11-01 — ticket 09 static preflight: llm2 DID run the Gen2 speed path 7/7; the missing lever is the retrain RACE
+
+Three facts, all code-verified (no hardware touched):
+
+1. **Two config sites in 0016, one gate each.** `nv.c nv_cmp90hx_gen2_config`
+   gates on `0x823800` alone and **ran on every one of the 7/7 landed-mask
+   boots** (its own error line is what production logged); the booter-context
+   "late Gen2 config" gated on `0x8e1b0` is the one that never engaged.
+   `kernel-hypothesis.md` conflated them — dated CORRECTION appended there.
+   Patches 0017/0018 touch neither site (grep clean); production retrain is
+   still jdowning's single-poll shape.
+2. **Wh1stle05's minimal-2 is methodologically solid** (ordered cumulative
+   mask apply + per-cycle link check + decisive single-mask control on a
+   second clean card, `docs/PCIE-GEN2-FINDINGS.md` §1): `{0x823800, 0x88fe8}`
+   sufficed for real Gen2 (their LnkCap re-advertises 5GT/s post-unlock —
+   speed-path declarations STUCK on their cards) — and llm2's landed 7/7 set
+   is a superset of exactly that. Their environment differs by: retrain-retry
+   patch (llm2 never had it), kernel 6.8.0-139 (→ ticket 08), VBIOS
+   94.02.74.00.01, different board (x16 Gen3 slots).
+3. **Their 0017 hunk applies to our series output cleanly**
+   (`patch -p1 --dry-run` PASS on the applied tree) — the port is mechanical,
+   NOT a gate-relaxation as ticket 09's step 1 originally hedged.
+
+Refined window (ticket 09 step 2): 7/7 l2 arm + module with retry hunk +
+NEW post-retrain readback of every declared register (`0x8841c`, `0x8c2c0`,
+XP3G `0x8e110/120/11c/12c`, `0x8c040`, `0x8872c`, both `LNKCTL2`, `LNKSTA`)
+— attribution by outcome: sticky+Gen2 = done; sticky+no-Gen2 after 5 rounds =
+race exonerated; drops = per-card mask insufficiency. Decision: vendored
+patch stays under `docs/cmp90hx/upstream/wh1stle05/patches/` — production
+series untouched until a LANDED verdict.
