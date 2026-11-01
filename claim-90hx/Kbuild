@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Product build (map 90hx-gen2-610 ticket 06): T09 gate-first table is the
+# product shape — verified via symbol size in CI/smoke (0x60 = 6 entries).
+ccflags-y += -DGU_CMP90HX_T09
+# SPDX-License-Identifier: GPL-2.0-only
+obj-m += gpu_unlock.o
+gpu_unlock-y := main.o gfw_eval.o prep_610.o layout_610.o \
+	vbios_610.o recipes.o payload.o firmware_610.o falcon.o unlock_610.o

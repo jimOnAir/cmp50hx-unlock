@@ -89,7 +89,35 @@ The packed values are used by RM/GSP code. The Linux module uses the split
 vendor, device, and subsystem fields. The two forms must not be mixed when a
 new patch is made.
 
+## CMP 90HX PCIe Gen2 (working, since 610.43.03 rev `20261101.17`)
+
+The 90HX (`10de:220d`) ships fused to PCIe **Gen1**; this package now brings
+it to **Gen2** at every boot. Mechanism (map `90hx-gen2-610`, evidence in
+[`docs/cmp90hx/`](docs/cmp90hx/) and `findings.md` 2026-11-01): a
+**once-per-boot privileged-mask claim** (`cmp90hx-claim.service` +
+`gpu-unlock-claim` DKMS module — the proven six-entry gate-first window,
+loaded before the driver binds and never by modprobe), then the patched
+module's in-kernel speed path (`patches/cmp90hx/0016` + the **retrain-retry**
+series `0019`) trains the link at device init: `LnkSta 5.0 GT/s`,
+`nvidia-smi` reports gen 2, held under live serving. Verified on a 3-GPU
+serving host: zero Xid, 50HX compute/Gen2/ReBAR/P2P unaffected.
+
+Kill-switch: `GEN2_90HX=disabled` in `/etc/cmp50hx/boot.conf` — or simply
+disable the unit. Fail-closed by construction: if the claim does not land,
+the speed path skips at its own privilege gate and the link stays Gen1,
+exactly like earlier releases; boots never block and never retry across
+boots (ADR-0001). Debug knob: `touch /var/lib/cmpunlocker-rs/gen2-trace`
+enables the per-boot declaration readback (`decl-readback:` dmesg line,
+series `0020`).
+
 ## Driver 615.78.08 status (investigated 2026-11-01: stay on 610)
+
+> **2026-11-01 update:** the product pin is back on **610.43.03** on `master`
+> (owner call — the closure verdict was "stay on 610" and the product surface
+> now matches); the 615-tree patch series are preserved, unbuilt, under
+> `patches/experiments/615/`. Everything below describes the interim 615
+> mode. The 90HX gap it mentions is closed on 610 — see **CMP 90HX PCIe
+> Gen2** above.
 
 The in-driver unlock does **not** work on 615.78.08: its recompiled SEC2
 booter rejects every crafted transaction-frame *shape* before parsing —

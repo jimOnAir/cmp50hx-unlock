@@ -34,6 +34,13 @@ ENABLE_UNITS=(cmp50hx-boot.service)
 if [ "${CMP_ENABLE_GOVERNOR:-1}" = "1" ]; then
     ENABLE_UNITS+=(cmp-idle-governor.service)
 fi
+# cmp90hx-claim ships only with the deb channel (ticket 06); enable it when
+# present, silently skip on install.sh hosts that lack the unit (guard keeps
+# both channels converging on ONE shipped set — the resurrection lesson).
+if [ -e /lib/systemd/system/cmp90hx-claim.service ] || \
+   [ -e /etc/systemd/system/cmp90hx-claim.service ]; then
+    ENABLE_UNITS+=(cmp90hx-claim.service)
+fi
 
 disable_unit() {
     local unit="$1"

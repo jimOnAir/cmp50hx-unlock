@@ -64,6 +64,29 @@ if [[ -d /var/lib/dkms/cmp50hx ]]; then
     rm -rf /var/lib/dkms/cmp50hx
 fi
 
+# --- gpu-unlock-claim purge (map 90hx-gen2-610 ticket 06) --------------------
+if [[ -d /var/lib/dkms/gpu-unlock-claim ]]; then
+    log "removing gpu-unlock-claim from DKMS"
+    for ver_dir in /var/lib/dkms/gpu-unlock-claim/*/; do
+        dkms_ver="${ver_dir#/var/lib/dkms/gpu-unlock-claim/}"
+        dkms_ver="${dkms_ver%/}"
+        if command -v dkms >/dev/null 2>&1; then
+            run_cmd dkms remove -m gpu-unlock-claim -v "${dkms_ver}" --all || true
+        fi
+        for kernel in /lib/modules/*/; do
+            kernel="${kernel#/lib/modules/}"; kernel="${kernel%/}"
+            rm -f "/lib/modules/${kernel}/updates/dkms/gpu_unlock.ko" \
+                  "/lib/modules/${kernel}/updates/dkms/gpu_unlock.ko.xz" \
+                  "/lib/modules/${kernel}/updates/dkms/gpu_unlock.ko.zst" 2>/dev/null || true
+        done
+    done
+    command -v depmod >/dev/null 2>&1 && run_cmd depmod -a || true
+    rm -rf /var/lib/dkms/gpu-unlock-claim
+fi
+# claim firmware: /lib/firmware/gpu-unlock is owned by this package (the
+# ko's GU_FW_* macros resolve there); purge removes the whole tree.
+rm -rf /lib/firmware/gpu-unlock
+
 # --- fallback firmware copies tracked by postinst ----------------------------
 # The .run uninstaller only removes what IT installed; when postinst had to
 # copy GSP firmware by hand it recorded a manifest in ${state_dir} (relative

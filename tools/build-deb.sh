@@ -126,6 +126,16 @@ BUILT_MODULE_LOCATION[4]="kernel-open/"
 DEST_MODULE_LOCATION[4]="/updates/dkms"
 EOF
 
+# --- 2b. gpu-unlock-claim: sibling DKMS tree (map 90hx-gen2-610 ticket 06) --
+# Once-per-boot Gen2 mask claim module for the CMP 90HX. Blacklisted from
+# loading (etc/modprobe.d/gpu-unlock-claim.conf); only cmp90hx-claim.sh
+# insmods it, before cmp50hx-boot binds nvidia.
+log "staging the gpu-unlock-claim module tree"
+claim_src="${stage}/usr/src/gpu-unlock-claim-${driver_version}"
+mkdir -p "${claim_src}"
+tar -C "${root}/claim-90hx" --exclude='*.o' --exclude='*.ko' --exclude='*.mod' --exclude='*.mod.c' --exclude='Module.symvers' --exclude='modules.order' --exclude='./.*' -cf - . | tar -C "${claim_src}" -xf -
+[[ -s "${claim_src}/dkms.conf" ]] || { printf 'gpu-unlock-claim staging produced no dkms.conf (excludes too greedy?)\n' >&2; exit 6; }
+
 # --- 3. runtime tree under /opt/cmp50hx-unlock ------------------------------
 opt="${stage}/opt/cmp50hx-unlock"
 mkdir -p "${opt}/cache" "${opt}/deb" "${opt}/efi" "${opt}/bin"
@@ -167,14 +177,22 @@ sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp50hx-boot.sh#' \
 sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp50hx governor#' \
     "${root}/idle-governor/cmp-idle-governor.service" \
     > "${stage}/lib/systemd/system/cmp-idle-governor.service"
+# claim unit keeps the ordering contract verbatim; only ExecStart is re-based
+sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp90hx-claim.sh#' \
+    "${root}/deb/cmp90hx-claim.service" \
+    > "${stage}/lib/systemd/system/cmp90hx-claim.service"
 
 # dpkg conffiles: nouveau blacklist, BAR1 selector (8 = 16 GiB, 9 = 32 GiB;
 # edit to switch, mirrors install.sh --rebar-32g), boot-flow policy, tuning
 # profiles seed.
 printf 'blacklist nouveau\n' > "${stage}/etc/modprobe.d/cmp-unlock.conf"
 printf 'options nvidia cmp50_rebar_size=8\n' > "${stage}/etc/modprobe.d/cmp50hx-unlock.conf"
+install -m 0644 "${root}/deb/blacklist-gpu-unlock-claim.conf" "${stage}/etc/modprobe.d/gpu-unlock-claim.conf"
 install -m 0644 "${root}/tuning/profiles.conf" "${stage}/etc/cmp-tune.conf"
 mkdir -p "${stage}/etc/cmp50hx"
+install -m 0755 "${root}/claim-90hx/cmp90hx-claim.sh" "${libdir}/cmp90hx-claim.sh"
+log "extracting the 90HX claim firmware assets (deterministic: source bindata + official .run)"
+bash "${root}/claim-90hx/firmware/extract.sh" "${src_tree}" "${run_file}" "${opt}/firmware-90hx" >/dev/null
 install -m 0644 "${root}/deb/boot.conf" "${stage}/etc/cmp50hx/boot.conf"
 
 # --- 5. DEBIAN metadata and maintainer scripts -------------------------------

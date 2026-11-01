@@ -813,3 +813,22 @@ nvidia/uvm/modeset build, noble container, production dkms command shape).
 Rationale: the closure verdict was "stay on 610" but the repo still built the
 615 deb whose unlock is firmware-blocked; the product surface must match the
 verdict. Six-step re-derivation checklist governs any future flip forward.
+
+## 2026-11-01 — ticket 06 build side complete: rev 20261101.17 deb passes the full contract chain
+
+`cmp50hx-unlock_610.43.03-20261101.17_amd64.deb` sha `3faa1d5e…`:
+claim unit + `gpu-unlock-claim` sibling DKMS (T09 table pinned in Kbuild,
+37 packaged files, 0 build residue) + firmware extracted at build time
+(byte-identical to host-verified assets, no blobs in git) + blacklist +
+`GEN2_90HX` kill-switch + purge cleanup + smoke/lifecycle assertions.
+Gates: PASS_CMP_DEB_SMOKE, DKMS-TREE-OK, UNIT-OK, residue 0, **in-deb ESP
+payload = the proven `a8e3d795…`** (dev-tree rebuild drift sidestepped per
+findings #6 — proven binary staged into the build, dev rebuild kept at
+/tmp/50HXUNLK.devtree-rebuild.efi).
+Three self-caught bugs worth remembering: `basename` broke the claim
+`insmod` path; tar `--exclude='.*'` matches every `./`-member (emptied the
+claim tree — smoke caught it); kbuild leaves `.*.cmd` dotfile residue that
+`rm *.o`-style cleanup and `*.o` excludes both miss. CI deps grew python3 +
+zstd (build-time extractor). Next: llm2 acceptance matrix (install → 3 cold
++ 2 warm unattended boots, per-boot P2P/coexistence/Xid gates, rollback
+rehearsal) — owner-gated.

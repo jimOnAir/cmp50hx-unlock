@@ -55,10 +55,27 @@ for path in \
         ./usr/lib/cmp50hx-unlock/cmp50hx-collect.sh \
         ./opt/cmp50hx-unlock/deb/enable-services.sh \
         ./opt/cmp50hx-unlock/deb/apt-pins.sh \
+        ./lib/systemd/system/cmp90hx-claim.service \
+        ./usr/lib/cmp50hx-unlock/cmp90hx-claim.sh \
+        ./etc/modprobe.d/gpu-unlock-claim.conf \
+        ./opt/cmp50hx-unlock/firmware-90hx/gsp_ga10x.bin \
+        ./opt/cmp50hx-unlock/firmware-90hx/booter_load_ga102.bin \
+        ./opt/cmp50hx-unlock/firmware-90hx/gsp_boot_ga102.bin \
+        ./opt/cmp50hx-unlock/firmware-90hx/gsp_boot_desc_ga102.bin \
         ./etc/cmp50hx/boot.conf; do
     grep -qx "${path}" <<<"${fsys}" \
         || { printf 'missing package path: %s\n' "${path}" >&2; exit 1; }
 done
+
+# gpu-unlock-claim (ticket 06): DKMS tree present and Kbuild pins the T09
+# gate-first table — a silently wrong table selection happened in development
+# (kbuild ignores EXTRA_CFLAGS), so the product build asserts it here.
+grep -Eq '^\./usr/src/gpu-unlock-claim-[0-9.]+/dkms\.conf$' <<<"${fsys}" \
+    || { printf 'missing gpu-unlock-claim DKMS tree\n' >&2; exit 1; }
+dpkg-deb --fsys-tarfile "${deb}" \
+    | tar -xO --wildcards './usr/src/gpu-unlock-claim-*/Kbuild' 2>/dev/null \
+    | grep -q -- '-DGU_CMP90HX_T09' \
+    || { printf 'claim Kbuild does not pin -DGU_CMP90HX_T09\n' >&2; exit 1; }
 
 # the argv[0] symlinks must point at TARGET-system paths, never staging
 # leftovers (a build that moves libdir/ must update this contract too)

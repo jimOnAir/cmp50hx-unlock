@@ -142,6 +142,25 @@ for kernel in "${build_kernels[@]}"; do
     depmod -a "${kernel}"
 done
 
+# --- gpu-unlock-claim (map 90hx-gen2-610 ticket 06) --------------------------
+# Sibling DKMS module: blacklisted against auto-load, insmodded once per boot
+# by cmp90hx-claim.service BEFORE cmp50hx-boot binds nvidia. Build failures
+# here are fail-closed downstream (claim unit no-ops, link stays Gen1), but
+# we still hard-fail the install so a broken claim tree is loud, not silent.
+log "registering the claim module with DKMS (gpu-unlock-claim/${dkms_version})"
+dkms remove -m gpu-unlock-claim -v "${dkms_version}" --all >/dev/null 2>&1 || true
+dkms add -m gpu-unlock-claim -v "${dkms_version}"
+for kernel in "${build_kernels[@]}"; do
+    dkms build -m gpu-unlock-claim -v "${dkms_version}" -k "${kernel}" --force
+    dkms install -m gpu-unlock-claim -v "${dkms_version}" -k "${kernel}" --force
+    depmod -a "${kernel}"
+done
+if [[ -d "${install_dir}/firmware-90hx" ]]; then
+    mkdir -p "/lib/firmware/gpu-unlock/${driver_version}"
+    install -m 0644 "${install_dir}/firmware-90hx/"*.bin "/lib/firmware/gpu-unlock/${driver_version}/"
+    log "90HX claim firmware staged under /lib/firmware/gpu-unlock/${driver_version}/"
+fi
+
 running_has_module=0
 if modinfo -n -k "${krel}" nvidia >/dev/null 2>&1; then
     ko="$(modinfo -n -k "${krel}" nvidia)"

@@ -204,6 +204,9 @@ phase_assert_removed() {
     fi
     [[ -e /var/lib/dkms/cmp50hx ]] && fail "/var/lib/dkms/cmp50hx still exists" || ok "dkms state dir gone"
     compgen -G '/usr/src/cmp50hx-*' >/dev/null && fail "/usr/src/cmp50hx-* tree still exists" || ok "dkms source tree gone"
+    [[ -e /var/lib/dkms/gpu-unlock-claim ]] && fail "/var/lib/dkms/gpu-unlock-claim still exists" || ok "claim dkms state gone"
+    compgen -G '/usr/src/gpu-unlock-claim-*' >/dev/null && fail "/usr/src/gpu-unlock-claim-* tree still exists" || ok "claim source tree gone"
+    [[ -e /lib/firmware/gpu-unlock ]] && fail "/lib/firmware/gpu-unlock still exists" || ok "claim firmware gone"
 
     # module files for EVERY kernel, not just the running one
     local kernel mod k bad

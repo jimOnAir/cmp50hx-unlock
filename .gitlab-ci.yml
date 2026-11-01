@@ -51,7 +51,7 @@ package:linux:
   needs: [build:linux-efi]
   before_script:
     - apt-get update -qq
-    - apt-get install -y --no-install-recommends build-essential dpkg-dev curl patch kmod binutils ca-certificates
+    - apt-get install -y --no-install-recommends build-essential dpkg-dev curl patch kmod binutils ca-certificates python3 zstd
   script:
     - |
       set -eux

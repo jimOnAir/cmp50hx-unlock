@@ -1,0 +1,24 @@
+[Unit]
+Description=CMP 90HX Gen2 mask claim (pre-nvidia-bind, once per boot, fail-closed)
+# Ordering contract (design record v1, ticket 05):
+#  - DefaultDependencies=no: this unit must run in the early system-boot
+#    phase, strictly BEFORE cmp50hx-boot.service binds nvidia; the claim is
+#    the run-1 context the booter accepts exactly once per boot.
+#  - NEVER add After=multi-user.target (Wh1stle05 ordering-cycle lesson:
+#    systemd deletes dependent jobs to break the cycle).
+#  - Before=cmp50hx-boot.service makes the bind observe open masks; if this
+#    unit is absent/disabled/failed, the in-module config pass skips on its
+#    own 0x823800 gate and the link simply stays Gen1. That is the designed
+#    fallback; nothing here may ever block boot.
+DefaultDependencies=no
+After=local-fs.target
+Before=cmp50hx-boot.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/cmp90hx-claim.sh
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
