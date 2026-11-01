@@ -6,6 +6,11 @@
 > llm2 cutover — see `.scratch/90hx-gen2-p2p/freeze-615-port.md` and
 > `.scratch/615-port/spec.md`. Historical record below stays authoritative
 > for 610.43.03 boots only.
+>
+> **UNFROZEN 2026-11-01:** the product pin is back on **610.43.03** (owner
+> call; 615 closed "stay on 610"), and the campaign's speed-path question is
+> answered — **Gen2-at-boot LANDED**, productized in `cmp50hx-unlock` rev
+> `20261101.19+`. The 610-only constants rule above remains in force forever.
 
 **Status: ACTIVE — canonical method: the pre-driver first claim lands a
 5-write frame with strict persistence, reproduced 7/7 window boots.**
@@ -15,11 +20,48 @@ per boot BEFORE the production driver lands FEAT `0x823804` + XVE
 driver bind — identically on seven consecutive boots (`18d94504` …
 `41ebb379`, §2 rows 4–37). Measured boundaries: the standalone ko fires
 exactly once per boot (§3 law — all reload routes closed), and warm reboot
-resets the masks (§6), so the claim must run every boot. No link-speed
-change is claimed (§5). This file is the canonical, reproduction-grade log of unlock methods
+resets the masks (§6), so the claim must run every boot. A link-speed change
+was not claimed at freeze time (§5); **it is claimed now — see
+Gen2-at-boot below.** This file is the canonical, reproduction-grade log of unlock methods
 that are **proven on real hardware** — fleet rollout, cold-boot re-apply
 logic, and any upstream result-note all derive from it. Populated during the
 same work cycle as each success; rules in ticket 11 (`Success logging`).
+
+## Gen2-at-boot — PRODUCT PATH (VERIFIED unattended 2026-11-01, deb rev `20261101.19`)
+
+The §-body above is the compute-unlock recipe; this section is the canonical,
+reproduction-grade record of the **PCIe Gen2** path that now ships in
+`cmp50hx-unlock` on 610.43.03. Full acceptance matrix:
+`.scratch/90hx-gen2-610/issues/06-product-integration.md` §Answer.
+
+- **Mechanism (two halves, one deb).** (1) `cmp90hx-claim.service` insmods the
+  sibling DKMS module `gpu-unlock-claim` once per boot **before** the nvidia
+  bind, running the proven **6-entry gate-first table** (Wh1stle05 minimal-2
+  `{0x823800, 0x88fe8}` plus openers; `0x823800` = config gate, table index 36
+  — its absence is why pre-November "7/7" sets never trained Gen2). (2) the
+  patched production module's speed path (series `0016` + retrain-retry `0019`)
+  trains the link at device init: `LNKCTL2=2` both sides, `LnkSta 5.0 GT/s x4`.
+- **Per-boot verification (3 reads).**
+  `journalctl -b 0 -u cmp90hx-claim.service | grep gen2-claim` →
+  `claim-ok 6/6 landed`; `journalctl -b 0 -u cmp50hx-boot.service | grep
+  cmp90hx-gen2` → `landed 5.0 GT/s`; `setpci -s 03:00.0 CAP_EXP+12.w` → `1042`.
+- **Verdict discipline (boots 1–2 lessons, 2026-11-01).** A rebooted card has
+  memory-decode off: every BAR0 offset reads `0xffffffff` — **never**
+  equate all-FF with "open"; trust a read only when `PMC_BOOT_0 (0x0) ==
+  0xb72000a1` (constant-register control). Post-`insmod` re-reads are also
+  untrustworthy (the ko restores the command register at handoff): the ko's
+  own synchronous log (`pass=N/6 … ret=0` ×6 + `unlocked`) is the authoritative
+  claim verdict, and post-bind sysfs is the authoritative link verdict.
+- **Fail-closed + kill-switch.** If the claim doesn't land, the speed path
+  skips at its privilege gate and the link stays Gen1 (boots never block,
+  never retry across boots — ADR-0001). Ops: `GEN2_90HX=disabled` in
+  `/etc/cmp50hx/boot.conf` → `gen2-claim: disabled` + digest `FALLBACK`,
+  fleet otherwise untouched; debug: `touch /var/lib/cmpunlocker-rs/gen2-trace`
+  → one `decl-readback:` dmesg line per boot (series `0020`).
+- **Effect measure (this platform).** Host pinned-copy bandwidth is
+  platform-capped ≈1.6/1.7 GB/s on ALL three cards regardless of link gen —
+  use the serving pp-rate A/B instead (`-tb 32` layer-split, unique
+  ~17k-token cold prompts): **Gen1 ≈3,450 → Gen2 ≈3,720 tok/s (+7.8%)**.
 
 ## 0. Evidence rules
 

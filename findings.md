@@ -856,3 +856,37 @@ Two verdict bugs, both mine, both caught by honest grading:
    landed|FALLBACK`. Matrix progress: 2 warm boots landed; 3 cold boots to
    go (owner power-cycles). revs: .17 install ok; .18 wedge-guard; .19 verdict
    split. deb shas in repo root .sha256 files.
+
+## 2026-11-01 — map 90hx-gen2-610 WALKED: acceptance matrix passes unattended; rollback rehearsal finds a real packaging bug
+
+Final product rev `20261101.19` accepted on llm2 without a single operator
+step per boot: **3 consecutive cold** (`365460c4` `d20ac776` `5ed25067`) +
+**2 warm** (`77a3261c` `465a5a2c`), each one `claim-ok 6/6` from POST-locked
+state + digest `cmp90hx-gen2: landed 5.0 GT/s`, `LnkSta 1042`, Xid 0,
+serving 200, `topo -p2p r/w` all-OK, both 50HXes Gen2+ReBAR+SS0=0x88888888.
+Cold 2 also captured the product-module `decl-readback:` — byte-identical
+decode to the t09b research readback. Ops extras: kill-switch cycle
+(honest `FALLBACK 2.5` boot, 50HXes unaffected), pp-rate A/B on the live
+`-tb 32` serving = **+7.8% Gen2** (the validated item-7 bar; the 1.9→3.9
+copy bar is platform-tool-capped and retired in writing), and
+`tools/p2pbench.cu` proving the CUDA `can_access_peer` matrix is
+**link-generation-independent** on this host (per-slot IOMMU grouping,
+groups 45/47/48; full CUDA peer access is old-campaign frozen tickets
+09/10 territory — out of scope, NVML P2P gates green throughout).
+
+**Rollback rehearsal > rollback documentation.** The real downgrade
+(rev15 deb → boot `0af3246e` = exact pre-campaign state) exposed that
+`postrm` early-exits on `$1=upgrade` (which downgrades also deliver), so
+the `gpu-unlock-claim` DKMS registration orphaned — every subsequent
+`dkms` command died with "Manual intervention required!". Fixed rev `.20`:
+guarded `sweep_claim` on `upgrade|failed-upgrade` (fires only when the
+/usr/src tree is gone), smoke assertion added, re-upgrade-onto-downgraded
+path verified (boot `c360d7e6` landed, dkms clean). General rule: any
+package that registers DKMS state under a shared version string must
+sweep its own registration on downgrade, not just on remove/purge.
+
+Tickets 03/04 (pre-OS alt route) closed moot-with-plan-preserved, 07 (bound
+branch) closed never-triggered, 08 (6.12 discriminator) closed
+off-critical-path. README EN carries the shipped-state section;
+`docs/cmp90hx/success-recipe.md` unfrozen with the Gen2-at-boot product
+section (610-only constants rule permanent). Nothing pushed anywhere.

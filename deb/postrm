@@ -15,8 +15,44 @@ log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 warn() { log "WARNING: $*"; }
 run_cmd() { "$@" || warn "command failed (ignored): $*"; }
 
+sweep_claim() { # gpu-unlock-claim: DKMS registration, module copies, firmware
+    if [[ -d /var/lib/dkms/gpu-unlock-claim ]]; then
+        log "removing gpu-unlock-claim from DKMS"
+        for ver_dir in /var/lib/dkms/gpu-unlock-claim/*/; do
+            dkms_ver="${ver_dir#/var/lib/dkms/gpu-unlock-claim/}"
+            dkms_ver="${dkms_ver%/}"
+            if command -v dkms >/dev/null 2>&1; then
+                run_cmd dkms remove -m gpu-unlock-claim -v "${dkms_ver}" --all || true
+            fi
+            for kernel in /lib/modules/*/; do
+                kernel="${kernel#/lib/modules/}"; kernel="${kernel%/}"
+                rm -f "/lib/modules/${kernel}/updates/dkms/gpu_unlock.ko" \
+                      "/lib/modules/${kernel}/updates/dkms/gpu_unlock.ko.xz" \
+                      "/lib/modules/${kernel}/updates/dkms/gpu_unlock.ko.zst" 2>/dev/null || true
+            done
+        done
+        command -v depmod >/dev/null 2>&1 && run_cmd depmod -a || true
+        rm -rf /var/lib/dkms/gpu-unlock-claim
+    fi
+    # claim firmware: /lib/firmware/gpu-unlock is owned by this package (the
+    # ko's GU_FW_* macros resolve there).
+    rm -rf /lib/firmware/gpu-unlock
+}
+
 case "${1:-remove}" in
     remove|purge)
+        ;;
+    upgrade|failed-upgrade)
+        # Downgrade to a revision without gpu-unlock-claim: dpkg deletes
+        # /usr/src/gpu-unlock-claim-* but leaves the DKMS registration, and
+        # every later dkms run dies on "broken" (rollback-rehearsal lesson,
+        # 2026-11-01). Sweep only when the source tree is really gone.
+        if ! ls /usr/src/gpu-unlock-claim-*/dkms.conf >/dev/null 2>&1 \
+                && [[ -d /var/lib/dkms/gpu-unlock-claim ]]; then
+            log "claim source gone (downgrade to a claim-less revision): sweeping gpu-unlock-claim state"
+            sweep_claim
+        fi
+        exit 0
         ;;
     *)
         exit 0
@@ -65,27 +101,7 @@ if [[ -d /var/lib/dkms/cmp50hx ]]; then
 fi
 
 # --- gpu-unlock-claim purge (map 90hx-gen2-610 ticket 06) --------------------
-if [[ -d /var/lib/dkms/gpu-unlock-claim ]]; then
-    log "removing gpu-unlock-claim from DKMS"
-    for ver_dir in /var/lib/dkms/gpu-unlock-claim/*/; do
-        dkms_ver="${ver_dir#/var/lib/dkms/gpu-unlock-claim/}"
-        dkms_ver="${dkms_ver%/}"
-        if command -v dkms >/dev/null 2>&1; then
-            run_cmd dkms remove -m gpu-unlock-claim -v "${dkms_ver}" --all || true
-        fi
-        for kernel in /lib/modules/*/; do
-            kernel="${kernel#/lib/modules/}"; kernel="${kernel%/}"
-            rm -f "/lib/modules/${kernel}/updates/dkms/gpu_unlock.ko" \
-                  "/lib/modules/${kernel}/updates/dkms/gpu_unlock.ko.xz" \
-                  "/lib/modules/${kernel}/updates/dkms/gpu_unlock.ko.zst" 2>/dev/null || true
-        done
-    done
-    command -v depmod >/dev/null 2>&1 && run_cmd depmod -a || true
-    rm -rf /var/lib/dkms/gpu-unlock-claim
-fi
-# claim firmware: /lib/firmware/gpu-unlock is owned by this package (the
-# ko's GU_FW_* macros resolve there); purge removes the whole tree.
-rm -rf /lib/firmware/gpu-unlock
+sweep_claim
 
 # --- fallback firmware copies tracked by postinst ----------------------------
 # The .run uninstaller only removes what IT installed; when postinst had to

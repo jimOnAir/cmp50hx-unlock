@@ -89,7 +89,7 @@ The packed values are used by RM/GSP code. The Linux module uses the split
 vendor, device, and subsystem fields. The two forms must not be mixed when a
 new patch is made.
 
-## CMP 90HX PCIe Gen2 (working, since 610.43.03 rev `20261101.17`)
+## CMP 90HX PCIe Gen2 (working, since 610.43.03 rev `20261101.19`)
 
 The 90HX (`10de:220d`) ships fused to PCIe **Gen1**; this package now brings
 it to **Gen2** at every boot. Mechanism (map `90hx-gen2-610`, evidence in
