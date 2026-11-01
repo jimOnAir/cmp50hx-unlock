@@ -1,0 +1,52 @@
+diff --git a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+--- a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
++++ b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+@@ -6902,6 +6902,48 @@
+         _kgspCmp50PutU32(pSignatureVa, 0xF920, 0x05503850U);
+     }
+ 
++    if ((v == 4U) || (v == 6U))
++    {
++        /*
++         * V4 record-trust probe (615-gen2-h2 ticket 10): overlay the head
++         * of the crafted buffer with the card's OWN genuine 615 signature
++         * records (verbatim copy saved at builder entry).  The records
++         * hash the real signed booter image in sysmem, so if the new 615
++         * gate validates record crypto, genuine records must satisfy it.
++         * Our crafted ROP tail lives beyond the record range and is not
++         * covered by the descriptor.  V4a (4): header untouched (stock
++         * length 0x8C8).  V4b (6): header length rewritten to the
++         * advertised WprMeta size 0xFA00 — if the descriptor is
++         * self-signed over its header, V4b fails where V4a passes.
++         */
++        KernelGsp *pKernelGspV4 = GPU_GET_KERNEL_GSP(pGpu);
++        NvU32 n = (pKernelGspV4 != NULL) ? pKernelGspV4->stockSignatureSize : 0U;
++        NvU32 hdr0 = 0U;
++
++        if ((pKernelGspV4 == NULL) || (pKernelGspV4->pStockSignatureData == NULL) ||
++            (n == 0U))
++        {
++            NV_PRINTF(LEVEL_ERROR,
++                      "CMP50_FRAMEVAR: V4 no stock records captured - frame left as-is\n");
++            return;
++        }
++        if (n > CMP50_PC_CANARY_SIGNATURE_SIZE)
++        {
++            n = CMP50_PC_CANARY_SIGNATURE_SIZE;
++        }
++        portMemCopy(pSignatureVa, n, pKernelGspV4->pStockSignatureData, n);
++        if (v == 6U)
++        {
++            _kgspCmp50PutU32(pSignatureVa, 0x0004,
++                             (NvU32)CMP50_PC_CANARY_SIGNATURE_SIZE);
++        }
++        portMemCopy(&hdr0, sizeof(hdr0), pSignatureVa, sizeof(hdr0));
++        NV_PRINTF(LEVEL_ERROR,
++                  "CMP50_FRAMEVAR: V4%cs overlay n=%u hdr0=0x%08x\n",
++                  (v == 6U) ? 'b' : 'a', n, hdr0);
++        return;
++    }
++
+     NV_PRINTF(LEVEL_ERROR,
+               "CMP50_FRAMEVAR: RmCmpFrameVariant=%u applied\n", v);
+ }

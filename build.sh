@@ -151,7 +151,8 @@ case "${card}" in
                  "${script_dir}/patches/both/09-lsvar-615-experiment.patch" \
                  "${script_dir}/patches/both/10-efionly-skip-stockflow.patch" \
                  "${script_dir}/patches/both/11-efionly-stock-boot.patch" \
-                 "${script_dir}/patches/both/12-frame-variant-matrix.patch"; do
+                 "${script_dir}/patches/both/12-frame-variant-matrix.patch" \
+                 "${script_dir}/patches/both/13-v4-record-trust.patch"; do
             [[ -f "$p" ]] || { printf 'missing patch: %s\n' "$p" >&2; exit 5; }
             patch_files+=("$p")
         done
