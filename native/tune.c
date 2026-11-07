@@ -472,11 +472,17 @@ static int scan_targets(NvmlApi *nvml, int index, bool quiet, Target *out,
                         int max) {
     unsigned int count = 0;
     int n = 0;
-    Target *supported = calloc((size_t)(count + 1), sizeof(Target));
     if (!nvml_ok(nvml, "nvmlDeviceGetCount_v2",
                  nvml->device_get_count(&count))) {
         die("nvmlDeviceGetCount failed");
     }
+    /* Allocate AFTER the count is known: sizing from count before the query
+     * allocated one entry and the loop below wrote one Target per supported
+     * CMP card past it (ASan heap-buffer-overflow on a 3-CMP host, 2026-11-07
+     * — the heap damage was silent in status/core-offset and aborted cmp-tune
+     * reset at the next malloc). n <= count <= allocation always: the loop
+     * only advances n for i < count, and `n < max` bounds it from below. */
+    Target *supported = calloc(count ? count : 1, sizeof(Target));
     for (unsigned int i = 0; i < count; ++i) {
         nvmlDevice_t h = NULL;
         NvmlPciInfo pci;

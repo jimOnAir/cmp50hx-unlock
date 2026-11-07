@@ -953,3 +953,28 @@ while scripting: lactd started before the fix caches the empty device list
 fixed boot; fresh boots enumerate with no restart. Host restored to
 hack+bench-file present pending ticket 04 owner decision (protections are
 now redundant, but retirement is an explicit irreversible-tier act).
+
+## cmp-tune scan_targets heap overflow: every multi-CMP cmp-tune command trashed the heap; whether it crashed was malloc luck (2026-11-07, rev 20261107.24)
+
+Caught by accident while closing the modules-late-610 VF-stick row: `cmp-tune
+reset -i N` aborted 100% with a glibc sysmalloc assertion **after** its first
+power-limit write (GPU1 silently went 170→250 W — the drill noticed the
+baseline change). `nvidia-smi` doing the identical NVML calls: clean. Raw
+ctypes replay of the three setters: clean. ASan build of native/tune.c on the
+3-CMP host pinned it: `scan_targets` sized its scratch array
+`calloc(count + 1, sizeof(Target))` **before** `nvmlDeviceGetCount_v2(&count)`
+filled `count` — allocation always one Target (120 B), loop wrote one Target
+per supported CMP card (3 → +240 B past the end) regardless of command. So
+`status`/`show`/`core-offset` had been smashing the heap silently on every
+run since the multi-call merge; `reset` merely crashed at the next malloc.
+Lesson: a heap overflow that "works most of the time" is a live defect in
+EVERY verb, not the one that crashed — bisect by sanitizer build, not by
+command (a 20-line ASan container build beat an hour of call-order guessing).
+Fix: allocate after GetCount (loop bound n <= count makes +1 dead weight).
+Proof: rebuilt ASan binary across six verbs on the live host (incl. the
+crashing reset): zero ASan errors; .24 native binary: reset works, all three
+GPUs printed, limits restored to the owner's 170 W. Related gotcha found in
+the same row: `nvidia-smi -rgc` (ResetGpuLockedClocks) clears GPC VF offsets
+on this TU102 CMP — manual -rgc zeroes an offset that the production cycle
+(P0→governor release→P8) preserves correctly (idle-governor README table
+stands; keep manual clock resets out of VF-offset workflows).
