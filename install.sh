@@ -274,8 +274,11 @@ if [[ -f "${artifact_dir}/rm-issue-rate" ]]; then
     log "linked /usr/local/bin/rm-issue-rate"
 fi
 
-# nouveau must not claim the card before the patched module at boot
-printf 'blacklist nouveau\n' > /etc/modprobe.d/cmp-unlock.conf
+# claim window is package-owned: nouveau must not claim the card before the
+# patched module, and the alias-reachable nvidia set must stay unbound until
+# the claim unit has run. ONE shipped source for both channels: the deb
+# installs the identical file (deb/blacklist-cmp-unlock.conf).
+install -m 0644 "${install_dir}/deb/blacklist-cmp-unlock.conf" /etc/modprobe.d/cmp-unlock.conf
 
 # the patched cmp50hx module carries the ReBAR size as a module option
 printf 'options nvidia cmp50_rebar_size=%s\n' "${rebar_selector}" \

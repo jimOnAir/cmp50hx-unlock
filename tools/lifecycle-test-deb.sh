@@ -146,6 +146,21 @@ phase_assert_install() {
     for cf in /etc/modprobe.d/cmp-unlock.conf /etc/modprobe.d/cmp50hx-unlock.conf; do
         [[ -f "${cf}" ]] && ok "conffile ${cf}" || fail "conffile ${cf} missing"
     done
+    # claim window is package-owned (modules-late-610 ticket 02): the live
+    # conffile must carry the full alias-block set, not just nouveau
+    for want_line in "blacklist nouveau" "blacklist nvidia" "blacklist nvidia_uvm" \
+                     "blacklist nvidia_drm" "blacklist nvidia_modeset"; do
+        if grep -qx "${want_line}" /etc/modprobe.d/cmp-unlock.conf 2>/dev/null; then
+            ok "claim window owned: ${want_line}"
+        else
+            fail "cmp-unlock.conf lacks '${want_line}' — claim window not package-owned"
+        fi
+    done
+    if grep -qxF 'NVIDIA_MODULES_LATE=enabled' /etc/cmp50hx/boot.conf 2>/dev/null; then
+        ok "boot.conf ships the late-load kill-switch enabled"
+    else
+        fail "boot.conf lacks NVIDIA_MODULES_LATE=enabled (ticket 01 default)"
+    fi
     # informational: do the /boot initrd images actually carry the module?
     kernel_scan_initrd "${version}" "assert-install"
 }

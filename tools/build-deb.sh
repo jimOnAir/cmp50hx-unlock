@@ -182,10 +182,13 @@ sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp90hx-claim.sh#' \
     "${root}/deb/cmp90hx-claim.service" \
     > "${stage}/lib/systemd/system/cmp90hx-claim.service"
 
-# dpkg conffiles: nouveau blacklist, BAR1 selector (8 = 16 GiB, 9 = 32 GiB;
-# edit to switch, mirrors install.sh --rebar-32g), boot-flow policy, tuning
-# profiles seed.
-printf 'blacklist nouveau\n' > "${stage}/etc/modprobe.d/cmp-unlock.conf"
+# dpkg conffiles: the package-owned claim window (nouveau + the alias-
+# reachable nvidia default set — see the file's header; explicit post-claim
+# loads are unaffected), BAR1 selector (8 = 16 GiB, 9 = 32 GiB; edit to
+# switch, mirrors install.sh --rebar-32g), boot-flow policy, tuning
+# profiles seed. ONE shipped source for the blacklist set (resurrection
+# lesson): the install.sh channel installs this same file.
+install -m 0644 "${root}/deb/blacklist-cmp-unlock.conf" "${stage}/etc/modprobe.d/cmp-unlock.conf"
 printf 'options nvidia cmp50_rebar_size=8\n' > "${stage}/etc/modprobe.d/cmp50hx-unlock.conf"
 install -m 0644 "${root}/deb/blacklist-gpu-unlock-claim.conf" "${stage}/etc/modprobe.d/gpu-unlock-claim.conf"
 install -m 0644 "${root}/tuning/profiles.conf" "${stage}/etc/cmp-tune.conf"

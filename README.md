@@ -436,6 +436,45 @@ Key behaviours:
 
 Settings are runtime state and clear on reboot, by design.
 
+## The module set and LACT
+
+The boot flow ends in the same NVIDIA module state a stock driver install
+ends with — `nvidia`, `nvidia_uvm`, `nvidia_drm` (and `nvidia_modeset` as
+its dependency) loaded by a best-effort late phase of `cmp50hx-boot`
+(**enabled** by default; switch: `NVIDIA_MODULES_LATE=disabled` in
+`/etc/cmp50hx/boot.conf`). The late phase is what makes DRM consumers —
+for example the [LACT](https://github.com/ilya-zlobintsev/LACT) GPU
+daemon — see the cards (`/dev/dri/card*` appears for every CMP GPU).
+
+Why late, and why never implicit: `nvidia` and `nvidia_drm` match the
+NVIDIA PCI aliases, so with default autoloading udev would bind the card
+early — and the once-per-boot 90HX Gen2 claim plus the booter window need
+the card **unbound**. The package therefore owns the claim window
+directly: `/etc/modprobe.d/cmp-unlock.conf` blacklists the whole default
+set (alias-scoped: the product's own explicit loads still work, and
+`nvidia_peermem` is not part of any stock default — it has no alias). A
+hand-written `modprobe.blacklist=` kernel parameter is **no longer
+required** for deployment. Do not add `modules-load.d` or other implicit
+loaders for these modules: any pre-claim bind silently costs you Gen2
+until the next power cycle.
+
+Notes:
+
+- **Tuning surface stays `cmp-tune` + governor.** LACT works for
+  enumeration/monitoring, and its VF-offset/power-limit controls are the
+  same NVML controls the governor preserves; but LACT's locked-clock
+  style adjustments conflict with the governor clearing clock locks while
+  P8 is forced (see [`idle-governor/`](idle-governor/README.md)). One
+  owner for the clock lock at a time.
+- A degraded boot (`INIT-INCOMPLETE`, Gen2 gate red) exits before the
+  late phase, so LACT sees 0 GPUs on such a boot by design — fix the
+  boot (reboot/power cycle), not the daemon.
+- **Voltage control does not exist on this driver** — no millivolt setter
+  in NVML/nvidia-smi on CMP cards; VF offsets are curve-equivalent. See
+  the voltage section in [`docs/CMP50HX.md`](docs/CMP50HX.md).
+- `lactd` started before the first release with this phase may have
+  cached an empty device list: `sudo systemctl restart lactd` once.
+
 ## Fresh performance results
 
 | Path | Result |

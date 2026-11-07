@@ -58,6 +58,7 @@ for path in \
         ./lib/systemd/system/cmp90hx-claim.service \
         ./usr/lib/cmp50hx-unlock/cmp90hx-claim.sh \
         ./etc/modprobe.d/gpu-unlock-claim.conf \
+        ./etc/modprobe.d/cmp-unlock.conf \
         ./opt/cmp50hx-unlock/firmware-90hx/gsp_ga10x.bin \
         ./opt/cmp50hx-unlock/firmware-90hx/booter_load_ga102.bin \
         ./opt/cmp50hx-unlock/firmware-90hx/gsp_boot_ga102.bin \
@@ -76,6 +77,29 @@ dpkg-deb --fsys-tarfile "${deb}" \
     | tar -xO --wildcards './usr/src/gpu-unlock-claim-*/Kbuild' 2>/dev/null \
     | grep -q -- '-DGU_CMP90HX_T09' \
     || { printf 'claim Kbuild does not pin -DGU_CMP90HX_T09\n' >&2; exit 1; }
+
+# claim window is package-owned (modules-late-610 ticket 02): every
+# alias-reachable module that could bind a card before the once-per-boot
+# claim unit must be blacklisted by the shipped conffile — a hand-written
+# kernel-cmdline blacklist stops being a deployment requirement
+cf="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./etc/modprobe.d/cmp-unlock.conf)"
+for want_line in "blacklist nouveau" "blacklist nvidia" "blacklist nvidia_uvm" \
+                 "blacklist nvidia_drm" "blacklist nvidia_modeset"; do
+    grep -qx "${want_line}" <<<"${cf}" \
+        || { printf 'cmp-unlock.conf missing line: %s\n' "${want_line}" >&2; exit 1; }
+done
+
+# stock-equivalent late module load (ticket 01): the phase exists, names
+# exactly the alias/autoload-reachable default set (peermem has no alias by
+# design), is wired to the documented kill-switch, and boots with it on
+bootsh="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./usr/lib/cmp50hx-unlock/cmp50hx-boot.sh)"
+grep -qF 'NVIDIA_MODULES_LATE' <<<"${bootsh}" \
+    || { printf 'cmp50hx-boot.sh lacks the NVIDIA_MODULES_LATE late-load phase\n' >&2; exit 1; }
+grep -qE 'for late_mod in nvidia nvidia_uvm nvidia-drm' <<<"${bootsh}" \
+    || { printf 'late-load module set drifted from the alias/autoload default set\n' >&2; exit 1; }
+bootconf="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./etc/cmp50hx/boot.conf)"
+grep -qxF 'NVIDIA_MODULES_LATE=enabled' <<<"${bootconf}" \
+    || { printf 'boot.conf does not ship NVIDIA_MODULES_LATE=enabled as the default\n' >&2; exit 1; }
 
 # the argv[0] symlinks must point at TARGET-system paths, never staging
 # leftovers (a build that moves libdir/ must update this contract too)

@@ -7,6 +7,9 @@
 #            ESP-promised cards (bounded 180 s; fails the unit if a card
 #            the pre-OS unlocker promised never reaches Gen2 PASS)
 #   phase 4: optional cmp-tune boot profile (CMP_BOOT_PROFILE)
+#   phase 5: CMP 90HX Gen2 truth line (report-only)
+#   phase 6: stock-equivalent late module load (nvidia/nvidia_uvm/nvidia-drm;
+#            NVIDIA_MODULES_LATE=disabled switches it off)
 #
 # No warm re-roll ladder (retired 2026-10-28, docs/adr/0001-ladder-retired.md):
 # a boot that reboots the host to gamble on the booter-window lottery breaks
@@ -28,6 +31,7 @@ dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 CONF=${CMP_TEST_CONF:-/etc/cmp50hx/boot.conf}
 CMP_BOOT_COLLECT=0
 CMP_BOOT_PROFILE=""
+NVIDIA_MODULES_LATE=enabled
 # shellcheck disable=SC1090,SC1091
 [ -f "$CONF" ] && . "$CONF"
 
@@ -36,6 +40,7 @@ CMP_BOOT_PROFILE=""
 ESP=${CMP_TEST_ESP_DIR:-/boot/efi}
 PCI=${CMP_TEST_PCI_DIR:-/sys/bus/pci}
 RUNFLAG=${CMP_TEST_RUN_FLAG:-/run/50hx-unlocked}
+MODPROBE=${CMP_TEST_MODPROBE:-modprobe}
 
 # the merged userland binary: libdir sibling (.deb) or PATH (/usr/local/bin
 # from install.sh, /usr/bin symlink from the .deb)
@@ -180,5 +185,33 @@ for cmp90_bdf in $(lspci -Dn 2>/dev/null | awk '/10de:220d/ {print $1}'); do
         *)    echo "cmp90hx-gen2: ${cmp90_bdf} FALLBACK ${cmp90_spd} (claim unit journal + gen2-trace knob)" ;;
     esac
 done
+
+# --- phase 6: stock-equivalent late module load (best-effort, NEVER vetoes) --
+# The boot ends with the module set a stock driver install ends with, but
+# only AFTER everything that needs an unbound card has run: the once-per-boot
+# claim is a Before= unit of this one, so its window is structurally closed
+# by the time this line executes. The alias-scoped blacklists (the shipped
+# modprobe conffile and/or a host's cmdline parameter) do NOT block explicit
+# loads — same mechanism phase 1's setuid nvidia-modprobe already relies on.
+# Set = alias/autoload-reachable default set: nvidia, nvidia_uvm, nvidia-drm
+# (nvidia-modeset rides in as its modules.dep dependency). nvidia_peermem is
+# deliberately absent: it carries no alias and auto-loads in no stock config
+# (GPUDirect-RDMA installs modprobe it by hand; intra-node CUDA P2P does not
+# need it). Plain load = module defaults (modeset=1 since 515) — headless
+# card, all gates passed, KMS init cannot reach claim/Gen2 state.
+# Kill-switch: NVIDIA_MODULES_LATE=disabled in /etc/cmp50hx/boot.conf
+# (GEN2_90HX idiom; map modules-late-610 ticket 01). Each module is tried
+# independently and failures only WARN: DRM/LACT consumers must never veto
+# the boot or the serving stack. Accepted edge: an INIT-INCOMPLETE boot exits
+# 1 before this phase — such a boot waits for the operator anyway.
+if [ "${NVIDIA_MODULES_LATE}" != "disabled" ]; then
+    for late_mod in nvidia nvidia_uvm nvidia-drm; do
+        if ! late_out="$($MODPROBE "$late_mod" 2>&1)"; then
+            logger -t cmp50hx-boot -- "WARN late modprobe ${late_mod} rc=$?: ${late_out}" || true
+            echo "late-modules: ${late_mod} failed (best-effort, continuing)"
+        fi
+    done
+    echo "late-modules: loaded: $(lsmod 2>/dev/null | awk '/^nvidia/{printf "%s ", $1}')"
+fi
 
 exit 0

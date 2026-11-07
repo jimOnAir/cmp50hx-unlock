@@ -21,6 +21,9 @@
 #   H4 every card rejected             -> gen2 best-effort (kernel rescue possible), 0
 #   H5 no ESP logs at all              -> best-effort gen2, exit 0
 #   H6 stale plain log never inflates the verdict (sharp signal)
+#   H7 phase 6 (NVIDIA_MODULES_LATE=enabled): exact stock set modprobed,
+#      strictly after the gate, unit rc unaffected
+#   H8 phase 6 disabled (fixture default): zero modprobe calls, zero output
 set -u
 here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 RUNNER="$here/../cmp50hx/cmp50hx-boot.sh"
@@ -76,7 +79,15 @@ done
 exit 0
 EOF
     chmod +x "$bin/cmp50hx"
-    printf 'CMP_BOOT_COLLECT=0\nCMP_BOOT_PROFILE=\n' > "$TMP/boot.conf"
+    # modprobe stub (phase 6 seam CMP_TEST_MODPROBE): records, never loads
+    cat > "$bin/modprobe" <<'EOF'
+#!/bin/sh
+echo "modprobe:$1" >> "$CMP_TEST_TMP/invocations"
+exit 0
+EOF
+    chmod +x "$bin/modprobe"
+    # default fixture keeps phase 6 inert; H7 flips it on explicitly
+    printf 'CMP_BOOT_COLLECT=0\nCMP_BOOT_PROFILE=\nNVIDIA_MODULES_LATE=disabled\n' > "$TMP/boot.conf"
     export CMP_TEST_TMP=$TMP
     local i=1
     for bdf in 0000:01:00.0 0000:03:00.0 0000:04:00.0; do
@@ -173,6 +184,28 @@ CMP_TEST_PASS_N=1 bash "$RUNNER" > "$O" 2>&1; echo $? > "$TMP/rc"
 want "$O" "DEGRADED win=1/2"
 want "$O" "stale ESP log"
 wanti "$O" "ALL-UNLOCKED"
+
+echo "== H7 late module load ON: stock set modprobed after the gate, exit 0 =="
+new_scenario
+export CMP_TEST_PASS_N=3
+printf 'CMP_BOOT_COLLECT=0\nCMP_BOOT_PROFILE=\nNVIDIA_MODULES_LATE=enabled\n' > "$TMP/boot.conf"
+CMP_TEST_MODPROBE=$bin/modprobe boot "$O" 1 unlock unlock unlock
+[ "$(rcv)" = 0 ] || bad "H7 exit rc=$(rcv), want 0"
+for wantmod in nvidia nvidia_uvm nvidia-drm; do
+    grep -q "^modprobe:${wantmod}$" "$TMP/invocations" || bad "H7: missing $wantmod in modprobe calls"
+done
+[ "$(grep -c '^modprobe:' "$TMP/invocations")" = 3 ] || bad "H7: exactly 3 modprobe calls expected"
+awk '/gen2-invoked/{g=NR} /^modprobe:/{if(!m)m=NR; l=NR} END{exit !(g&&m>g&&l>m)}' \
+    "$TMP/invocations" || bad "H7: phase 6 must run strictly after the phase 3 gate"
+want "$O" "late-modules: loaded:"
+
+echo "== H8 kill-switch disabled: phase 6 fully inert =="
+new_scenario                       # fixture default is NVIDIA_MODULES_LATE=disabled
+export CMP_TEST_PASS_N=3
+CMP_TEST_MODPROBE=$bin/modprobe boot "$O" 1 unlock unlock unlock
+[ "$(rcv)" = 0 ] || bad "H8 exit rc=$(rcv), want 0"
+grep -q '^modprobe:' "$TMP/invocations" && bad "H8: no modprobe calls when disabled"
+wanti "$O" "late-modules"
 
 rm -f "$O"
 echo

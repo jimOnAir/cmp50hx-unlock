@@ -100,6 +100,14 @@ if command -v unmkinitramfs >/dev/null 2>&1; then
             && ! grep -rq 'nouveau' "${tmp}"/*/etc/modprobe.d 2>/dev/null; then
         log "WARNING: nouveau is in the initramfs without a blacklist; it may grab the card at early boot"
     fi
+
+    # claim-window parity (modules-late-610 ticket 02): the package-owned
+    # blacklist must ride into the image like nouveau's does, or udev
+    # coldplug binds the card before cmp90hx-claim.service can run
+    if find "${tmp}" -name 'nvidia.ko*' | grep -q . \
+            && ! grep -rqE '^[[:space:]]*blacklist[[:space:]]+nvidia[[:space:]]*$' "${tmp}"/*/etc/modprobe.d 2>/dev/null; then
+        log "WARNING: nvidia.ko is in the initramfs without a 'blacklist nvidia' entry; udev coldplug may bind the card before the claim unit runs"
+    fi
 else
     log "WARNING: unmkinitramfs not found; could not verify the image content"
 fi
