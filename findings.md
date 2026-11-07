@@ -920,3 +920,36 @@ enabled**; boot `92e27c54` on `.22` lands Gen2 (`claim-ok 6/6`,
 Boundary stated honestly: outgoing revs `.17–.20` carry no self-protection —
 downgrading from them still orphans until a ≥`.22` reinstall self-heals;
 documented in bug report #10.
+
+## modules-late-610: the claim window was a hand-made fiction; the stock module set is now a product contract (2026-11-07)
+
+The "deb blacklists all nvidia modules" assumption, repeated in planning prose
+for weeks, was **wrong**: the deb shipped only `blacklist nouveau` (+
+`gpu_unlock` later). The claim window on llm2 held only because of a manual
+`modprobe.blacklist=nvidia,nvidia_uvm,nvidia_drm,nvidia_modeset` GRUB line
+with no repo provenance plus a bench-deployed `50hx-osunlock.conf` copy —
+on a fresh host, udev coldplug binds the card before `cmp90hx-claim` ever
+runs, silently stranding 90HX at Gen1 (the design fallback, so silent). Live
+`modules.alias` probe (2026-11-07): **only `nvidia` and `nvidia_drm` carry the
+10DE PCI-class aliases**; uvm/modeset have none, `nvidia_peermem` has none
+either — it autoloads in no stock config, so "the default set" the boot must
+end with is exactly {nvidia, nvidia_modeset, nvidia_drm, nvidia_uvm}.
+Alias-blocked ≠ load-blocked: explicit loads (setuid nvidia-modprobe already
+in phase 1, the new phase 6, bench osunlock) pass through every blacklist
+form — that asymmetry is the whole mechanism. Rev `20261107.23` makes it a
+product property: conffile-owned window (one shipped file, both install
+channels) + post-claim best-effort late load (`NVIDIA_MODULES_LATE=enabled`)
+so DRM consumers (LACT — enumeration only; tuning stays cmp-tune+governor,
+locked-clock style conflicts with P8 clearing; voltage control does not
+exist on this driver) see the cards. Proof-boot (warm4 log sequence, boot at
+16:01): `16:01:17 gpu_unlock stage=claim` card unbound → `16:01:18 claim-ok
+6/6` → `16:01:19 NVRM loading` — first bind one second AFTER the claim,
+with `modprobe.blacklist=` ABSENT from the cmdline and the bench file
+renamed: deb alone held the window, same boot ended `late-modules: loaded:
+nvidia_drm nvidia_modeset nvidia_uvm nvidia`, `/dev/dri/card{0,1,2}`,
+LACT 3/3, 3× `5.0 GT/s`, Xid 0, imgbench container healthy. Caveat learned
+while scripting: lactd started before the fix caches the empty device list
+(its retry loop gave up) — one `systemctl restart lactd` after the first
+fixed boot; fresh boots enumerate with no restart. Host restored to
+hack+bench-file present pending ticket 04 owner decision (protections are
+now redundant, but retirement is an explicit irreversible-tier act).
