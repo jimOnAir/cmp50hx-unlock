@@ -17,13 +17,17 @@
 #   2. installs build tools and kernel headers
 #   3. installs the pinned NVIDIA driver userland from the official .run package
 #   4. builds the patched kernel modules for the running kernel (build.sh)
-#   5. installs the modules with a backup of any previous ones, runs depmod
-#   6. installs the cmp50hx-boot boot-flow unit (unlock verdict + PCIe Gen2
-#      readiness gate) and enables the idle governor unit
+#   5. installs the modules with a backup of any previous ones; writes the
+#      package-owned modprobe blacklists (nouveau + the alias-reachable NVIDIA
+#      set, so the card is unbound when the once-per-boot 90HX claim unit —
+#      shipped by the .deb channel — runs; the boot flow late-loads the
+#      stock-equivalent set afterwards) and runs depmod
+#   6. rebuilds and verifies the initramfs for the running kernel
+#   7. installs the cmp50hx-boot boot-flow unit (unlock verdict + PCIe Gen2
+#      readiness gate + late module load), the cmp-tune tuning utility and
+#      cmp50hx-autotune, and enables the idle governor unit
 #      (--no-idle-governor skips the governor)
-#   7. installs the cmp-tune profile tuning utility
 #   8. best-effort live check of the card
-#   9. rebuilds and verifies the initramfs for the running kernel
 #
 # It never reboots or unloads a loaded driver. Reboot after the installer
 # reports PASS_CMP_INITRAMFS to load the patched module at boot.

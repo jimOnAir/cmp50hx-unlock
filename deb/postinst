@@ -195,6 +195,7 @@ if [[ -L /usr/local/bin/rm-issue-rate && ! -e /usr/local/bin/rm-issue-rate ]]; t
 fi
 log "cmp50hx-boot.service enabled (boot flow: unlock verdict + Gen2 readiness gate; policy in /etc/cmp50hx/boot.conf)"
 log "cmp-idle-governor.service enabled (idle power drops within ~30s of load ending; starts at boot; disable: sudo systemctl disable --now cmp-idle-governor)"
+log "cmp50hx-autotune installed (per-card undervolt search with llama-bench grading: sudo cmp50hx-autotune --help; docs: tuning/README.md)"
 
 # --- boot persistence of the patched module in the initramfs ---------------
 if [[ ${running_has_module} -eq 0 ]]; then

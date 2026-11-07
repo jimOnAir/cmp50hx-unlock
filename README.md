@@ -198,6 +198,9 @@ Historical kernel build results (driver `610.43.03` era):
 On `7.2.9-cmp50hx`, `nvidia-drm.ko` was omitted because NVIDIA `610.43.03`
 uses DRM atomic APIs that do not match this kernel's API. With the `615.78.08`
 port all five modules — including `nvidia-drm.ko` — build on `7.2.9-1-MANJARO`.
+On the supported Ubuntu fleet all five modules have always built, and since
+`20261107.23` the boot flow ends with that stock-equivalent set loaded — see
+"The module set and LACT".
 
 ## CUDA kernel profiling
 
@@ -268,7 +271,10 @@ curl -fsSL https://xrip.github.io/cmp50hx-unlock/install.sh | sudo bash
 
 The installer adds the build tools, installs the NVIDIA `610.43.03` userland
 from the official `.run` package, builds the patched modules for the running
-kernel, installs them with a backup, blacklists `nouveau`, rebuilds and verifies
+kernel, installs them with a backup, blacklists `nouveau` plus the
+alias-reachable NVIDIA module set (so the card is still unbound when the
+once-per-boot 90HX claim unit runs — the boot flow loads them explicitly
+afterwards, see "The module set and LACT"), rebuilds and verifies
 the initramfs, and runs `depmod`. It never reboots or unloads a loaded driver.
 It ends with a best-effort live check of the card.
 

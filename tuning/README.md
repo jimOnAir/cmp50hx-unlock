@@ -135,6 +135,9 @@ never blocks boot. See the warning below before enabling it.
 
 ## Auto-tuning a card: `cmp50hx-autotune`
 
+(working, since `610.43.03-20261107.25`; the `--apply` scoping fix landed in
+`.26`)
+
 `cmp50hx-autotune -i <N>` searches this card's own undervolt point instead
 of trusting a hand-written profile: it probes a power/offset/clock-ceiling
 grid under a deterministic OpenCL FMA load, gates every probe
@@ -163,9 +166,12 @@ Know before running:
 - Live validation (llm2, rev `20261107.25`, GPU 2): the search independently
   landed on `180 W / core_offset +200` — the documented measured-optimal
   point — and rejected a 1950 MHz ceiling as a perf-drop.
-- `--apply` syncs the governor drop-in file, but a *running* governor keeps
-  the env it started with until it restarts: after changing profiles,
-  `sudo systemctl restart cmp-idle-governor`.
+- `--apply` syncs the governor drop-in file and queues an async
+  `systemctl try-restart cmp-idle-governor` (no-block, so a boot-time profile
+  can be ordered before the governor without deadlocking). The restart is
+  async — for a deterministic check that the governor picked up the new
+  restore values, `sudo systemctl restart cmp-idle-governor` and look at
+  `systemctl show cmp-idle-governor -p Environment`.
 - Voltage itself is not controllable on this driver (curve-equivalent VF
   offsets only — see `docs/CMP50HX.md`); the grid tops out at +250 offset
   per the documented stability wall.

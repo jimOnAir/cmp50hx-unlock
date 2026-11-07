@@ -15,7 +15,11 @@ Description: CMP 50HX compute unlock for Ubuntu (NVIDIA @DRIVER_VERSION@ + patch
   automatically on every kernel update, deploys the UEFI ESP unlock
   binary, and installs the cmp50hx-boot boot-flow service (unlock
   verdict, PCIe Gen2 retrain as a GPU readiness gate), the idle
-  P-state governor (enabled by default) and the cmp-tune utility.
+  P-state governor (enabled by default), the cmp-tune utility, and
+  cmp50hx-autotune (per-card undervolt search with llama-bench
+  grading). The boot flow ends stock-equivalent (nvidia/uvm/drm
+  loaded after the claim window) so DRM consumers such as LACT see
+  the cards.
  .
  Removing this package uninstalls the NVIDIA driver it embedded.
  Supported: Ubuntu 24.04 / 26.04 amd64 (the 26.04 install path is

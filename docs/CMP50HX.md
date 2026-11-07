@@ -228,7 +228,10 @@ attempts. They precede the final successful `SIGNED_FULLSPEED_STOCK_RELOCK`,
 function reset before loading the module; otherwise those old failures can be
 mistaken for the current state. The final `No compatible format found` and
 `Cannot find any crtc or sizes` messages are display/KMS scanout warnings on
-the headless CMP board, not CUDA, Tensor, or RT execution errors.
+the headless CMP board, not CUDA, Tensor, or RT execution errors. Since rev
+`20261107.23` these lines are expected on ordinary production boots too: the
+boot flow deliberately ends stock-equivalent and loads `nvidia_drm` late,
+after the claim window (map modules-late-610) — the warnings are harmless.
 
 ### Proved working
 
