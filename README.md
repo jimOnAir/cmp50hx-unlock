@@ -436,6 +436,11 @@ Key behaviours:
 
 Settings are runtime state and clear on reboot, by design.
 
+Want the profile found automatically, per card? `cmp50hx-autotune` searches
+the power/offset grid under load with stability gates and a llama-bench
+judge, and can install the winner as `[auto-gpuN]` — see
+[`tuning/README.md`](tuning/README.md#auto-tuning-a-card-cmp50hx-autotune).
+
 ## The module set and LACT
 
 The boot flow ends in the same NVIDIA module state a stock driver install

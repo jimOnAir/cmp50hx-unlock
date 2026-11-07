@@ -22,7 +22,31 @@ static const char *SRC =
 #define ITEMS 303104u   /* 148 SM * 2048 */
 #define ITERS 100000
 
+/* autotune mode (map autotune-610): env knobs make the FMA chain actually
+ * reach the power cap (longer kernel, wider grid); unset env = legacy probe
+ * (the lock-detection discriminator behaviour must not change). */
+static size_t env_size(const char *name, size_t dflt) {
+    const char *v = getenv(name);
+    return (v && atol(v) > 0) ? (size_t)atol(v) : dflt;
+}
+
+#define CL_DEVICE_PCI_BUS_INFO_KHR 0x410F /* from CL/cl_ext.h (verified, not memory) */
+typedef struct { cl_uint domain, bus, device, func; } cl_pci_bus_info_khr;
+
+static int bus_matches(cl_device_id dev, const char *want) {
+    cl_pci_bus_info_khr bi;
+    cl_int rc = clGetDeviceInfo(dev, CL_DEVICE_PCI_BUS_INFO_KHR, sizeof bi, &bi, NULL);
+    if (rc != CL_SUCCESS) {
+        fprintf(stderr, "businfo rc=%d\n", rc);
+        return 0;
+    }
+    char got[32];
+    snprintf(got, sizeof got, "%04x:%02x:%02x.%x", bi.domain, bi.bus, bi.device, bi.func);
+    return strcmp(got, want) == 0;
+}
+
 int main(int argc, char **argv) {
+    const char *want_bus = getenv("FMA_BUS");   /* "0000:04:00.0"; unset = legacy select */
     cl_platform_id pl[8]; cl_uint npl = 0; int cnt = 0;
     clGetPlatformIDs(8, pl, &npl);
     cl_device_id dev = NULL; int want = argc>1?atoi(argv[1]):0;
@@ -33,7 +57,9 @@ int main(int argc, char **argv) {
             char name[128] = {0};
             clGetDeviceInfo(ds[i], CL_DEVICE_NAME, 127, name, NULL);
             printf("device: %s\n", name);
-            if (strstr(name, "NVIDIA") && cnt++ == want) { dev = ds[i]; break; }
+            if (!strstr(name, "NVIDIA")) continue;
+            if (want_bus && !bus_matches(ds[i], want_bus)) continue;
+            if (cnt++ == want) dev = ds[i];
         }
     }
     if (!dev) { printf("no GPU\n"); return 1; }
@@ -49,15 +75,16 @@ int main(int argc, char **argv) {
         printf("build: %d\n%s\n", err, log); return 1;
     }
     cl_kernel k = clCreateKernel(prg, "chain", &err);
-    cl_mem out = clCreateBuffer(ctx, CL_MEM_READ_WRITE, ITEMS * 4, NULL, &err);
-    int iters = ITERS;
+    size_t items = env_size("FMA_ITEMS", ITEMS);
+    int iters = (int)env_size("FMA_ITERS", ITERS);
+    cl_mem out = clCreateBuffer(ctx, CL_MEM_READ_WRITE, items * 4, NULL, &err);
     clSetKernelArg(k, 0, sizeof out, &out);
     clSetKernelArg(k, 1, sizeof iters, &iters);
 
-    double flops = (double)ITEMS * ITERS * 8.0 * 2.0; /* 8 FMA * 2 flop */
+    double flops = (double)items * iters * 8.0 * 2.0; /* 8 FMA * 2 flop */
     for (int run = 0; run < 3; run++) {
         cl_event ev;
-        err = clEnqueueNDRangeKernel(q, k, 1, NULL, &(size_t){ITEMS}, &(size_t){256}, 0, NULL, &ev);
+        err = clEnqueueNDRangeKernel(q, k, 1, NULL, &items, &(size_t){256}, 0, NULL, &ev);
         clWaitForEvents(1, &ev);
         cl_ulong t0, t1;
         clGetEventInfo(ev, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof err, &err, NULL);

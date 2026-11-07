@@ -132,3 +132,40 @@ never blocks boot. See the warning below before enabling it.
 - Values that a profile omits are left exactly as they are — a profile is not
   a full reset. Use `cmp-tune reset` for that, or a profile with no keys
   (`[stock]`).
+
+## Auto-tuning a card: `cmp50hx-autotune`
+
+`cmp50hx-autotune -i <N>` searches this card's own undervolt point instead
+of trusting a hand-written profile: it probes a power/offset/clock-ceiling
+grid under a deterministic OpenCL FMA load, gates every probe
+(watchdog, Xid/AER, throughput vs control), grades the survivors with
+llama-bench, and reports the Pareto table. Default objective `min-power` =
+the lowest cap that keeps llama throughput within `--judge-margin`
+(default 1%) of stock.
+
+```bash
+sudo cmp50hx-autotune -i 2 \
+     --model /home/dmitry/models/diffusion/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+sudo cmp50hx-autotune -i 2 --model ... --apply     # writes [auto-gpu2] and applies it
+```
+
+Know before running:
+
+- **The card must be idle** (util <= 5% for 10 s) — the run itself loads the
+  GPU for minutes. Other cards keep working normally.
+- Nothing survives unless `--apply`: state is runtime NVML and a reboot
+  clears it; persist with `CMP_BOOT_PROFILE=auto-gpu2` in
+  `/etc/cmp50hx/boot.conf`.
+- The judge grades the prompt+generation mix llama-bench runs (`-pg 512,128`).
+  A prompt-heavy shape punishes power caps harder than the generation-heavy
+  table in `docs/CMP50HX.md` — for serving-style generation workloads relax
+  with `--judge-margin 0.05` or judge with your own `-pp/-tg` shape.
+- Live validation (llm2, rev `20261107.25`, GPU 2): the search independently
+  landed on `180 W / core_offset +200` — the documented measured-optimal
+  point — and rejected a 1950 MHz ceiling as a perf-drop.
+- `--apply` syncs the governor drop-in file, but a *running* governor keeps
+  the env it started with until it restarts: after changing profiles,
+  `sudo systemctl restart cmp-idle-governor`.
+- Voltage itself is not controllable on this driver (curve-equivalent VF
+  offsets only — see `docs/CMP50HX.md`); the grid tops out at +250 offset
+  per the documented stability wall.

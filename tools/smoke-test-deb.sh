@@ -52,6 +52,7 @@ for path in \
         ./lib/systemd/system/cmp-idle-governor.service \
         ./usr/lib/cmp50hx-unlock/cmp50hx \
         ./usr/lib/cmp50hx-unlock/cmp50hx-boot.sh \
+        ./usr/bin/cmp50hx-autotune \
         ./usr/lib/cmp50hx-unlock/cmp50hx-collect.sh \
         ./opt/cmp50hx-unlock/deb/enable-services.sh \
         ./opt/cmp50hx-unlock/deb/apt-pins.sh \
@@ -97,6 +98,11 @@ grep -qF 'NVIDIA_MODULES_LATE' <<<"${bootsh}" \
     || { printf 'cmp50hx-boot.sh lacks the NVIDIA_MODULES_LATE late-load phase\n' >&2; exit 1; }
 grep -qE 'for late_mod in nvidia nvidia_uvm nvidia-drm' <<<"${bootsh}" \
     || { printf 'late-load module set drifted from the alias/autoload default set\n' >&2; exit 1; }
+# autotune (map autotune-610): the shipped script must be the real tool
+autotune="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./usr/bin/cmp50hx-autotune)"
+grep -qF 'cmp50hx-autotune' <<<"${autotune}" \
+    && grep -qF -- '--apply' <<<"${autotune}" \
+    || { printf 'cmp50hx-autotune payload is not the expected tool\n' >&2; exit 1; }
 bootconf="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./etc/cmp50hx/boot.conf)"
 grep -qxF 'NVIDIA_MODULES_LATE=enabled' <<<"${bootconf}" \
     || { printf 'boot.conf does not ship NVIDIA_MODULES_LATE=enabled as the default\n' >&2; exit 1; }

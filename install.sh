@@ -311,6 +311,9 @@ if [[ "${card}" == cmp50hx ]]; then
     make -C "${install_dir}/native" || die "could not build native/cmp50hx"
     install -m 0755 "${install_dir}/native/cmp50hx" /usr/local/bin/cmp50hx
     ln -sf /usr/local/bin/cmp50hx /usr/local/bin/cmp-tune
+    # per-card undervolt search (map autotune-610); fma_bench stays optional:
+    # the tool grades with llama-bench alone when the OpenCL bench is absent
+    install -m 0755 "${install_dir}/tools/autotune/cmp50hx-autotune" /usr/local/bin/cmp50hx-autotune
     ln -sf /usr/local/bin/cmp50hx /usr/local/bin/rm-issue-rate
     install -m 0644 "${runtime_dir}/cmp50hx-boot.service" \
         /etc/systemd/system/cmp50hx-boot.service

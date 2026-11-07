@@ -1,0 +1,545 @@
+#!/usr/bin/env python3
+"""cmp50hx-autotune — per-card undervolt search for CMP 50HX/90HX.
+
+Map autotune-610 ticket 01. Objective (default min-power): the lowest power
+cap at which the card keeps throughput within the margin of its own stock
+level. Grid bench: tools/fma_bench.c (OpenCL, deterministic compute-bound —
+the documented clamp discriminator; the NVIDIA ICD honours
+CUDA_VISIBLE_DEVICES, so each probe is pinned to ONE PCI device). Final
+judge: llama-bench inside a CUDA container (real memory mix), top-K only.
+
+Safety contract: runtime NVML state only (reboot clears everything); one
+watchdogged probe at a time; Xid/AER gate; idle guard before any writes;
+{power limit, core/mem VF offsets, clock lock} snapshot restored on EVERY
+exit path (including SIGINT) unless --apply left the winner in place.
+Applying goes through cmp-tune (profile validation + governor drop-in sync
+are not duplicated here). Direct voltage does not exist on this driver —
+VF offsets are curve-equivalent (docs/CMP50HX.md, findings.md).
+"""
+import argparse
+import ctypes
+import os
+import re
+import signal
+import subprocess
+import sys
+import threading
+import time
+
+# ---------------------------------------------------------------- NVML ------
+
+class Nvml:
+    """Thin ctypes wrapper; symbol names mirror native/nvml.c exactly
+    (verified against libnvidia-ml.so.1 of the pinned driver)."""
+
+    def __init__(self):
+        self.lib = ctypes.CDLL("libnvidia-ml.so.1")
+        self.lib.nvmlInit_v2()
+
+    def count(self):
+        c = ctypes.c_uint()
+        self.lib.nvmlDeviceGetCount_v2(ctypes.byref(c))
+        return c.value
+
+    def handle(self, idx):
+        h = ctypes.c_void_p()
+        r = self.lib.nvmlDeviceGetHandleByIndex_v2(ctypes.c_uint(idx), ctypes.byref(h))
+        if r:
+            raise RuntimeError(f"nvmlDeviceGetHandleByIndex_v2({idx}) rc={r}")
+        return h
+
+    def name(self, h):
+        b = ctypes.create_string_buffer(96)
+        self.lib.nvmlDeviceGetName(h, b, ctypes.c_uint(96))
+        return b.value.decode(errors="replace")
+
+    def uuid(self, h):
+        b = ctypes.create_string_buffer(96)
+        if self.lib.nvmlDeviceGetUUID(h, b, ctypes.c_uint(96)):
+            raise RuntimeError("nvmlDeviceGetUUID failed")
+        return b.value.decode()
+
+    def pci_bus_id(self, h):
+        # Layout differs across driver series (observed: a 32-slice read yields
+        # garbage on 610) — scan the buffer for any PCI-style token instead
+        # and normalize the domain to the 4-hex-digit CUDA_VISIBLE_DEVICES
+        # form ("0000:04:00.0").
+        b = ctypes.create_string_buffer(256)
+        r = self.lib.nvmlDeviceGetPciInfo_v3(h, b)
+        if r:
+            raise RuntimeError(f"nvmlDeviceGetPciInfo_v3 rc={r}")
+        text = b.raw
+        m = re.search(rb"([0-9a-fA-F]{4,8}):([0-9a-fA-F]{2}):([0-9a-fA-F]{2})\.([0-9a-fA-F])", text)
+        if not m:
+            raise RuntimeError("no PCI token in nvmlPciInfo buffer")
+        dom, bus, dev, fn = (x.decode() for x in m.groups())
+        return f"{dom[-4:]}:{bus}:{dev}.{fn}".lower()
+
+    def power_constraints_w(self, h):
+        lo, hi = ctypes.c_uint(), ctypes.c_uint()
+        self.lib.nvmlDeviceGetPowerManagementLimitConstraints(h, ctypes.byref(lo), ctypes.byref(hi))
+        return lo.value // 1000, hi.value // 1000
+
+    def power_get_w(self, h):
+        v = ctypes.c_uint()
+        self.lib.nvmlDeviceGetPowerManagementLimit(h, ctypes.byref(v))
+        return v.value // 1000
+
+    def power_set_w(self, h, w):
+        # legacy exported name takes the mW value directly — same symbol
+        # native/nvml.c loads and cmp-tune drives successfully.
+        return self.lib.nvmlDeviceSetPowerManagementLimit(h, ctypes.c_uint(w * 1000))
+
+    def offset_get(self, h, mem=False):
+        g = "nvmlDeviceGetMemClkVfOffset" if mem else "nvmlDeviceGetGpcClkVfOffset"
+        v = ctypes.c_int()
+        return None if getattr(self.lib, g)(h, ctypes.byref(v)) else v.value
+
+    def offset_set(self, h, value, mem=False):
+        s = "nvmlDeviceSetMemClkVfOffset" if mem else "nvmlDeviceSetGpcClkVfOffset"
+        return getattr(self.lib, s)(h, ctypes.c_int(value))
+
+    def offset_range(self, h, mem=False):
+        # exported names (nm -D of the pinned 610/615 libs): ...GetGpcClkMinMaxVfOffset
+        g = ("nvmlDeviceGetMemClkMinMaxVfOffset" if mem
+             else "nvmlDeviceGetGpcClkMinMaxVfOffset")
+        lo, hi = ctypes.c_int(), ctypes.c_int()
+        try:
+            f = getattr(self.lib, g)
+        except AttributeError:
+            return None
+        return None if f(h, ctypes.byref(lo), ctypes.byref(hi)) else (lo.value, hi.value)
+
+    def clocks_lock(self, h, mhz):
+        return self.lib.nvmlDeviceSetGpuLockedClocks(h, ctypes.c_uint(mhz), ctypes.c_uint(mhz))
+
+    def clocks_reset(self, h):
+        return self.lib.nvmlDeviceResetGpuLockedClocks(h)
+
+    def max_graphics_clock(self, h):
+        # mirrors native/tune.c: the graphics-clock table is keyed by a VALID
+        # memory clock (memClock=0 is rejected), so walk GetSupportedMemory-
+        # Clocks first; fall back to GetMaxClockInfo(GRAPHICS).
+        mc = ctypes.c_uint()
+        if self.lib.nvmlDeviceGetSupportedMemoryClocks(h, ctypes.byref(mc), None) or not mc.value:
+            mc = ctypes.c_uint(0)
+            v = ctypes.c_uint()
+            if self.lib.nvmlDeviceGetMaxClockInfo(h, ctypes.c_uint(0), ctypes.byref(v)):
+                return None
+            return v.value or None
+        marr = (ctypes.c_uint * mc.value)()
+        if self.lib.nvmlDeviceGetSupportedMemoryClocks(h, ctypes.byref(mc), marr):
+            return None
+        best = None
+        for i in range(mc.value):
+            gc = ctypes.c_uint()
+            self.lib.nvmlDeviceGetSupportedGraphicsClocks(h, marr[i], ctypes.byref(gc), None)
+            if not gc.value:
+                continue
+            garr = (ctypes.c_uint * gc.value)()
+            if self.lib.nvmlDeviceGetSupportedGraphicsClocks(h, marr[i], ctypes.byref(gc), garr):
+                continue
+            vals = [garr[j] for j in range(gc.value) if garr[j]]
+            if vals and (best is None or max(vals) > best):
+                best = max(vals)
+        return best
+
+    def util_gpu(self, h):
+        class U(ctypes.Structure):
+            _fields_ = [("gpu", ctypes.c_uint), ("memory", ctypes.c_uint)]
+        u = U()
+        return 101 if self.lib.nvmlDeviceGetUtilizationRates(h, ctypes.byref(u)) else u.gpu
+
+    def power_draw_w(self, h):
+        v = ctypes.c_uint()
+        return None if self.lib.nvmlDeviceGetPowerUsage(h, ctypes.byref(v)) else v.value / 1000.0
+
+
+NV = None
+
+# ---------------------------------------------------------------- gates -----
+
+def xid_count(since_epoch):
+    try:
+        out = subprocess.run(["journalctl", "-b", "-q", "--since", f"@{int(since_epoch)}", "-o", "cat"],
+                             capture_output=True, text=True, timeout=30).stdout
+        return len(re.findall(r"NVRM.*Xid", out))
+    except Exception:
+        return -1
+
+
+def aer_problems():
+    n = 0
+    for d in os.listdir("/sys/bus/pci/devices"):
+        for f in ("aer_dev_fatal", "aer_dev_nonfatal"):
+            p = f"/sys/bus/pci/devices/{d}/{f}"
+            try:
+                if int(open(p).read().strip(), 16):
+                    n += 1
+            except (OSError, ValueError):
+                pass
+    return n
+
+
+def idle_guard(h, seconds, util_max):
+    for _ in range(seconds):
+        if NV.util_gpu(h) > util_max:
+            return False
+        time.sleep(1)
+    return True
+
+# ---------------------------------------------------------------- bench -----
+
+class PowerSampler(threading.Thread):
+    def __init__(self, h, hz=4):
+        super().__init__(daemon=True)
+        self.h, self.dt, self.samples = h, 1.0 / hz, []
+        self._stop = False
+
+    def run(self):
+        while not self._stop:
+            try:
+                w = NV.power_draw_w(self.h)
+                if w:
+                    self.samples.append(w)
+            except Exception:
+                pass
+            time.sleep(self.dt)
+
+    def stop(self):
+        self._stop = True
+        self.join(timeout=3)
+
+    def peak(self):
+        return round(max(self.samples), 1) if self.samples else 0.0
+
+
+def run_cmd(cmd, env, timeout):
+    t0 = time.time()
+    try:
+        p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, start_new_session=True)
+    except FileNotFoundError:
+        return None, f"missing binary: {cmd[0]}", time.time() - t0
+    timed_out = False
+    while p.poll() is None:
+        if time.time() - t0 > timeout:
+            timed_out = True
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            break
+        time.sleep(0.4)
+    out = p.stdout.read() if p.stdout else ""
+    return (None if timed_out else p.returncode), out, time.time() - t0
+
+
+def bench_fma(fma_path, pci, timeout):
+    env = dict(os.environ, FMA_BUS=pci, FMA_ITEMS="606208", FMA_ITERS="2500000")
+    rc, out, _ = run_cmd([fma_path], env, timeout)
+    if rc is None:
+        return None, f"watchdog-timeout: {out[-200:]}"
+    if rc != 0:
+        return None, out[-300:]
+    vals = [float(x) for x in re.findall(r"->\s*([0-9.]+)\s*TFLOP/s", out)]
+    return (max(vals), "ok") if vals else (None, "unparsed: " + out[-300:])
+
+
+def bench_llama(image, model, uuid, pp, tg, reps, timeout):
+    """One-shot judge container pinned to exactly this GPU via --gpus
+    device=UUID (host containers may be CDI-scoped to another card).
+    `model` is a HOST absolute path; its directory is mounted at the same
+    path so -m needs no translation."""
+    if not os.path.exists(model):
+        return None, f"model not found on host: {model}"
+    mdir = os.path.dirname(model)
+    rc, out, _ = run_cmd(["docker", "run", "--rm", "-i", "--gpus", f"device={uuid}",
+                          "-v", f"{mdir}:{mdir}:ro", "--entrypoint", "llama-bench", image,
+                          "-m", model, "-pg", f"{pp},{tg}", "-r", str(reps)],
+                         dict(os.environ), timeout)
+    if rc is None:
+        return None, f"watchdog-timeout: {out[-200:]}"
+    if rc != 0:
+        return None, out[-300:]
+    rows = parse_llama_rows(out)
+    if not rows:
+        return None, "unparsed: " + out[-300:]
+    return rows, "ok"
+
+
+def parse_llama_rows(out):
+    # llama-bench emits lowercase test names (pp512/tg128) and a combined
+    # pp512+tg128 row; the \s*\| anchor means the combined row matches
+    # neither individual token and cannot overwrite them.
+    rows = {}
+    for line in out.splitlines():
+        m = re.search(r"\|\s*(pp\d+|tg\d+)\s*\|\s*([0-9.]+)", line, re.I)
+        if m:
+            rows[m.group(1).upper()] = float(m.group(2))
+    return rows
+
+
+def scalar_of(rows, pp, tg):
+    if not rows:
+        return None
+    return (rows.get(f"PP{pp}") or 0) + (rows.get(f"TG{tg}") or 0) or None
+
+# ---------------------------------------------------------------- tuner -----
+
+def apply_cfg(h, cfg):
+    NV.power_set_w(h, cfg["power"])
+    NV.clocks_reset(h)
+    if cfg.get("cclock"):
+        NV.clocks_lock(h, cfg["cclock"])
+    NV.offset_set(h, cfg["core_off"])
+    NV.offset_set(h, cfg["mem_off"], mem=True)
+    time.sleep(1.0)
+
+
+def snapshot(h):
+    return {"power": NV.power_get_w(h), "core_off": NV.offset_get(h) or 0,
+            "mem_off": NV.offset_get(h, mem=True) or 0, "cclock": None}
+
+
+def probe_grid(args, h, pci, cfg, bench, control_perf):
+    t0 = time.time() - 1
+    x0, a0 = xid_count(t0), aer_problems()
+    apply_cfg(h, cfg)
+    s = PowerSampler(h)
+    s.start()
+    perf, detail = bench(pci, args.probe_timeout)
+    time.sleep(0.3)
+    s.stop()
+    x1, a1 = xid_count(t0), aer_problems()
+    stable = perf is not None and x0 >= 0 and x1 == x0 and a1 <= a0
+    gate = ""
+    if stable and control_perf and perf < control_perf * (1 - args.perf_margin):
+        stable, gate = False, "perf-drop"
+    return {"cfg": cfg, "perf": perf, "peak_w": s.peak(), "stable": stable,
+            "gate": gate, "detail": (detail if not stable else "")}
+
+
+def parse_budget(text):
+    m = re.fullmatch(r"(\d+)([sm]?)", text)
+    if not m:
+        raise SystemExit(f"bad --budget: {text}")
+    return int(m.group(1)) * (60 if m.group(2) in ("", "m") else 1)
+
+
+def tune_gpu(args, idx):
+    h = NV.handle(idx)
+    name, pci, gpu_uuid = NV.name(h), NV.pci_bus_id(h), NV.uuid(h)
+    lo, hi = NV.power_constraints_w(h)
+    rng = NV.offset_range(h) or (0, 0)
+    maxclk = NV.max_graphics_clock(h)
+    offs = [int(x) for x in args.offsets.split(",")]
+    offs = [o for o in offs if not rng or -rng[1] <= o <= rng[1]]
+    caps = [None, maxclk, max(210, maxclk - 150)] if maxclk else [None]
+    if args.powers:
+        powers = sorted((int(p) for p in args.powers.split(",")), reverse=True)
+    else:
+        powers = sorted({max(lo, hi - k * args.power_step) for k in range(5)}, reverse=True)
+    control = {"power": hi, "core_off": 0, "mem_off": 0, "cclock": None}
+
+    print(f"== GPU {idx} {name} pci={pci} power[{lo}..{hi}]W offsets[±{rng[1]}] maxclk={maxclk}", flush=True)
+    if args.dry_run:
+        total = sum(1 for p in powers for o in offs for c in caps if {"power": p, "core_off": o, "mem_off": 0, "cclock": c} != control)
+        print(f"   dry-run: {total} fma probes at <= {args.probe_timeout}s (budget {args.budget}) "
+              f"+ <= {args.topk + 1} llama judge runs; NVML writes: 0")
+        for p in powers:
+            for o in offs:
+                for c in caps:
+                    print(f"   probe power={p} core_off={o} cclock={c}")
+        return True
+
+    if not idle_guard(h, args.idle_seconds, args.idle_util):
+        print(f"   SKIP: busy (util > {args.idle_util}% during {args.idle_seconds}s guard) — stop the workload first")
+        return False
+
+    snap = snapshot(h)
+    applied = False
+    try:
+        if not args.fma:
+            for cand in ("/usr/lib/cmp50hx-unlock/fma_bench", "/usr/local/bin/fma_bench", "/var/tmp/fma_bench"):
+                if os.path.exists(cand):
+                    args.fma = cand
+                    break
+        if args.fma and os.path.exists(args.fma):
+            bench = lambda p, t: bench_fma(args.fma, p, t)
+            perf_unit = "TFLOP/s"
+        else:
+            if args.judge == "off":
+                raise SystemExit("no fma_bench (--fma) and --judge off: nothing to measure with")
+            bench = lambda p, t: (lambda r: (scalar_of(r[0], args.pp, args.tg), r[1]))(
+                bench_llama(args.judge, args.model, gpu_uuid, args.pp, args.tg, 1, t))
+            perf_unit = "t/s(pp+tg)"
+            print(f"   no fma_bench — grid falls back to llama-bench (slow): pass --fma to split phases")
+
+        c = probe_grid(args, h, pci, control, bench, None)
+        if not c["stable"]:
+            raise SystemExit(f"control probe failed: {c['detail']}")
+        control_perf = c["perf"]
+        print(f"   control (stock {control['power']}W): {control_perf:.2f} {perf_unit}, peak {c['peak_w']} W", flush=True)
+
+        t_end = time.time() + parse_budget(args.budget)
+        frontier = [c]  # stock control is a Pareto point too
+        for o in offs:
+            for cp in caps:
+                for p in powers:  # powers sorted high->low: descend until the first failure
+                    if time.time() > t_end:
+                        break
+                    cfg = {"power": p, "core_off": o, "mem_off": args.mem_offset, "cclock": cp}
+                    if cfg["power"] == control["power"] and cp == control["cclock"] and o == 0 and args.mem_offset == 0:
+                        continue
+                    r = probe_grid(args, h, pci, cfg, bench, control_perf)
+                    tag = "ok    " if r["stable"] else f"REJECT/{r['gate'] or 'unstable'}"
+                    pv = f"{r['perf']:.2f}" if r["perf"] is not None else "-"
+                    print(f"   {tag} power={p:>4} off={o:>4} cclock={str(cp):>5} perf={pv} peakW={r['peak_w']}", flush=True)
+                    if r["stable"] and r["perf"] >= control_perf * (1 - args.perf_margin):
+                        frontier.append(r)
+                    else:
+                        break  # unstable or perf-collapse at this cap: lower caps can only be worse
+            if time.time() > t_end:
+                break
+        if not frontier:
+            print("   no stable reduced-power config found within gates — card likes stock; nothing to apply")
+            return True
+
+        if args.objective == "min-power":
+            frontier.sort(key=lambda r: (r["cfg"]["power"], -(r["perf"] or 0)))
+        else:
+            frontier.sort(key=lambda r: -((r["perf"] or 0) / max(r["peak_w"], 1)))
+        top = frontier[:args.topk]
+
+        winner = None
+        if args.judge != "off" and args.fma and os.path.exists(args.fma):
+            # real second-phase judge over candidates + control
+            top_ok = []
+            apply_cfg(h, control)  # judge baseline must be the control state, not the last probe
+            jr, jdet = bench_llama(args.judge, args.model, gpu_uuid, args.pp, args.tg, args.reps, args.judge_timeout)
+            if not jr:
+                print(f"   judge control failed: {jdet} — continuing with grid-only ranking")
+                top_ok = None
+            csc = scalar_of(jr, args.pp, args.tg)
+            print(f"   judge control: {jr}", flush=True)
+            for r in top if top_ok is not None else []:
+                apply_cfg(h, r["cfg"])
+                jr, det = bench_llama(args.judge, args.model, gpu_uuid, args.pp, args.tg, args.reps, args.judge_timeout)
+                sc = scalar_of(jr, args.pp, args.tg)
+                r["judge"], r["judge_scalar"] = jr, sc
+                r["llama_ok"] = bool(sc and csc and sc >= csc * (1 - args.judge_margin))
+                print(f"   judge power={r['cfg']['power']} off={r['cfg']['core_off']} -> {jr} ok={r['llama_ok']}", flush=True)
+            ok = top[:] if top_ok is None else [r for r in top if r.get("llama_ok")]
+        else:
+            ok = top[:]
+        if ok:
+            winner = min(ok, key=lambda r: r["cfg"]["power"]) if args.objective == "min-power" else ok[0]
+
+        print("   Pareto table:")
+        for r in sorted(frontier, key=lambda r: r["cfg"]["power"]):
+            w = r["cfg"]
+            print(f"     power={w['power']:>4} core_off={w['core_off']:>4} cclock={str(w['cclock']):>5} "
+                  f"perf={r['perf']:.2f} peakW={r['peak_w']}")
+        if winner:
+            w = winner["cfg"]
+            print(f"   BEST: power={w['power']} core_off={w['core_off']} cclock={w['cclock']} "
+                  f"peak={winner['peak_w']}W perf={winner['perf']:.2f}")
+            if args.apply:
+                prof = f"auto-gpu{idx}"
+                block = f"\n[{prof}]\npower_w = {w['power']}\ncore_offset = {w['core_off']}\n"
+                if w["cclock"]:
+                    block += f"clock_max = {w['cclock']}\n"
+                with open(args.config, "a") as f:
+                    f.write(block)
+                rc = subprocess.run(["cmp-tune", "apply", prof]).returncode
+                applied = rc == 0
+                print(f"   applied [{prof}] via cmp-tune rc={rc}; persist with CMP_BOOT_PROFILE={prof} in /etc/cmp50hx/boot.conf")
+            else:
+                print("   (not applied; rerun with --apply)")
+        else:
+            print("   no candidate passed the judge margin")
+        return True
+    finally:
+        if not applied:
+            apply_cfg(h, {**control, "power": snap["power"], "core_off": snap["core_off"], "mem_off": snap["mem_off"]})
+            print(f"   restored snapshot: power={snap['power']} core={snap['core_off']} mem={snap['mem_off']} (clocks cleared)")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="cmp50hx-autotune",
+                                 description="Undervolt search for CMP cards (power-first, per-card).")
+    ap.add_argument("-i", "--gpu", default="auto", help="NVML index list or auto (CMP cards)")
+    ap.add_argument("--objective", choices=["min-power", "perf-per-w"], default="min-power")
+    ap.add_argument("--apply", action="store_true", help="write + apply [auto-gpuN] via cmp-tune")
+    ap.add_argument("--report-only", action="store_true", help="alias: never writes config; measures only")
+    ap.add_argument("--dry-run", action="store_true", help="print the planned probe grid, zero hardware writes")
+    ap.add_argument("--selftest", action="store_true", help="logic check without NVML")
+    ap.add_argument("--fma", default=os.environ.get("CMP50_FMA", ""), help="fma_bench path (OpenCL); empty = probe the usual locations")
+    ap.add_argument("--judge", default="auto", help="image containing llama-bench (auto: from a running llama* container), or off")
+    ap.add_argument("--model", default="", help="gguf HOST path (its dir is mounted read-only into the judge run)")
+    ap.add_argument("--pp", type=int, default=512)
+    ap.add_argument("--tg", type=int, default=128)
+    ap.add_argument("--reps", type=int, default=2, help="llama-bench -r for the judge phase")
+    ap.add_argument("--budget", default="20m", help="per-GPU budget: 20m / 900s")
+    ap.add_argument("--powers", help="override power grid, e.g. 225,200,180,160,150")
+    ap.add_argument("--power-step", type=int, default=15, help="default grid: hi - k*step, k=0..4")
+    ap.add_argument("--offsets", default="0,125,200,250", help="core VF offset grid (clipped to card range)")
+    ap.add_argument("--mem-offset", type=int, default=0, help="fixed mem VF offset during the search")
+    ap.add_argument("--perf-margin", type=float, default=0.03, help="grid gate: max drop vs control")
+    ap.add_argument("--judge-margin", type=float, default=0.01, help="final gate on llama-bench")
+    ap.add_argument("--topk", type=int, default=4)
+    ap.add_argument("--probe-timeout", type=int, default=90, help="watchdog per grid probe, s")
+    ap.add_argument("--judge-timeout", type=int, default=600)
+    ap.add_argument("--idle-seconds", type=int, default=10)
+    ap.add_argument("--idle-util", type=int, default=5)
+    ap.add_argument("--config", default="/etc/cmp-tune.conf")
+    args = ap.parse_args()
+
+    if args.selftest:
+        assert parse_budget("20m") == 1200 and parse_budget("90s") == 90
+        assert scalar_of({"PP512": 300.0, "TG128": 70.0}, 512, 128) == 370.0
+        _rows = parse_llama_rows(
+            "| qwen3 4B Q4_K - Medium | 2.32 GiB | 4.02 B | CUDA | -1 | pp512 | 3326.15 ± 0.00 |\n"
+            "| qwen3 4B Q4_K - Medium | 2.32 GiB | 4.02 B | CUDA | -1 | tg128 | 122.55 ± 0.00 |\n"
+            "| qwen3 4B Q4_K - Medium | 2.32 GiB | 4.02 B | CUDA | -1 | pp512+tg128 | 524.63 ± 0.00 |\n")
+        assert _rows == {"PP512": 3326.15, "TG128": 122.55}, _rows
+        assert re.search(r"->\s*([0-9.]+)\s*TFLOP/s", "run 3: 2.000 s -> 13.50 TFLOP/s FP32").group(1) == "13.50"
+        print("SELFTEST_OK")
+        return 0
+    if args.apply and args.report_only:
+        ap.error("--apply conflicts with --report-only")
+
+    global NV
+    try:
+        NV = Nvml()
+    except OSError as e:
+        print(f"libnvidia-ml.so.1 unavailable: {e}", file=sys.stderr)
+        return 1
+
+    if args.judge == "auto":
+        cid = subprocess.run(["docker", "ps", "-q", "--filter", "name=llama"],
+                             capture_output=True, text=True).stdout.split("\n")[0]
+        if not cid:
+            print("no running llama container to derive the judge image from; pass --judge <image> or --judge off", file=sys.stderr)
+            return 1
+        img = subprocess.run(["docker", "inspect", "-f", "{{.Config.Image}}", cid],
+                             capture_output=True, text=True).stdout.strip()
+        if not img or img == "<no value>":
+            img = subprocess.run(["docker", "inspect", "-f", "{{.Image}}", cid],
+                                 capture_output=True, text=True).stdout.strip()
+        args.judge = img
+        print(f"judge image: {args.judge}")
+    if args.judge != "off" and not args.model and not args.dry_run:
+        print("--model is required for the llama judge (path INSIDE the container)", file=sys.stderr)
+        return 1
+
+    n = NV.count()
+    idxs = ([i for i in range(n) if "CMP" in NV.name(NV.handle(i))]
+            if args.gpu == "auto" else [int(x) for x in args.gpu.split(",")])
+    ok = all([tune_gpu(args, i) for i in idxs])
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

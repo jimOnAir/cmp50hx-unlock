@@ -978,3 +978,29 @@ the same row: `nvidia-smi -rgc` (ResetGpuLockedClocks) clears GPC VF offsets
 on this TU102 CMP — manual -rgc zeroes an offset that the production cycle
 (P0→governor release→P8) preserves correctly (idle-governor README table
 stands; keep manual clock resets out of VF-offset workflows).
+
+## autotune-610: pinning is the whole game when three identical-vendor GPUs share a host (2026-11-07, rev 20261107.25)
+
+Built `cmp50hx-autotune` (grid search under OpenCL FMA load, llama-bench
+judge, Xid/AER/watchdog gates, snapshot/restore) and it found the documented
+optimum (180 W/+200 on GPU2) without being told — but three facts had to be
+probed out first, each of which silently targeted the WRONG card until fixed:
+(1) the NVIDIA OpenCL ICD does not honour CUDA_VISIBLE_DEVICES — first "real"
+Pareto table was load-on-90HX + NVML-sampled-50HX garbage (dead giveaway:
+21.5 TFLOP/s, an unclamped GA102 number, from a "50HX" probe; later a
+sustained 14.2-14.7 TFLOP/s at 2010 MHz/162 W for the actually-clamped card);
+pin OpenCL via cl_khr_pci_bus_info (added FMA_BUS to tools/fma_bench.c) and
+CUDA via one-shot `docker run --gpus device=GPU-<uuid>` — the llama-swap
+container itself is CDI-scoped to the 90HX, so `docker exec` pinning is
+structurally impossible; (2) `CL_DEVICE_PCI_BUS_INFO_KHR` is 0x410F per
+CL/cl_ext.h — guessed 0x42C0 then 0x410C both returned CL_INVALID_VALUE;
+read the header, not memory; (3) llama-bench prints lowercase test names and
+a combined `pp512+tg128` row that would overwrite the individual scores.
+Also learned: `cmp-tune apply` writes the governor drop-in but the RUNNING
+governor keeps its start-time env until restarted — documented in
+tuning/README. Grid physics: PP-heavy judging punishes power caps (-4..-7% at
+165 W) while generation-heavy shapes tolerate them (docs Pareto -44 W) —
+judge shape is a policy knob (`--judge-margin`, `-pp/-tg`), not a hidden
+default. Busy-guard, apply/cleanup round-trip (config + drop-in + 170 W
+baseline all verified byte-restored), deb payload + smoke + lifecycle on
+`.25`: green.

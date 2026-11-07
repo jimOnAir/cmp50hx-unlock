@@ -165,6 +165,15 @@ ln -sfn /usr/lib/cmp50hx-unlock/cmp50hx "${stage}/usr/bin/cmp50hx"
 ln -sfn /usr/lib/cmp50hx-unlock/cmp50hx "${stage}/usr/bin/cmp-tune"
 ln -sfn /usr/lib/cmp50hx-unlock/cmp50hx "${stage}/usr/bin/rm-issue-rate"
 install -m 0755 "${root}/cmp50hx/cmp50hx-boot.sh" "${libdir}/cmp50hx-boot.sh"
+# autotune (map autotune-610): per-card undervolt search; fma_bench is its
+# grid bench (OpenCL runtime comes from the host's ICD, optional at run time
+# — the tool falls back to llama-only grading when the binary is absent)
+install -m 0755 "${root}/tools/autotune/cmp50hx-autotune" "${stage}/usr/bin/cmp50hx-autotune"
+if cc -O2 -w "${root}/tools/fma_bench.c" -o "${libdir}/fma_bench" -lOpenCL 2>/dev/null; then
+    log "fma_bench built (cmp50hx-autotune grid bench)"
+else
+    log "NOTE: OpenCL dev headers absent — fma_bench not bundled; cmp50hx-autotune falls back to llama-only grading"
+fi
 install -m 0755 "${root}/cmp50hx/cmp50hx-collect.sh" "${libdir}/cmp50hx-collect.sh"
 install -m 0755 "${root}/deb/enable-services.sh" "${opt}/deb/enable-services.sh"
 install -m 0755 "${root}/deb/apt-pins.sh" "${opt}/deb/apt-pins.sh"
