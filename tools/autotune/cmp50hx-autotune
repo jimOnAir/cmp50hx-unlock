@@ -452,7 +452,9 @@ def tune_gpu(args, idx):
                     block += f"clock_max = {w['cclock']}\n"
                 with open(args.config, "a") as f:
                     f.write(block)
-                rc = subprocess.run(["cmp-tune", "apply", prof]).returncode
+                # -i: a profile found for ONE card must never touch the
+                # others (live proof: unscoped apply moved GPU0/GPU1 caps)
+                rc = subprocess.run(["cmp-tune", "-i", str(idx), "apply", prof]).returncode
                 applied = rc == 0
                 print(f"   applied [{prof}] via cmp-tune rc={rc}; persist with CMP_BOOT_PROFILE={prof} in /etc/cmp50hx/boot.conf")
             else:
