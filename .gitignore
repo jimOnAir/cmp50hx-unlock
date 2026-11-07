@@ -13,3 +13,4 @@ efi-unlock/50HXUNLK.EFI
 efi-unlock/50HXUNLK.EFI.sha256
 dist-llm2/
 native/cmp50hx
+__pycache__/
