@@ -46,7 +46,16 @@ bar0_reads_trustworthy() { # wedge guard: after a reboot the card's memory
     # decode is off and EVERY BAR0 offset reads 0xffffffff — indistinguishable
     # from "open" (success-recipe §0 lesson). PMC_BOOT_0 is a constant; if it
     # reads correctly, other readbacks mean what they say.
-    [[ "$(bar0_read 0x0)" == "0xb72000a1" ]]
+    # GTUU row U4 (@1d6a508): compare the chip-identity field (bits 28:20 =
+    # 0x172 GA102), NOT a full literal — foundry strap bits 31:29 make
+    # 0xb72000a1 and 0x172000a1 the same silicon (llm2's card is the strap
+    # form; a bare-field part used to fail this guard and silently lose the
+    # Gen2 claim).
+    local v
+    v=$(bar0_read 0x0)
+    [[ "$v" =~ ^0x[0-9a-fA-F]{8}$ ]] || return 1
+    [[ "$v" == "0x00000000" || "$v" == "0xffffffff" ]] && return 1
+    (( (( 16#${v#0x} >> 20 ) & 0x1ff) == 0x172 ))
 }
 
 claim_done() { # masks the config pass needs are already open (idempotency guard)
@@ -58,6 +67,18 @@ if disabled; then say "gen2-claim: disabled (boot.conf GEN2_90HX=disabled)"; exi
 if ! lspci -Dn -s "$BDF" 2>/dev/null | grep -q "10de:220d"; then exit 0; fi   # no 90HX: no-op
 if [[ ! -d "/sys/bus/pci/devices/$BDF" ]]; then say "gen2-claim: gen1-fallback device absent"; exit 0; fi
 if claim_done; then say "gen2-claim: already-open (idempotent skip)"; exit 0; fi
+
+# Cold-state verdict (GTUU row U3 port, informational on the 90HX: the
+# Gen2 claim does not write SS0/SS1, but the fleet should name this state
+# from journal alone). Offsets: GA102 SS0/SS1 per claim-90hx/registers.h.
+_ss0=$(bar0_read 0x82381c); _ss1=$(bar0_read 0x823820)
+if [[ "$_ss0" == "0x88888888" && "$_ss1" == "0x00000008" ]]; then
+    say "gen2-claim: cold-state ALREADY_MODIFIED ss0=$_ss0 ss1=$_ss1"
+elif [[ "$_ss0" == "0x88888888" || "$_ss1" == "0x00000008" ]]; then
+    say "gen2-claim: cold-state PARTIALLY_MODIFIED ss0=$_ss0 ss1=$_ss1 (half-unlocked tensor state — investigate; Gen2 claim unaffected)"
+else
+    say "gen2-claim: cold-state CLEAN"
+fi
 
 mkdir -p "$STATE"
 if insmod "$KO" targets="$BDF" resume=0 2>/tmp/cmp90hx-claim.insmod; then

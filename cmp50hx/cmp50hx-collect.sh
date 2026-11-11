@@ -65,7 +65,7 @@ if [ -f "$LOGSRC" ]; then
     PA=$(awk '/skipped: CONSOLE \(lowest-bus-assumption\)/{printf "%s:console-assumed;", $3}' "$CLEAN" | sed 's/card//')
     PREFLIGHT="${PREFLIGHT}${PA}"
     VERDICTS=$(grep -oE 'card [0-9]+ result: [A-Za-z ()-]+' "$CLEAN" | sed 's/result: //;s/ /_/g;s/_$//g' | paste -sd';' -)
-    [ -z "$VERDICTS" ] && VERDICTS=$(grep -oE '\*\*\* UNLOCKED|RESULT: PLM=0x[0-9a-f]+ SS0=0x[0-9a-f]+' "$CLEAN" | tail -2 | paste -sd';' - | tr ' ' '_')
+    [ -z "$VERDICTS" ] && VERDICTS=$(grep -oE '\*\*\* UNLOCKED|RESULT: PLM=0x[0-9a-f]+ SS0=0x[0-9a-f]+|cold-state: [A-Z_]+' "$CLEAN" | tail -2 | paste -sd';' - | tr ' ' '_')
     SS0=$(awk '/=== card/{c=$4} /RESULT:.*SS0=/{sub(/.*SS0=/,"",$0);sub(/[ ).].*/,"",$0);printf "%s:%s;", c, $0}' "$CLEAN")
 fi
 

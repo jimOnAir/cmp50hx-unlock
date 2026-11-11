@@ -1106,7 +1106,7 @@ enable_mem_decode(void)
     Print(L"cfg 0x04 (command) after = 0x%08x\n", cmd);
 }
 
-/* ==== Quick state snapshot + "already unlocked" check ==== */
+/* ==== Quick state snapshot + cold-state verdict ==== */
 static void
 dump_regs(const CHAR16 *Tag)
 {
@@ -1119,11 +1119,34 @@ dump_regs(const CHAR16 *Tag)
         mmio_read32(REG_PFB_MMU_WPR2_LO));
 }
 
+/* Cold-state verdict (row U3, GPU-Tensor-Unlock-Universal @1d6a508 port):
+ * SS0 and SS1 latch independently, so a crash mid-write can leave exactly
+ * one selector at the unlocked value — a half-modified FEAT page that
+ * previously read as plain stock and fell through to full injection on
+ * an unknown premise. PARTIALLY_MODIFIED refuses injection (chainload
+ * proceeds untouched; refusing can only cost the uplift, never the card).
+ * "Modified" here means reads-equal-unlocked: a stock card is CLEAN,
+ * matching the old behavior exactly. */
+#define COLD_CLEAN   0
+#define COLD_ALREADY 1
+#define COLD_PARTIAL 2
+static int
+cold_state_verdict(void)
+{
+    BOOLEAN s0 = (mmio_read32(REG_FEAT_OVR_SM_SPD) == VAL_SS0_UNLOCKED);
+    BOOLEAN s1 = (mmio_read32(REG_FEAT_OVR_SM_SPD_1) == VAL_SS1_UNLOCKED);
+
+    if (s0 && s1)
+        return COLD_ALREADY;
+    if (s0 != s1)
+        return COLD_PARTIAL;
+    return COLD_CLEAN;
+}
+
 static BOOLEAN
 is_unlocked(void)
 {
-    return (mmio_read32(REG_FEAT_OVR_SM_SPD) == VAL_SS0_UNLOCKED &&
-            mmio_read32(REG_FEAT_OVR_SM_SPD_1) == VAL_SS1_UNLOCKED);
+    return cold_state_verdict() == COLD_ALREADY;
 }
 
 /* ==== Read-only diagnostics dump (dev builds pause between sections) ====
@@ -4757,9 +4780,34 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     dump_regs(L"[v55 boot]");
 
     /* ---------- [4] 快捷path：unlock / 直写可粘 ---------- */
-    if (is_unlocked()) {
-        Print(L"[50HX] already unlocked (SS0/SS1 exact) — skip injection\n");
-        goto done;
+    {
+        int cs = cold_state_verdict();
+        if (cs == COLD_ALREADY) {
+            Print(L"[50HX] cold-state: ALREADY_MODIFIED (SS0/SS1 exact) — skip injection\n");
+            goto done;
+        }
+        if (cs == COLD_PARTIAL) {
+            Print(L"[50HX] cold-state: PARTIALLY_MODIFIED (SS0=0x%08x SS1=0x%08x) — refuse injection, chainload untouched\n",
+                mmio_read32(REG_FEAT_OVR_SM_SPD), mmio_read32(REG_FEAT_OVR_SM_SPD_1));
+            goto done;
+        }
+        Print(L"[50HX] cold-state: CLEAN — proceed to injection\n");
+    }
+    /* Chip-identity observation (row U4 audit, gtuu-mining/05): the TU102
+     * kflcnReset RM writes emit the corrected historical constant
+     * 0x162000A1, which the driver derives as its own PMC_BOOT_0 read
+     * (see the :2129 note — 40HX=0x166000A1, GA102 trace=0xb72000a1,
+     * a foundry-strap bits-31:29 variant differs likewise). A part whose
+     * live PMC_BOOT_0 differs from the written constant used to be
+     * invisible; now it warns. Switching the RM writes to the live value
+     * is deliberately NOT done here: unproven silicon acceptance, gated
+     * on a hardware ticket. */
+    {
+        UINT32 boot0 = mmio_read32(0x0u);
+        if (boot0 != 0x162000A1u && boot0 != 0u && boot0 != 0xFFFFFFFFu)
+            Print(L"[50HX] WARNING: PMC_BOOT_0=0x%08x != RM-write constant 0x162000A1 (strap variant — chain acceptance unproven)\n", boot0);
+        else
+            Print(L"[50HX] PMC_BOOT_0=0x%08x (matches RM constant)\n", boot0);
     }
     if (direct_write_probe()) {
         Print(L"[50HX] direct MMIO probe succeeded — skip booter\n");
