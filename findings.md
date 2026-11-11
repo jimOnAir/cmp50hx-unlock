@@ -1004,3 +1004,38 @@ judge shape is a policy knob (`--judge-margin`, `-pp/-tg`), not a hidden
 default. Busy-guard, apply/cleanup round-trip (config + drop-in + 170 W
 baseline all verified byte-restored), deb payload + smoke + lifecycle on
 `.25`: green.
+
+## gtuu-mining: read-only mining of the two consumer-lineage unlock repos — 13 tickets, three transferable classes (2026-11-11)
+
+Full static sweeps of MindAllik/GPU-Tensor-Unlock-Universal @ 1d6a508 (B1)
+and physicsdolphin/nv-uefi-unlocker @ bbcb92f (B2), both read-only (never
+executed, never imported). Shaped finding: claim-90hx and B1's kernel
+module are divergent forks of the same Zagitta 7eb51bcc mother — WE are
+ahead (PM-notifier resume re-unlock, 2-attempt retry, `stage=` protocol);
+B1 is ahead only in host-testability (X1/X3 simulation harnesses),
+pre-flight validation (U2/U5), and failure forensics (K15 RISC-V trace-PC —
+with the falcon2-window offset trap documented for free). Adopted rows →
+`.scratch/gtuu-mining/issues/` tickets 01-13 (tensor-MMA bench closing the
+lock-profile gap, cold-state verdicts, strap-tolerant chip-ID, aperture
+feature-detect, falcon forensics, config-space walker, live-PROM SHA gate,
+gpu_peek read-only triage ko, harnesses, blob-free generation); B2
+preliminary deltas (4 GiB staging boundary, booter 0x89/0x91 dictionary,
+S3/S5 resume-clearing audit) queued as 14-16 pending its re-sweep. B1
+public-citation caveats now codified in `.scratch/gtuu-mining/source-eval.md`
+(its provenance.json admits a non-public master with per-file deltas; CMP
+support rows are simulation-only; its packaging mirrors NVIDIA firmware via
+third-party distro archives). License rule: ports land as separate
+GPL-2.0-only files with provenance headers (B1/B2 are GPL-2.0-only; our
+kernel side already is). Evidence anchors spot-verified this session
+(falcon.c:21/:168, verify.c:43, claim PM notifier; B1 adapter 746 ln,
+no-FLR tail 1665, turing_experimental). llm2 guinea-pig baseline before any
+hardware work: rev 610.43.03-20261107.28, kernel 7.0.0-38, GPU0/GPU2 50HX +
+GPU1 90HX, all 5.0 GT/s, 170 W × 3 (host pointers in the session journal).
+
+URL-resolution sweep while rewriting CREDITS found a provenance event:
+our MIT-base upstream **PZH1gdmu/CMP40HX-Unlock is gone from GitHub** —
+author account 404s (deleted/renamed-away; the 301 → `GPU-Unlock` → 404
+chain proves the account, not just the repo). The vendored port +
+`efi-unlock/LICENSE-40HX-UNLOCK` are now the surviving record;
+same-named repos under other accounts are candidate mirrors, unverified.
+Every other CREDITS URL re-resolved 200 this session.
