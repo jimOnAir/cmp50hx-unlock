@@ -82,6 +82,8 @@ struct unlock_transaction_work {
 struct gu_boot_state {
 	u32 ctl, engine, reset_plm, mailbox0, mailbox1, acr, csberr, fhstate;
 	u32 wpr_lo, wpr_hi;
+	u32 tracepc_lo, tracepc_hi, riscv, rpc, priv_err, priv_info;
+	u32 priv_addr, priv_addr_hi, hub_err;
 	bool ok;
 };
 
@@ -224,6 +226,16 @@ static void gu_read_boot_state(struct unlock_transaction_work *work,
 	GU_BOOT_RD(fhstate, GU_SEC2_BASE + GU_FALCON_FHSTATE_OFFSET);
 	GU_BOOT_RD(wpr_lo, GU_WPR2_ADDR_LO_OFFSET);
 	GU_BOOT_RD(wpr_hi, GU_WPR2_ADDR_HI_OFFSET);
+	/* RISC-V debug block — window caveat documented at the offsets. */
+	GU_BOOT_RD(tracepc_lo, GU_SEC2_FALCON2_BASE + GU_FLCN2_RISCV_TRACEPC_LO_OFS);
+	GU_BOOT_RD(tracepc_hi, GU_SEC2_FALCON2_BASE + GU_FLCN2_RISCV_TRACEPC_HI_OFS);
+	GU_BOOT_RD(riscv, GU_SEC2_FALCON2_BASE + GU_FLCN2_RISCV_PRIV_ACCESS_OFS);
+	GU_BOOT_RD(rpc, GU_SEC2_FALCON2_BASE + GU_FLCN2_RISCV_RPC_OFS);
+	GU_BOOT_RD(priv_err, GU_SEC2_FALCON2_BASE + GU_FLCN2_RISCV_PRIV_ERR_OFS);
+	GU_BOOT_RD(priv_info, GU_SEC2_FALCON2_BASE + GU_FLCN2_RISCV_PRIV_INFO_OFS);
+	GU_BOOT_RD(priv_addr, GU_SEC2_FALCON2_BASE + GU_FLCN2_RISCV_PRIV_ADDR_OFS);
+	GU_BOOT_RD(priv_addr_hi, GU_SEC2_FALCON2_BASE + GU_FLCN2_RISCV_PRIV_ADDR_HI_OFS);
+	GU_BOOT_RD(hub_err, GU_SEC2_FALCON2_BASE + GU_FLCN2_RISCV_HUB_ERR_OFS);
 #undef GU_BOOT_RD
 }
 
@@ -276,6 +288,10 @@ static void gu_snapshot(struct unlock_transaction_work *work, const char *functi
 		"gpu_unlock: boot reset_plm=%#x ctl=%#x engine=%#x fhstate=%#x mbox=%#x:%#x acr=%#x csberr=%#x ok=%u\n",
 		b.reset_plm, b.ctl, b.engine, b.fhstate, b.mailbox1, b.mailbox0,
 		b.acr, b.csberr, b.ok);
+	dev_err(&work->pdev->dev,
+		"gpu_unlock: riscv tracepc=%#x:%#x priv_access=%#x rpc=%#x priv_err=%#x info=%#x addr=%#x:%#x hub_err=%#x\n",
+		b.tracepc_hi, b.tracepc_lo, b.riscv, b.rpc, b.priv_err,
+		b.priv_info, b.priv_addr_hi, b.priv_addr, b.hub_err);
 	dev_err(&work->pdev->dev,
 		"gpu_unlock: wpr2 lo=%#x hi=%#x start=%#llx end=%#llx frts=%#x:%#x saved=%u\n",
 		b.wpr_lo, b.wpr_hi, (unsigned long long)start,

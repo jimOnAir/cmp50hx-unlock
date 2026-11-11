@@ -47,6 +47,20 @@
 
 #define GU_FBIF_TRANSCFG(index)       (0x00000000u + (index) * 4u)
 #define GU_FBIF_CTL_OFFSET            0x00000024u
+/* RISC-V debug block (row K15, GTUU @1d6a508 port): lives in the FALCON2
+ * window — reading these at the plain SEC2 base returns PRI garbage and
+ * looks like dead hardware (the trap their comment documents; nouveau's
+ * ga102_flcn_riscv_active() reads 0x388 from the addr2 window likewise).
+ */
+#define GU_FLCN2_RISCV_PRIV_ACCESS_OFS        0x00000388u
+#define GU_FLCN2_RISCV_TRACEPC_LO_OFS         0x0000040cu
+#define GU_FLCN2_RISCV_TRACEPC_HI_OFS         0x00000410u
+#define GU_FLCN2_RISCV_RPC_OFS                0x000003ecu
+#define GU_FLCN2_RISCV_PRIV_ERR_OFS           0x00000500u
+#define GU_FLCN2_RISCV_PRIV_INFO_OFS          0x00000504u
+#define GU_FLCN2_RISCV_PRIV_ADDR_OFS          0x00000508u
+#define GU_FLCN2_RISCV_PRIV_ADDR_HI_OFS       0x0000050cu
+#define GU_FLCN2_RISCV_HUB_ERR_OFS            0x00000510u
 #define GU_FALCON2_MOD_SEL_OFFSET             0x00000180u
 #define GU_FALCON2_BROM_CURR_UCODE_ID_OFFSET  0x00000198u
 #define GU_FALCON2_BROM_ENGIDMASK_OFFSET       0x0000019cu
