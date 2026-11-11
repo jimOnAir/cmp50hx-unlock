@@ -4,7 +4,8 @@
 
 This repo builds and installs patched NVIDIA `610.43.03` open kernel modules
 for the CMP 50HX (TU102). This guide records each patch and its validation
-status.
+status. Vendored upstreams and the consulted-source ledger: [`CREDITS`](CREDITS)
+→ [`docs/cmp90hx/SOURCES.md`](docs/cmp90hx/SOURCES.md).
 
 ## One-click install
 

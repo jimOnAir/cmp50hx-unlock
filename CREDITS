@@ -1,3 +1,48 @@
+# CREDITS — third-party attribution
 
-Vendored CMP 90HX (GA102) driver patches from WildFlash1st/cmp90hx-unlock
-(GPL-2.0), commit 76940ae — see docs/cmp90hx/VENDORED.md.
+## Vendored code
+
+- [WildFlash1st/cmp90hx-unlock](https://github.com/WildFlash1st/cmp90hx-unlock)
+  (GPL-2.0), commit `76940ae` — CMP 90HX (GA102) driver patches;
+  see docs/cmp90hx/VENDORED.md.
+- [Zagitta/gpu-unlock](https://github.com/Zagitta/gpu-unlock) (GPL-2.0),
+  lineage from `7eb51bcc` — `claim-90hx/` is a divergent fork (T09 gate
+  table, retry, PM-notifier resume); provenance in claim-90hx/README.md.
+- [PZH1gdmu/CMP40HX-Unlock](https://github.com/PZH1gdmu/CMP40HX-Unlock)
+  v3.0.0 (MIT) — base of the `efi-unlock/` UEFI application; license at
+  efi-unlock/LICENSE-40HX-UNLOCK. Upstream gone as of 2026-11-11: the
+  author account no longer exists (301 → `GPU-Unlock` → 404); the local
+  MIT text and vendored port are the surviving record. Same-named
+  repos under other accounts exist as candidate mirrors
+  (e.g. `a1092595196/CMP40HX-Unlock`) — **not verified** to be faithful,
+  do not cite as upstream.
+
+## Consulted sources
+
+The canonical link ledger — one URL per bullet, role and pinned revision
+where recorded — is [docs/cmp90hx/SOURCES.md](docs/cmp90hx/SOURCES.md).
+It includes the read-only consult entries for
+[MindAllik/GPU-Tensor-Unlock-Universal](https://github.com/MindAllik/GPU-Tensor-Unlock-Universal)
+(evaluated at `1d6a508`, corpus pin `ab7bfc0`) and
+[physicsdolphin/nv-uefi-unlocker](https://github.com/physicsdolphin/nv-uefi-unlocker)
+(evaluated at `bbcb92f`, corpus pin `36b4089`) — both GPL-2.0, neither
+ever executed here; evaluation tables and public-citation caveats live in
+the ticket journals under `.scratch/` (`.scratch/gtuu-mining/source-eval.md`).
+
+Research lineage:
+
+- Jon Pry, "A Canary in the Crypto Mine" —
+  https://doi.org/10.5281/zenodo.20916112 — the V67 SEC2 Booter
+  disclosure the whole field (this repo included) stands on.
+
+Tooling used in measurement and packaging (not vendored):
+
+- https://github.com/NVIDIA/open-gpu-kernel-modules — patched base,
+  pinned `610.43.03` (hash-verified in `cache/`, see driver-pin.env)
+- https://github.com/ProjectPhysX/OpenCL-Benchmark — 2026-09-10 A/B matrix
+- https://github.com/ilya-zlobintsev/LACT — KMS/console-side validation
+- https://github.com/ncroxon/gnu-efi — EFI build toolchain (apt `gnu-efi`)
+- https://github.com/notfromstatefarm/nvflashk — studied SPI tooling
+  (this repo never flashes VBIOS)
+- https://github.com/dartraiden/NVIDIA-patcher,
+  https://github.com/bmgjet/Ampere-Bios-Editor — surveyed, unused
