@@ -1149,6 +1149,159 @@ is_unlocked(void)
     return cold_state_verdict() == COLD_ALREADY;
 }
 
+/* ==== Pre-flight config-space validation (row U2, GPU-Tensor-Unlock-
+ * Universal @1d6a508 checks.c port; runs after BAR0/MEM-enable, before the
+ * first unlock write). Reads a 256-byte config snapshot and proves the
+ * capability chain is sane: dword-aligned in-range offsets, loop-free,
+ * no overlaps, no unknown IDs, singletons single, PM in D0, PCIe v1/v2
+ * present with FLReset+ (DEVCAP bit28) and no reserved garbage, option
+ * ROM disabled. A layout we cannot check is a layout we must not write
+ * into. Deviation from the source: it rejects MSI with the 64-bit-address
+ * bit set (ctrl bit0) while its own length math adds the 64-bit extra
+ * bytes — self-contradictory, and GPUs commonly advertise it; accepting
+ * both here so a real card is never silently skipped, which is the class
+ * of bug this whole ticket exists to kill. ==== */
+#define PF_CFG_DWORDS 64
+static UINT8 cfg8_at(const UINT32 *cfg, UINTN off)
+{
+    return (UINT8)((cfg[off >> 2] >> ((off & 3U) << 3)) & 0xffU);
+}
+static UINT16 cfg16_at(const UINT32 *cfg, UINTN off)
+{
+    return (UINT16)((cfg[off >> 2] >> ((off & 2U) << 3)) & 0xffffU);
+}
+
+static BOOLEAN
+u40x_preflight_config(void)
+{
+    UINT32 cfg[PF_CFG_DWORDS];
+    UINT8 occupied[256 - 0x40];
+    UINT64 seen_bits = 0;
+    const CHAR16 *why = NULL;
+    UINTN i, pointer, steps = 0;
+    UINT16 caps_pm = 0, caps_pcie = 0;
+    BOOLEAN rom_off, mem_en, has_caps;
+
+    for (i = 0; i < PF_CFG_DWORDS; i++)
+        cfg[i] = cfg_read32(i * 4);
+    for (i = 0; i < sizeof(occupied); i++)
+        occupied[i] = 0;
+
+    has_caps = (cfg16_at(cfg, 0x06) & 0x0010U) != 0;   /* STATUS cap-list */
+    mem_en   = (cfg16_at(cfg, 0x04) & 0x0002U) != 0;   /* COMMAND memory */
+    rom_off  = (cfg[0x30 / 4] & 1U) == 0;              /* ROM BAR decode */
+    if (!mem_en)
+        why = L"MEM space not enabled";
+    else if (!rom_off)
+        why = L"option ROM decode enabled";
+    else if (!has_caps)
+        why = L"no capability list";
+    if (why) {
+        Print(L"[50HX] PREFLIGHT reject: %s\n", why);
+        return FALSE;
+    }
+
+    pointer = cfg8_at(cfg, 0x34);
+    while (pointer != 0) {
+        UINT8 id = cfg8_at(cfg, pointer);
+        UINT8 next = cfg8_at(cfg, pointer + 1);
+        UINT16 ctrl = cfg16_at(cfg, pointer + 2);
+        UINTN length = 0;
+
+        if (++steps > 40 || pointer < 0x40 || pointer > 0xf8 || (pointer & 3U) != 0) {
+            Print(L"[50HX] PREFLIGHT reject: cap ptr 0x%x step %u\n", pointer, (UINT32)steps);
+            return FALSE;
+        }
+        if (seen_bits & ((UINT64)1 << (pointer >> 2))) {
+            Print(L"[50HX] PREFLIGHT reject: cap cycle at 0x%x\n", pointer);
+            return FALSE;
+        }
+        seen_bits |= (UINT64)1 << (pointer >> 2);
+
+        switch (id) {
+        case 0x01: /* PM: version 1..3, singleton, fixed 8 bytes, must be D0 */
+            if (caps_pm != 0 || (ctrl & 7U) == 0 || (ctrl & 7U) > 3 ||
+                (cfg16_at(cfg, pointer + 4) & 3U) != 0 /* PowerState != D0 */)
+                length = 0;
+            else
+                length = 8;
+            break;
+        case 0x03: /* VPD */
+        case 0x0D: /* Subsystem ID */
+            length = 8;
+            break;
+        case 0x08: /* AGP */
+            length = 6;
+            break;
+        case 0x05: /* MSI */
+            length = (ctrl & 0x80U) ? 14 : 10;   /* per-vector mask */
+            if (ctrl & 0x01U)
+                length += 10;                    /* 64-bit address (see deviation note) */
+            if (ctrl & 0x80U)
+                length += 8;                     /* pending bits */
+            break;
+        case 0x10: /* PCIe */
+            if (caps_pcie != 0 || (ctrl & 0x0fU) < 1 || (ctrl & 0x0fU) > 2 ||
+                ((ctrl >> 4) & 0x0fU) > 1 ||
+                (cfg[pointer / 4 + 1] & (1U << 28)) == 0 ||
+                (cfg16_at(cfg, pointer + 8) & 0x8000U) != 0) {
+                length = 0;
+                break;
+            }
+            if ((ctrl & 0x0fU) == 1)
+                length = 0x14;
+            else if (next > pointer && next < pointer + 0x3c && next >= pointer + 0x2c)
+                length = next - pointer;         /* compact AIB v2 layout */
+            else
+                length = 0x3c;
+            break;
+        case 0x11: /* MSI-X: function-masked layout refused */
+            length = (ctrl & 0x8000U) ? 0 : 12;
+            break;
+        case 0x09: /* Vendor — length is explicit */
+            length = ctrl & 0xffU;
+            if (length < 3)
+                length = 0;
+            break;
+        default:
+            length = 0;
+            Print(L"[50HX] PREFLIGHT reject: unknown cap id 0x%x @0x%x\n", id, pointer);
+            return FALSE;
+        }
+        if (length == 0) {
+            Print(L"[50HX] PREFLIGHT reject: bad layout for cap id 0x%x @0x%x ctrl=0x%x\n",
+                  id, pointer, ctrl);
+            return FALSE;
+        }
+        if (length > 256 - pointer) {
+            Print(L"[50HX] PREFLIGHT reject: cap 0x%x len %u overruns cfg\n",
+                  pointer, (UINT32)length);
+            return FALSE;
+        }
+        for (i = pointer; i < pointer + length; i++) {
+            if (occupied[i - 0x40]) {
+                Print(L"[50HX] PREFLIGHT reject: overlap at 0x%x (cap 0x%x)\n",
+                      i, pointer);
+                return FALSE;
+            }
+            occupied[i - 0x40] = 1;
+        }
+        if (id == 0x01)
+            caps_pm = (UINT16)pointer;
+        if (id == 0x10)
+            caps_pcie = (UINT16)pointer;
+        pointer = next;
+    }
+    if (caps_pm == 0 || caps_pcie == 0) {
+        Print(L"[50HX] PREFLIGHT reject: pm=0x%x pcie=0x%x required\n",
+              caps_pm, caps_pcie);
+        return FALSE;
+    }
+    Print(L"[50HX] PREFLIGHT ok: pm=0x%x pcie=0x%x steps=%u\n",
+          caps_pm, caps_pcie, (UINT32)steps);
+    return TRUE;
+}
+
 /* ==== Read-only diagnostics dump (dev builds pause between sections) ====
  * Never touches file protocols here (they hang some AMI firmwares);
  * RELEASE_BUILD/EFI_AUTOTEST compile out the key waits:
@@ -4760,6 +4913,11 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     if (u40x_enable_bar()) {
         Print(L"[50HX] BAR enable failed; abort\n");
         return returnToGrub ? EFI_SUCCESS : EFI_DEVICE_ERROR;
+    }
+    /* ---------- [2b] pre-flight config validation (row U2) ---------- */
+    if (!u40x_preflight_config()) {
+        Print(L"[50HX] PREFLIGHT config-space validation FAILED — refuse unlock, chainload untouched\n");
+        goto done;
     }
     /* Detect the card SKU from the WPR2 the VBIOS POST latched (10 GiB vs 20 GiB).
      * Must happen before any code path that consumes g_fbSize / g_frtsOffset
