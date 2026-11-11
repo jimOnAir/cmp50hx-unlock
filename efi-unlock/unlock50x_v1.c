@@ -323,6 +323,7 @@ u40x_entry(EFI_HANDLE ImageHandle_, EFI_SYSTEM_TABLE *SystemTable_)
  * header, safe for -ffreestanding. Values verified against
  * open-gpu-kernel-modules GA102 regmaps. */
 #include "../common/cmp50hx_regs.h"
+#include "sha256.h"
 #define REG_FEAT_OVR_PLM       CMP50_REG_FEAT_OVR_PLM   /* 0xffffffff = open */
 #define REG_FEAT_OVR_SM_SPD    CMP50_REG_FEAT_SS0       /* 0x88888888 = full */
 #define REG_FEAT_OVR_SM_SPD_1  CMP50_REG_FEAT_SS1       /* 0x00000008 = full */
@@ -1300,6 +1301,220 @@ u40x_preflight_config(void)
     Print(L"[50HX] PREFLIGHT ok: pm=0x%x pcie=0x%x steps=%u\n",
           caps_pm, caps_pcie, (UINT32)steps);
     return TRUE;
+}
+
+/* ==== Asset self-attestation + live-PROM gate (rows U5+U6,
+ * GPU-Tensor-Unlock-Universal @1d6a508 port; gtuu-mining ticket 09).
+ * (1) The binary hashes every firmware blob it embeds and compares each
+ * digest against a manifest built from the same blobs at compile time:
+ * a corrupted or stale EFI refuses its own transaction. (2) The PROM
+ * gate hashes the LIVE card's ROM window (NV_PROM_DATA, BAR0+0x300000):
+ * with 50hx_prom_pin.sha256 on the ESP the digest must match (mismatch =
+ * dump the PROM to 50hx_prom_fail.bin, refuse unlock, chainload
+ * untouched — a reflashed VBIOS card fails as a named cause, not an
+ * opaque Booter halt); without the pin the digest is logged OBSERVE-only
+ * so the fleet gets attestation evidence before enforcement. The
+ * digest-latch re-check before Bus Master (U5's full chain) is the
+ * follow-up hunk recorded in the ticket. ==== */
+extern const UINT8 v67_payload_bin_end[];
+extern const UINT8 booter_ucode_dbg_end[];
+extern const UINT8 booter_ucode_prod_end[];
+extern const UINT8 gsp_rm_boot_dbg_end[];
+extern const UINT8 fwsec_50hx_prod_bin_end[];
+extern const UINT8 fwsec_50hx_dbg_bin_end[];
+extern const UINT8 sec2_ucode_vbios_49_end[];
+extern const UINT8 sec2_ucode_vbios_89_end[];
+extern const UINT8 gsp_bl_tu102_end[];
+extern const UINT8 assets_sha256_bin[];
+extern const UINT8 assets_sha256_bin_end[];
+
+struct u40x_asset {
+    const char *file;
+    const CHAR16 *label;
+    const UINT8 *data;
+    const UINT8 *end;
+};
+static struct u40x_asset u40x_assets[] = {
+    { "v67_payload.bin",         L"v67_payload",  v67_payload_bin,     v67_payload_bin_end },
+    { "booter_ucode_prod.bin",   L"booter_prod",  booter_ucode_prod,   booter_ucode_prod_end },
+    { "booter_ucode_dbg.bin",    L"booter_dbg",   booter_ucode_dbg,    booter_ucode_dbg_end },
+    { "gsp_rm_boot_dbg.bin",     L"gsp_rm_boot",  gsp_rm_boot_dbg,     gsp_rm_boot_dbg_end },
+    { "fwsec_50hx_prod.bin",     L"fwsec_prod",   fwsec_50hx_prod_bin, fwsec_50hx_prod_bin_end },
+    { "fwsec_50hx_dbg.bin",      L"fwsec_dbg",    fwsec_50hx_dbg_bin,  fwsec_50hx_dbg_bin_end },
+    { "sec2_ucode_vbios_49.bin", L"sec2_vb49",    sec2_ucode_vbios_49, sec2_ucode_vbios_49_end },
+    { "sec2_ucode_vbios_89.bin", L"sec2_vb89",    sec2_ucode_vbios_89, sec2_ucode_vbios_89_end },
+    { "bl_gsp_tu102.bin",        L"gsp_bl",       gsp_bl_tu102,        gsp_bl_tu102_end },
+};
+
+static BOOLEAN u40x_manifest_lookup(const char *file, char *hex64)
+{
+    const char *m = (const char *)assets_sha256_bin;
+    UINTN n = (UINTN)(assets_sha256_bin_end - assets_sha256_bin);
+    UINTN fl = 0, i, j;
+
+    while (file[fl])
+        fl++;
+    for (i = 0; i + 64 + 2 + fl <= n; i++) {
+        if (i != 0 && m[i - 1] != '\n')
+            continue;
+        for (j = 0; j < fl; j++)
+            if (m[i + 64 + 2 + j] != file[j])
+                break;
+        if (j == fl) {
+            for (j = 0; j < 64; j++)
+                hex64[j] = m[i + j];
+            hex64[64] = '\0';
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static BOOLEAN u40x_attest_assets(void)
+{
+    UINTN i;
+
+    for (i = 0; i < sizeof(u40x_assets) / sizeof(u40x_assets[0]); i++) {
+        char hex[65];
+
+        if (!u40x_manifest_lookup(u40x_assets[i].file, hex)) {
+            Print(L"[50HX] ATTEST %s: no manifest entry — REFUSE\n", u40x_assets[i].label);
+            return FALSE;
+        }
+        if (!GuHashMatches(u40x_assets[i].data,
+                           (UINTN)(u40x_assets[i].end - u40x_assets[i].data), hex)) {
+            Print(L"[50HX] ATTEST %s: DIGEST MISMATCH — REFUSE\n", u40x_assets[i].label);
+            return FALSE;
+        }
+    }
+    Print(L"[50HX] ATTEST ok: %d embedded assets match manifest\n", 9);
+    return TRUE;
+}
+
+/* ESP read/write on the proven LoadedImage->DeviceHandle->FS pattern. */
+static EFI_STATUS u40x_esp_open(EFI_HANDLE IH, EFI_FILE_PROTOCOL **root)
+{
+    EFI_LOADED_IMAGE_PROTOCOL *li = NULL;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = NULL;
+
+    if (!BS || !IH)
+        return EFI_UNSUPPORTED;
+    if (uefi_call_wrapper(BS->HandleProtocol, 3, IH, &u40x_li_guid, (void **)&li))
+        return EFI_NOT_FOUND;
+    if (!li || !li->DeviceHandle)
+        return EFI_NOT_FOUND;
+    if (uefi_call_wrapper(BS->HandleProtocol, 3, li->DeviceHandle, &u40x_fs_guid, (void **)&fs) || !fs)
+        return EFI_NOT_FOUND;
+    if (uefi_call_wrapper(fs->OpenVolume, 2, fs, root) || !*root)
+        return EFI_NOT_FOUND;
+    return EFI_SUCCESS;
+}
+
+static BOOLEAN u40x_esp_read(EFI_HANDLE IH, CHAR16 *name, VOID *buf, UINTN cap, UINTN *out)
+{
+    EFI_FILE_PROTOCOL *root = NULL, *f = NULL;
+    UINTN sz = cap;
+
+    if (EFI_ERROR(u40x_esp_open(IH, &root)))
+        return FALSE;
+    if (uefi_call_wrapper(root->Open, 5, root, &f, name, EFI_FILE_MODE_READ, 0) || !f) {
+        uefi_call_wrapper(root->Close, 1, root);
+        return FALSE;
+    }
+    if (uefi_call_wrapper(f->Read, 3, f, &sz, buf)) {
+        uefi_call_wrapper(f->Close, 1, f);
+        uefi_call_wrapper(root->Close, 1, root);
+        return FALSE;
+    }
+    uefi_call_wrapper(f->Close, 1, f);
+    uefi_call_wrapper(root->Close, 1, root);
+    *out = sz;
+    return TRUE;
+}
+
+static BOOLEAN u40x_esp_write(EFI_HANDLE IH, CHAR16 *name, const VOID *data, UINTN len)
+{
+    EFI_FILE_PROTOCOL *root = NULL, *f = NULL;
+
+    if (EFI_ERROR(u40x_esp_open(IH, &root)))
+        return FALSE;
+    if (uefi_call_wrapper(root->Open, 5, root, &f, name,
+                          EFI_FILE_MODE_CREATE | EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE, 0) || !f) {
+        uefi_call_wrapper(root->Close, 1, root);
+        return FALSE;
+    }
+    uefi_call_wrapper(f->SetPosition, 2, f, 0ULL);
+    uefi_call_wrapper(f->Write, 3, f, &len, (VOID *)data);
+    uefi_call_wrapper(f->Flush, 1, f);
+    uefi_call_wrapper(f->Close, 1, f);
+    uefi_call_wrapper(root->Close, 1, root);
+    return TRUE;
+}
+
+#define U40X_PROM_WINDOW     0x300000u   /* NV_PROM_DATA, BAR0-relative */
+#define U40X_PROM_OBSERVE    0x40000u
+#define U40X_PROM_MAX        0x100000u
+static BOOLEAN u40x_prom_gate(EFI_HANDLE IH)
+{
+    char pinc[96];
+    UINTN pinlen = 0, i, bytes = U40X_PROM_OBSERVE;
+    BOOLEAN enforce;
+    UINT8 *buf = NULL;
+    UINT8 dig[32];
+    CHAR16 hexw[65];
+    static const CHAR16 hx[] = L"0123456789abcdef";
+
+    enforce = u40x_esp_read(IH, L"50hx_prom_pin.sha256", (VOID *)pinc, sizeof(pinc) - 1, &pinlen)
+              && pinlen >= 64;
+    if (enforce) {
+        /* optional second field: decimal byte length, else the OBSERVE default */
+        UINTN v = 0, seen = 0;
+        for (i = 64; i < pinlen; i++)
+            if (pinc[i] >= '0' && pinc[i] <= '9') { v = v * 10 + (UINTN)(pinc[i] - '0'); seen = 1; }
+        if (seen && v > 0 && v <= U40X_PROM_MAX)
+            bytes = v;
+    }
+    if (uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, bytes, (VOID **)&buf) != EFI_SUCCESS || !buf) {
+        Print(L"[50HX] PROM gate: alloc %u failed — skip gate (attest-only boot)\n", bytes);
+        return TRUE;
+    }
+    for (i = 0; i < bytes / 4; i++)
+        ((volatile UINT32 *)buf)[i] = mmio_read32(U40X_PROM_WINDOW + i * 4);
+    GuSha256(buf, bytes, dig);
+    for (i = 0; i < 32; i++) {
+        hexw[2 * i] = hx[dig[i] >> 4];
+        hexw[2 * i + 1] = hx[dig[i] & 0xF];
+    }
+    hexw[64] = 0;
+    if (!enforce) {
+        Print(L"[50HX] PROM gate OBSERVE: sha256=%s bytes=0x%x\n", hexw, bytes);
+        uefi_call_wrapper(BS->FreePool, 1, buf);
+        return TRUE;
+    }
+    {
+        BOOLEAN match = TRUE;
+        CHAR16 pinw[65];
+        for (i = 0; i < 64; i++) {
+            char p = pinc[i];
+            if (p >= 'A' && p <= 'F') p = (char)(p - 'A' + 'a');
+            pinw[i] = (CHAR16)p;
+            if (hexw[i] != (CHAR16)p)
+                match = FALSE;
+        }
+        pinw[64] = 0;
+        if (match) {
+            Print(L"[50HX] PROM gate ENFORCE ok: sha256=%s bytes=0x%x\n", hexw, bytes);
+            uefi_call_wrapper(BS->FreePool, 1, buf);
+            return TRUE;
+        }
+        Print(L"[50HX] PROM gate ENFORCE MISMATCH: live=%s pin=%s — REFUSE unlock\n", hexw, pinw);
+        if (u40x_esp_write(IH, L"50hx_prom_fail.bin", buf, bytes))
+            Print(L"[50HX] PROM gate: live ROM dumped to 50hx_prom_fail.bin (%u B)\n", bytes);
+        else
+            Print(L"[50HX] PROM gate: PROM dump FAILED (ESP write)\n");
+        uefi_call_wrapper(BS->FreePool, 1, buf);
+        return FALSE;
+    }
 }
 
 /* ==== Read-only diagnostics dump (dev builds pause between sections) ====
@@ -4917,6 +5132,15 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     /* ---------- [2b] pre-flight config validation (row U2) ---------- */
     if (!u40x_preflight_config()) {
         Print(L"[50HX] PREFLIGHT config-space validation FAILED — refuse unlock, chainload untouched\n");
+        goto done;
+    }
+    /* ---------- [2c] self-attestation + live-PROM gate (rows U5+U6) ---------- */
+    if (!u40x_attest_assets()) {
+        Print(L"[50HX] ASSET ATTESTATION FAILED — this EFI is corrupt or stale; refuse unlock, chainload untouched\n");
+        goto done;
+    }
+    if (!u40x_prom_gate(ImageHandle)) {
+        Print(L"[50HX] PROM GATE REFUSED — VBIOS differs from pin; unlock skipped, chainload untouched\n");
         goto done;
     }
     /* Detect the card SKU from the WPR2 the VBIOS POST latched (10 GiB vs 20 GiB).

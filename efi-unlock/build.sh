@@ -34,6 +34,20 @@ gcc -c -O2 -fno-stack-protector -fpic -ffreestanding \
     ${EXTRA_CFLAGS:-} \
     -o "$OBJ" "$SRC"
 
+echo "=== 1b. compile sha256.c ==="
+gcc -c -O2 -fno-stack-protector -fpic -ffreestanding \
+    -fno-asynchronous-unwind-tables -fno-unwind-tables \
+    -fshort-wchar -mno-red-zone -maccumulate-outgoing-args \
+    -fno-builtin -fno-strict-aliasing -Wno-unused-function \
+    -I "$EFI_INC" -I "$EFI_INC/x86_64" \
+    -DGNU_EFI_USE_MS_ABI \
+    -o sha256.o sha256.c
+
+echo "=== 1c. asset manifest (attested by the app at boot; row U6) ==="
+( cd blobs && sha256sum v67_payload.bin booter_ucode_prod.bin booter_ucode_dbg.bin \
+    gsp_rm_boot_dbg.bin fwsec_50hx_prod.bin fwsec_50hx_dbg.bin \
+    sec2_ucode_vbios_49.bin sec2_ucode_vbios_89.bin bl_gsp_tu102.bin > assets.sha256 )
+
 echo "=== 2. embed blobs ==="
 # Debian/Ubuntu gnu-efi archives hold ELF objects, so the whole link is ELF
 # (crt0 + elf_x86_64_efi.lds) and the blob objects must be ELF too.
@@ -58,6 +72,7 @@ embed() {
   echo "  embedded $f -> ${tgt}"
 }
 embed v67_payload.bin         v67_payload_bin
+embed assets.sha256           assets_sha256_bin
 embed booter_ucode_dbg.bin    booter_ucode_dbg
 embed booter_ucode_prod.bin   booter_ucode_prod
 embed gsp_rm_boot_dbg.bin     gsp_rm_boot_dbg
@@ -67,7 +82,7 @@ embed sec2_ucode_vbios_49.bin sec2_ucode_vbios_49
 embed sec2_ucode_vbios_89.bin sec2_ucode_vbios_89
 embed bl_gsp_tu102.bin        gsp_bl_tu102
 
-OBJS="$OBJ v67_payload_bin.o booter_ucode_dbg.o booter_ucode_prod.o \
+OBJS="$OBJ sha256.o v67_payload_bin.o assets_sha256_bin.o booter_ucode_dbg.o booter_ucode_prod.o \
 gsp_rm_boot_dbg.o fwsec_50hx_prod_bin.o fwsec_50hx_dbg_bin.o \
 sec2_ucode_vbios_49.o sec2_ucode_vbios_89.o gsp_bl_tu102.o"
 

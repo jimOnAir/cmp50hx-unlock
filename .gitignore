@@ -14,3 +14,4 @@ efi-unlock/50HXUNLK.EFI.sha256
 dist-llm2/
 native/cmp50hx
 __pycache__/
+efi-unlock/blobs/assets.sha256
