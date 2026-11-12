@@ -1246,6 +1246,191 @@ is_unlocked(void)
     return cold_state_verdict() == COLD_ALREADY;
 }
 
+/* ==== Reset-scratch canary (row B2-P3, gtuu-mining ticket 16) ====
+ * Fleet mystery answered from logs: unlock green one boot, locked the
+ * next — WHO wiped it? Mechanism ported READ-ONLY from nv-uefi-unlocker
+ * @bbcb92f: loader/src/tx.rs:84-132 (canary_arm/canary_verdict),
+ * docs/diag-2.1.11-diag1-protocol.md §3 (the judgment table),
+ * tools/diag-unlock.py:98-117. Arm a magic word in the PBUS
+ * software-scratch block after our transaction succeeds (each actor
+ * arms exactly ONE of the two cells per the slot convention below);
+ * next boot reads them BEFORE anything else touches hardware. The
+ * BUS-domain scratch dies to FLR/SBR/rail-off alike, so its death
+ * witnesses "a reset happened"; the AON island (where the SS overrides
+ * live) resets ONLY on power loss — "AON is reset only by power loss;
+ * no other reset source can reach it" (their docs/faq.en.md relock
+ * section) — so the SS pair splits WHICH reset:
+ *
+ *   PBUS dead + SS dead   => rail-off / S5 full power removal wiped the
+ *                            volatile unlock — EXPECTED, logged as such
+ *                            (their `cleared` + FEAT-gone row).
+ *   PBUS dead + SS alive  => an FLR/SBR-class reset between boots that
+ *                            the AON island survived — NOT a power
+ *                            cycle; noteworthy on our fleet where the
+ *                            unlock is meant to stick across warm boots.
+ *   PBUS alive + SS gone  => no reset between boots — something
+ *                            RE-WROTE the speed-selectors while scratch
+ *                            survived: driver-init relock or a manual
+ *                            write (their `intact` + FEAT-gone row,
+ *                            "write-type, not a power event"). Cross-
+ *                            check: SS0/SS1 values in the line, the
+ *                            ticket-04 half-latch class (one selector
+ *                            at unlocked value -> AON=partial), and
+ *                            the B2-P33 relock taxonomy (source-eval
+ *                            row P33): a relocked gate (PLM 0xffffffef/
+ *                            0xffffff8f) with INTACT SS = still
+ *                            unlocked — never call PLM != open alone a
+ *                            loss. The gate is printed for corroboration
+ *                            only and NEVER enters the classification.
+ *                            On TU102 this cell is the anomaly worth
+ *                            shouting about: their ssdiag note records
+ *                            Turing SS overrides persisting across
+ *                            driver load (devinit re-derivation behaves
+ *                            differently than GA10x) — a relock-suspect
+ *                            here names a writer we do not expect.
+ *   PBUS alive + SS alive => no reset, nothing rewrote the state —
+ *                            nothing happened between boots (row 1).
+ *
+ * Offsets/magics ADOPTED from B2 verbatim for cross-project
+ * debuggability: NV_PBUS_SW_SCRATCH(i) = 0x1400 + i*4, indices
+ * 0x20/0x21 = 0x1480/0x1484, magics 0x0164c0de/0x0165cafe (their
+ * issues #164/#165 numbers). Formula verified against the open-gpu-
+ * kernel-modules 580.x headers vendored at
+ * work/upstream/bendy2-cmp90hx/.../swref/published/{turing/tu102,
+ * ampere/ga100}/dev_bus.h (all 64 indices RW-4A, __SIZE_1 64,
+ * INIT 0x00000000). Write-audit (2026-11-12): zero references to
+ * 0x1480/0x1484 anywhere in efi-unlock/, claim-90hx/, native/,
+ * patches/; in that kernel tree no in-tree writer of ANY SW_SCRATCH
+ * index exists (the gpuWritePBusScratch hal is defined, uncalled;
+ * kmigmgr_ga100.c reads index 1), the legacy drain scratch is index
+ * 0x1E (their tx.rs:37-43 note), and our repo's only scratch reader
+ * is index 0x0E = 0x1438 (FWSEC gate read + claim ko ACR-scratch
+ * reads, all read-only). Indices 0x20/0x21 are clean.
+ *
+ * AON-side register — DOCUMENTED LIMITATION (ticket 16 instruction:
+ * take the offset from their doc, never guess a hardware offset):
+ * B2's protocol doc §3 names NO separate AON scratch — their design
+ * pairs the PBUS canary with the FEAT/override values themselves
+ * ("Read with the FEAT values", diag-unlock.py:95-97), and the open
+ * headers expose no general-purpose writable AON scratch either
+ * (0x1183a4 PGC6 AON_SECURE_SCRATCH_GROUP_42 is a framebuffer-size
+ * report register, not a scratch cell). So the AON column below is
+ * DERIVED FROM THE SS PAIR: this is a PBUS-scratch canary with the
+ * FEAT values as the AON witness — exactly the reference design. The
+ * limitation it cannot cross: an SS value rewritten to the same
+ * pattern a reset produces is told apart only via the canary's
+ * cleared-vs-intact state, which is precisely what the pairing is
+ * for; a dedicated AON scratch would add no further split under the
+ * physical model (AON dies only on rail-off, and rail-off always
+ * also clears the BUS domain).
+ *
+ * Slot convention (COUPLED with claim-90hx/cmp90hx-claim.sh, which
+ * documents the same split): EFI owns index 0x20 (0x1480, magic
+ * 0x0164c0de), the 90HX claim script owns index 0x21 (0x1484, magic
+ * 0x0165cafe) — each actor owns ONE slot and never writes the
+ * other's, so neither can overwrite the other's evidence; each slot
+ * dates the gap since ITS OWN last arm. A classification site takes
+ * the verdict from its own slot (primary witness) and prints the
+ * other slot's raw value for corroboration: on cards with only one
+ * of the two actors (50HX: EFI-only; 90HX: claim-only) the foreign
+ * slot reads 0 forever, and a zero cannot distinguish "cleared by
+ * reset" from "never armed on this card" — the verdict is named for
+ * the reset reading (their doctrine: cleared says a reset happened,
+ * not who did it) and collect's CSV leaves the column empty for
+ * pre-feature boots.
+ * ARM ONLY ON SUCCESS (refusal paths must not overwrite evidence) and
+ * NEVER on the ALREADY_MODIFIED entry (ticket 04 skip: we did nothing
+ * this boot, so we do not re-date the witness; the early [2a] read
+ * still classifies — the canary describes the inter-boot event, not
+ * this boot's work). Gated offline by tools/reset-canary-selftest.sh.
+ */
+#define CANARY_REG_EFI      0x00001480UL  /* NV_PBUS_SW_SCRATCH(0x20) — EFI slot */
+#define CANARY_REG_CLAIM    0x00001484UL  /* NV_PBUS_SW_SCRATCH(0x21) — claim slot */
+#define CANARY_MAGIC_EFI    0x0164C0DEu   /* B2 CANARY_MAGIC_A (issue #164) */
+#define CANARY_MAGIC_CLAIM  0x0165CAFEu   /* B2 CANARY_MAGIC_B (issue #165) */
+
+static BOOLEAN
+u40x_canary_poison(UINT32 v)
+{
+    /* B2's inaccessible() (tx.rs:80-82): all-ones = no decode,
+     * 0xBADF**** = gated power domain. Both mean "this read says
+     * nothing", never "the canary died". */
+    return v == 0xFFFFFFFFu || (v & 0xFFFF0000u) == 0xBADF0000u;
+}
+
+static const CHAR16 *
+u40x_canary_slot_state(UINT32 v, UINT32 magic)
+{
+    if (u40x_canary_poison(v)) return L"unreadable";
+    if (v == magic)            return L"intact";
+    if (v == 0u)               return L"cleared";
+    return L"rewritten";    /* a third value: a devinit/BIOS pass ran
+                             * over the cell (their `other` row) */
+}
+
+static const CHAR16 *
+u40x_canary_aon_state(UINT32 ss0, UINT32 ss1)
+{
+    BOOLEAN a = (ss0 == VAL_SS0_UNLOCKED);
+    BOOLEAN b = (ss1 == VAL_SS1_UNLOCKED);
+    if (a && b)  return L"alive";
+    if (a != b)  return L"partial";   /* ticket-04 half-latch class */
+    return L"dead";
+}
+
+/* Pure verdict core: (primary slot, its magic, SS pair) -> verdict.
+ * No register reads inside, so the harness can drive the whole
+ * matrix. The gate (PLM) is deliberately NOT an input — B2-P33:
+ * relocked gate + intact SS = still unlocked. */
+static const CHAR16 *
+u40x_canary_verdict(UINT32 slot_v, UINT32 magic, UINT32 ss0, UINT32 ss1)
+{
+    BOOLEAN ss_alive = (ss0 == VAL_SS0_UNLOCKED) && (ss1 == VAL_SS1_UNLOCKED);
+
+    if (u40x_canary_poison(slot_v))     return L"unreadable";     /* not judged */
+    if (slot_v == magic)                return ss_alive ? L"no-event"
+                                                        : L"relock-suspect";
+    if (slot_v == 0u)                   return ss_alive ? L"flr-sbr"
+                                                        : L"power-cycle";
+    return L"rewritten";
+}
+
+/* Read-only classification line (never arms). Print goes to the ESP
+ * log through the u40x_print wrapper, so the verdict is fleet-visible.
+ * The verdict takes the EFI slot (our witness since our last arm);
+ * the claim slot is read raw for corroboration only. */
+static void
+u40x_canary_classify(void)
+{
+    UINT32 efi_v   = mmio_read32(CANARY_REG_EFI);
+    UINT32 claim_v = mmio_read32(CANARY_REG_CLAIM);
+    UINT32 ss0 = mmio_read32(REG_FEAT_OVR_SM_SPD);
+    UINT32 ss1 = mmio_read32(REG_FEAT_OVR_SM_SPD_1);
+
+    Print(L"[CANARY] AON=%s PBUS=%s verdict=%s efi@0x1480=0x%08x claim@0x1484=0x%08x ss0=0x%08x ss1=0x%08x gate=0x%08x\n",
+          u40x_canary_aon_state(ss0, ss1),
+          u40x_canary_slot_state(efi_v, CANARY_MAGIC_EFI),
+          u40x_canary_verdict(efi_v, CANARY_MAGIC_EFI, ss0, ss1),
+          efi_v, claim_v, ss0, ss1,
+          mmio_read32(REG_FEAT_OVR_PLM));
+}
+
+/* Arm OUR slot (0x1480) after a successful transaction, with the
+ * B2 CANARY-SET readback proof (tx.rs:120-130): a block that does not
+ * hold the magic is named as not-writable and the chain proceeds. */
+static void
+u40x_canary_arm(void)
+{
+    UINT32 rb;
+
+    mmio_write32(CANARY_REG_EFI, CANARY_MAGIC_EFI);
+    rb = mmio_read32(CANARY_REG_EFI);
+    if (rb == CANARY_MAGIC_EFI)
+        Print(L"[CANARY] SET efi@0x1480=0x%08x readback ok (armed after the last deliberate step of a successful transaction)\n", rb);
+    else
+        Print(L"[CANARY] SET readback FAILED got=0x%08x — treats the block as not writable on this chip\n", rb);
+}
+
 /* ==== Pre-flight config-space validation (row U2, GPU-Tensor-Unlock-
  * Universal @1d6a508 checks.c port; runs after BAR0/MEM-enable, before the
  * first unlock write). Reads a 256-byte config snapshot and proves the
@@ -5511,6 +5696,17 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         Print(L"[50HX] BAR enable failed; abort\n");
         return returnToGrub ? EFI_SUCCESS : EFI_DEVICE_ERROR;
     }
+    /* ---------- [2a] reset-scratch canary read + classify (row B2-P3,
+     * gtuu-mining ticket 16) ----------
+     * Earliest point where BAR0 reads MEAN anything (the cmd |= 6 in
+     * u40x_enable_bar above is what makes them decodable) and the last
+     * point before this boot touches the card: [2b]/[2c] are read-only,
+     * [4]/[5]+ start writing. Read-only, never arms. The verdict
+     * describes the inter-boot event (who wiped the unlock since the
+     * last arm), NOT this boot's work — so it runs on every path,
+     * including the [4] ALREADY_MODIFIED skip below. See the function
+     * block near cold_state_verdict() for the classification doctrine. */
+    u40x_canary_classify();
     /* ---------- [2b] pre-flight config validation (row U2) ---------- */
     if (!u40x_preflight_config()) {
         Print(L"[50HX] PREFLIGHT config-space validation FAILED — refuse unlock, chainload untouched\n");
@@ -5575,6 +5771,12 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     }
     if (direct_write_probe()) {
         Print(L"[50HX] direct MMIO probe succeeded — skip booter\n");
+        /* Success path (row B2-P3): the unlock is live at handoff, so
+         * arm our witness slot. This is one of exactly TWO arm sites
+         * (the other is [10c] after sanitize); every refusal/goto-done
+         * path skips both and leaves prior evidence untouched. The
+         * ALREADY_MODIFIED skip above never reaches either. */
+        u40x_canary_arm();
         goto done;
     }
 
@@ -5907,6 +6109,21 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     }
 
     }
+
+    /* ---------- [10c] reset-scratch canary arm (row B2-P3, ticket 16) ------
+     * Success-only arm: is_unlocked() here is the same predicate the [10]
+     * RESULT block prints *** UNLOCKED *** on, so refusals (preflight /
+     * attestation / PROM / PARTIALLY / ALREADY — all of which goto done
+     * before this point) and failed/deferred attempts (SS not unlocked —
+     * the V551-DEFER branch lives right above) never overwrite the prior
+     * boot's evidence. Placed after the sanitize tail so the last
+     * deliberate engine resets of the chain (SEC2 engine reset + spin
+     * stop) are behind us — B2's rule: arm after the last reset the
+     * chain performs on purpose, so everything the canary later
+     * witnesses is an actor we did not perform ourselves. */
+    if (is_unlocked())
+        u40x_canary_arm();
+
     /* ---------- [10.5] PCIe Gen2 - OS-side only (removed in v1.1.8,
      * re-tested and re-confirmed dead 2026-09-17) -----------------------
      * The pre-OS Gen2 attempt never trained on any host (X79: LNKCTL2

@@ -19,6 +19,12 @@
 #   tflops            per-GPU FMA bench (skipped:busy when compute apps hold GPUs)
 #   dmesg_wpr2        count of WPR2/RmInitAdapter hits
 #   log_path          archived ESP log location
+#   canary            reset-scratch verdict per actor (gtuu-mining ticket 16):
+#                     efi=<verdict> from the ESP [CANARY] line, claim=<verdict>
+#                     from the cmp90hx-claim journal, ';'-joined when both.
+#                     Verdicts: no-event|relock-suspect|flr-sbr|power-cycle|
+#                     rewritten|unreadable. EMPTY = pre-feature boot (no
+#                     canary existed when this boot's actors ran).
 set -uo pipefail
 
 BENCHDIR="/home/dmitry/debug/50hx"   # absolute: systemd User=root has HOME=/root (bit us 2026-10-26)
@@ -121,13 +127,31 @@ fi
 WPR=$(dmesg 2>/dev/null | grep -ciE 'WPR2|RmInitAdapter')
 WPR=${WPR:-0}
 
+# CANARY-COLLECT-BEGIN — extracted VERBATIM by the reset-canary selftest
+# ---- reset-scratch canary verdicts (gtuu-mining ticket 16) -------------
+# EFI side: the [CANARY] line of THIS boot's log — counted only when the
+# log is fresh (RAN=yes/unknown): the unlocker deletes+recreates the ESP
+# log every run, so a stale log's verdict belongs to an EARLIER boot and
+# must not land in this row. Claim side: the journal of the current boot
+# (-b), tag cmp90hx-claim, `canary ... verdict=` line.
+# EMPTY stays EMPTY when neither exists = pre-feature boot.
+CANARY=""
+if [ -f "$CLEAN" ] && [ "$RAN" != "stale-log" ] && [ "$RAN" != "no-log" ]; then
+    CE=$(grep -oE '\[CANARY\].*verdict=[a-z-]+' "$CLEAN" 2>/dev/null | tail -1 | sed 's/.*verdict=//')
+    [ -n "$CE" ] && CANARY="efi=$CE"
+fi
+CC=$(journalctl -t cmp90hx-claim -b --no-pager 2>/dev/null \
+     | grep -oE 'canary .*verdict=[a-z-]+' | tail -1 | sed 's/.*verdict=//')
+[ -n "$CC" ] && CANARY="${CANARY:+$CANARY;}claim=$CC"
+# CANARY-COLLECT-END
+
 # ---- append CSV ---------------------------------------------------------
 NEW=0; [ ! -f "$LEDGER" ] && NEW=1
 {
-[ "$NEW" = 1 ] && echo 'boot_utc,collect_utc,boot_id,stamp,efi_ran,layout,preflight,verdicts,ss0,drm_minor0,nvml_count,tflops,dmesg_wpr2,log_path'
-printf '%s,%s,%s,"%s",%s,"%s","%s","%s","%s",%s,%s,"%s",%s,%s\n' \
+[ "$NEW" = 1 ] && echo 'boot_utc,collect_utc,boot_id,stamp,efi_ran,layout,preflight,verdicts,ss0,drm_minor0,nvml_count,tflops,dmesg_wpr2,log_path,canary'
+printf '%s,%s,%s,"%s",%s,"%s","%s","%s","%s",%s,%s,"%s",%s,%s,"%s"\n' \
     "$BOOT_UTC" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BOOT_ID" "$STAMP" "$RAN" \
-    "$LAYOUT" "$PREFLIGHT" "$VERDICTS" "$SS0" "$DRM0" "$NVML" "$TF" "$WPR" "$ARCH/50hx_log.txt"
+    "$LAYOUT" "$PREFLIGHT" "$VERDICTS" "$SS0" "$DRM0" "$NVML" "$TF" "$WPR" "$ARCH/50hx_log.txt" "$CANARY"
 } >> "$LEDGER"
 
 chown -R dmitry:dmitry "$BENCHDIR" 2>/dev/null
