@@ -1039,3 +1039,21 @@ chain proves the account, not just the repo). The vendored port +
 `efi-unlock/LICENSE-40HX-UNLOCK` are now the surviving record;
 same-named repos under other accounts are candidate mirrors, unverified.
 Every other CREDITS URL re-resolved 200 this session.
+
+## gpu-unlock-peek: pre-driver state, named from SSH (gtuu-mining t10, row T2, 2026-11-12)
+
+Port of the read-only peek sampler from GPU-Tensor-Unlock-Universal
+@1d6a508 — audit-first: the module's only device primitive is
+`ioread32` inside one bounds-checked `peek_read()` (grep table in
+gpu-peek/README.md; zero write/config/master/FLR calls), bound-driver
+target refuses with -EBUSY, DKMS sibling `gpu-unlock-peek` ships with
+`blacklist gpu_peek` and nothing in any unit references it — operator
+`sudo cmp-peek <BDF>` only. Trust control mirrors the just-fixed
+cmp90hx-claim.sh rule (PMC_BOOT_0 bits 28:20 vs per-card chip; all-FF ⇒
+verdict COLD-ALLFF, reads meaningless). Compile gate: 7.2.9 + 6.18.55
+native zero-warnings, ubuntu 24.04 (6.8.0-149) + 26.04 (7.0.0-43)
+containers green, W=1 clean. Package gate: full deb
+`610.43.03-20261112.gtuu1` built offline from cache/ in the CI container
+→ PASS_CMP_DEB_SMOKE including the new peek assertions (blacklist line
+grep -qx, no-unit-reference scan, wrapper 0755, maintainer-script
+downgrade-sweep locks). Live proof awaiting llm2 (down 2026-11-12).

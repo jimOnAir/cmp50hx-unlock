@@ -59,6 +59,8 @@ for path in \
         ./lib/systemd/system/cmp90hx-claim.service \
         ./usr/lib/cmp50hx-unlock/cmp90hx-claim.sh \
         ./etc/modprobe.d/gpu-unlock-claim.conf \
+        ./etc/modprobe.d/gpu-unlock-peek.conf \
+        ./usr/local/sbin/cmp-peek \
         ./etc/modprobe.d/cmp-unlock.conf \
         ./opt/cmp50hx-unlock/firmware-90hx/gsp_ga10x.bin \
         ./opt/cmp50hx-unlock/firmware-90hx/booter_load_ga102.bin \
@@ -78,6 +80,29 @@ dpkg-deb --fsys-tarfile "${deb}" \
     | tar -xO --wildcards './usr/src/gpu-unlock-claim-*/Kbuild' 2>/dev/null \
     | grep -q -- '-DGU_CMP90HX_T09' \
     || { printf 'claim Kbuild does not pin -DGU_CMP90HX_T09\n' >&2; exit 1; }
+
+# gpu-unlock-peek (gtuu-mining ticket 10): the read-only diagnostic sibling
+# ships as its own DKMS tree, blacklisted, with the operator wrapper present
+# and EXECUTABLE — and, unlike the claim, with no systemd unit anywhere:
+# nothing may ever order gpu_peek into a boot phase.
+grep -Eq '^\./usr/src/gpu-unlock-peek-[0-9.]+/dkms\.conf$' <<<"${fsys}" \
+    || { printf 'missing gpu-unlock-peek DKMS tree\n' >&2; exit 1; }
+peekcf="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./etc/modprobe.d/gpu-unlock-peek.conf)"
+grep -qx "blacklist gpu_peek" <<<"${peekcf}" \
+    || { printf 'gpu-unlock-peek.conf missing line: blacklist gpu_peek\n' >&2; exit 1; }
+grep -qxF '/etc/modprobe.d/gpu-unlock-peek.conf' <<<"$(dpkg-deb --ctrl-tarfile "${deb}" | tar -xO ./conffiles)" \
+    || { printf 'gpu-unlock-peek.conf is not a dpkg conffile\n' >&2; exit 1; }
+while IFS= read -r unit; do
+    [[ -n "${unit}" ]] || continue
+    body="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO "${unit}")"
+    ! grep -Eq 'gpu_peek|gpu-unlock-peek|cmp-peek' <<<"${body}" \
+        || { printf '%s references the peek diagnostic (nothing in the boot flow may ever load it)\n' "${unit}" >&2; exit 1; }
+done < <(grep -E '^\./lib/systemd/system/' <<<"${fsys}")
+dpkg-deb -c "${deb}" | grep '^\-rwxr-xr-x' | grep -q './usr/local/sbin/cmp-peek$' \
+    || { printf '/usr/local/sbin/cmp-peek missing or not executable\n' >&2; exit 1; }
+dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./usr/local/sbin/cmp-peek \
+    | grep -qF -- '--help' \
+    || { printf 'cmp-peek lacks a --help path\n' >&2; exit 1; }
 
 # claim window is package-owned (modules-late-610 ticket 02): every
 # alias-reachable module that could bind a card before the once-per-boot
@@ -128,6 +153,9 @@ for spec in \
         "postrm:cmp50-bak:postrm purge must remove the initrd rollback backups" \
         "postrm:firmware-copies.txt:postrm must clean the fallback firmware copies" \
         "prerm:predates gpu-unlock-claim:prerm must sweep gpu-unlock-claim DKMS state when downgrading to a claim-less revision (postrm cannot: dpkg runs the INCOMING version's postrm)" \
+        "prerm:predates gpu-unlock-peek:prerm must sweep gpu-unlock-peek DKMS state when downgrading to a peek-less revision (same lesson)" \
+        "postrm:sweep_peek:postrm must sweep gpu-unlock-peek DKMS state on remove/purge" \
+        "postinst:gpu-unlock-peek:postinst must register the gpu-unlock-peek DKMS tree (blacklisted diagnostic, no unit)" \
         "postrm:install_dir}/logs:postrm must remove the untracked logs dir" \
         "postinst:firmware-copies.txt:postinst must record fallback firmware copies" \
         "postinst:nvidia-peermem:postinst must verify all five modules per kernel" \

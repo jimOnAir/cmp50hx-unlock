@@ -155,6 +155,21 @@ for kernel in "${build_kernels[@]}"; do
     dkms install -m gpu-unlock-claim -v "${dkms_version}" -k "${kernel}" --force
     depmod -a "${kernel}"
 done
+# --- gpu-unlock-peek (map gtuu-mining ticket 10) ------------------------------
+# Read-only pre-driver diagnostic: sibling DKMS module of the claim, shipped
+# blacklisted (etc/modprobe.d/gpu-unlock-peek.conf), with NO unit and NO
+# boot-flow role — only /usr/local/sbin/cmp-peek insmods it, on operator
+# demand. Mirrors the claim registration exactly: a broken peek tree is loud,
+# not silent.
+log "registering the peek diagnostic module with DKMS (gpu-unlock-peek/${dkms_version})"
+dkms remove -m gpu-unlock-peek -v "${dkms_version}" --all >/dev/null 2>&1 || true
+dkms add -m gpu-unlock-peek -v "${dkms_version}"
+for kernel in "${build_kernels[@]}"; do
+    dkms build -m gpu-unlock-peek -v "${dkms_version}" -k "${kernel}" --force
+    dkms install -m gpu-unlock-peek -v "${dkms_version}" -k "${kernel}" --force
+    depmod -a "${kernel}"
+done
+
 if [[ -d "${install_dir}/firmware-90hx" ]]; then
     mkdir -p "/lib/firmware/gpu-unlock/${driver_version}"
     install -m 0644 "${install_dir}/firmware-90hx/"*.bin "/lib/firmware/gpu-unlock/${driver_version}/"

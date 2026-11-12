@@ -74,6 +74,29 @@ case "${1:-remove}" in
             rm -rf /var/lib/dkms/gpu-unlock-claim
             rm -rf /lib/firmware/gpu-unlock
         fi
+        # Same orphan-DKMS-state reasoning for the peek diagnostic sibling
+        # (map gtuu-mining ticket 10): a pre-peek revision's postrm cannot
+        # sweep OUR gpu-unlock-peek registration. Peek landed 2026-11-12.
+        if [[ -n "${incoming}" ]] \
+                && dpkg --compare-versions "${incoming}" lt "610.43.03-20261112" 2>/dev/null; then
+            log "incoming ${incoming} predates gpu-unlock-peek: sweeping peek DKMS state"
+            if command -v dkms >/dev/null 2>&1; then
+                for ver_dir in /var/lib/dkms/gpu-unlock-peek/*/; do
+                    [[ -d "${ver_dir}" ]] || continue
+                    dkms_ver="${ver_dir#/var/lib/dkms/gpu-unlock-peek/}"
+                    dkms_ver="${dkms_ver%/}"
+                    run_cmd dkms remove -m gpu-unlock-peek -v "${dkms_ver}" --all
+                done
+            fi
+            for kernel_dir in /lib/modules/*/; do
+                k="${kernel_dir#/lib/modules/}"; k="${k%/}"
+                rm -f "/lib/modules/${k}/updates/dkms/gpu_peek.ko" \
+                      "/lib/modules/${k}/updates/dkms/gpu_peek.ko.xz" \
+                      "/lib/modules/${k}/updates/dkms/gpu_peek.ko.zst" 2>/dev/null || true
+            done
+            command -v depmod >/dev/null 2>&1 && run_cmd depmod -a || true
+            rm -rf /var/lib/dkms/gpu-unlock-peek
+        fi
         exit 0
         ;;
     *)

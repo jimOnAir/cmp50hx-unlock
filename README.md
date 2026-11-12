@@ -53,6 +53,15 @@ ordinary Linux docker runners.
 
 
 
+## Pre-driver read-only triage
+
+`sudo cmp-peek 0000:04:00.0` against an unbound card prints PMC_BOOT_0,
+permission PLMs, SS0/SS1 + FEAT readout decode and a
+LOCKED/UNLOCKED/PARTIAL/COLD-ALLFF verdict — the card's pre-driver state
+named from SSH alone. The `gpu_peek` module ships blacklisted: nothing in
+the boot flow loads it, operator `insmod` only, zero writes by static
+audit ([gpu-peek/README.md](gpu-peek/README.md)).
+
 ## UEFI compute unlock (working, no kernel patches needed)
 
 [`efi-unlock/`](efi-unlock/README.md) is a port of the

@@ -45,6 +45,15 @@ NVIDIA `610.43.03` для CMP 50HX (TU102). В руководстве описа
 
 
 
+## Диагностика без драйвера (read-only)
+
+`sudo cmp-peek 0000:04:00.0` по неподключённой карте печатает PMC_BOOT_0,
+permission PLM, SS0/SS1 + декод FEAT readout и вердикт
+LOCKED/UNLOCKED/PARTIAL/COLD-ALLFF — состояние карты до загрузки драйвера
+называется прямо по SSH. Модуль `gpu_peek` ставится с blacklist: поток
+загрузки его не трогает, только ручной `insmod`, ноль записей по
+статическому аудиту ([gpu-peek/README.md](gpu-peek/README.md)).
+
 ## UEFI-разблокировка вычислений (работает, патчи ядра не нужны)
 
 [`efi-unlock/`](efi-unlock/README.md) — перенос UEFI-приложения

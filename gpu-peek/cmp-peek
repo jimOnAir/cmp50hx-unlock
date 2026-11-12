@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# cmp-peek — read-only pre-driver BAR0 peek for one fleet CMP card.
+# Map gtuu-mining ticket 10 (gpu-unlock-peek sibling of gpu-unlock-claim).
+#
+# Loads the blacklisted gpu_peek diagnostic against an UNBOUND card (refuses
+# a bound one twice over: here via sysfs and in-module via pdev->driver),
+# prints its synchronous dmesg lines, and rmmods. The module performs single
+# 32-bit reads only — no writes, no enables, no resets — so the card is
+# untouched either way; rmmod is always clean.
+#
+# NOTHING in the boot flow may ever load gpu_peek; this script runs only on
+# explicit operator demand.
+set -u
+
+JOURNAL_TAG=cmp-peek
+SAYCOPIES=40
+
+usage() {
+	cat <<'EOF'
+usage: cmp-peek <domain:bus:slot.function>   (root)
+
+Read-only pre-driver peek of one CMP card (10de:1e09 50HX / 10de:220d 90HX):
+insmod gpu_peek targets=<BDF> -> print dmesg lines -> rmmod. Refuses a card
+with a bound driver (unbind it first, e.g. echo 1 >
+/sys/bus/pci/devices/<BDF>/driver/remove_device). The verdict line in the
+output is one of LOCKED / UNLOCKED / PARTIAL, or COLD-ALLFF when BAR0 reads
+are untrusted (cold card or wedge; see gpu-peek/README.md).
+
+  --help, -h    show this help and exit
+EOF
+}
+
+say() { logger -t "$JOURNAL_TAG" -- "$*" 2>/dev/null; printf '%s\n' "$*"; }
+die() { say "cmp-peek: $*"; exit 1; }
+
+case "${1:-}" in
+    --help|-h|"") usage; exit 0 ;;
+esac
+[[ $# -eq 1 ]] || { usage; exit 2; }
+BDF="$1"
+
+[[ "$(id -u)" -eq 0 ]] || die "needs root (insmod)"
+[[ "$BDF" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$ ]] ||
+    die "not a full PCI address: $BDF (want domain:bus:slot.function)"
+SYSFS="/sys/bus/pci/devices/${BDF,,}"
+[[ -d "$SYSFS" ]] || die "no device at $BDF"
+
+vendor="$(cat "$SYSFS/vendor" 2>/dev/null)"
+device="$(cat "$SYSFS/device" 2>/dev/null)"
+case "${vendor}:${device}" in
+    0x10de:0x1e09|0x10de:0x220d) ;;
+    *) die "$BDF is ${vendor}:${device}, not a fleet CMP card (10de:1e09 / 10de:220d)" ;;
+esac
+if [[ -e "$SYSFS/driver" ]]; then
+    die "$BDF is bound to $(basename "$(readlink -f "$SYSFS/driver")") — peek reports pre-driver state only; unbind first"
+fi
+[[ ! -e /sys/module/gpu_peek ]] || die "gpu_peek is already loaded (rmmod gpu_peek first)"
+
+# Module resolution follows claim-90hx/cmp90hx-claim.sh: modprobe -R resolves
+# the path without loading (the blacklist blocks loads, not resolution).
+KO="$(modprobe -R gpu_peek 2>/dev/null || true)"
+if [[ -z "$KO" || ! -f "$KO" ]]; then
+    KO="$(find "/lib/modules/$(uname -r)/updates/dkms" -maxdepth 1 -name 'gpu_peek.ko*' 2>/dev/null | head -1)"
+fi
+[[ -n "$KO" && -f "$KO" ]] || die "gpu_peek.ko not built for $(uname -r) (dkms status | grep gpu-unlock-peek)"
+
+RC=0
+if insmod "$KO" targets="$BDF" 2>/tmp/cmp-peek.insmod; then
+    # The ko logs synchronously during insmod: every gpu_peek line in dmesg
+    # this boot belongs to a peek run (the module was just proven unloaded
+    # above and never autoloads — blacklisted, no aliases, no units).
+    dmesg | grep -a 'gpu_peek:' | tail -n "$SAYCOPIES"
+    say "cmp-peek: $BDF sampled (verdict above; module rmmodded)"
+else
+    RC=1
+    say "cmp-peek: insmod failed: $(tail -1 /tmp/cmp-peek.insmod 2>/dev/null) (see dmesg)"
+fi
+rmmod gpu_peek 2>/dev/null || true
+exit "$RC"

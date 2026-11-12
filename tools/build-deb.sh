@@ -136,6 +136,15 @@ mkdir -p "${claim_src}"
 tar -C "${root}/claim-90hx" --exclude='*.o' --exclude='*.ko' --exclude='*.mod' --exclude='*.mod.c' --exclude='Module.symvers' --exclude='modules.order' --exclude='./.*' -cf - . | tar -C "${claim_src}" -xf -
 [[ -s "${claim_src}/dkms.conf" ]] || { printf 'gpu-unlock-claim staging produced no dkms.conf (excludes too greedy?)\n' >&2; exit 6; }
 
+# --- 2c. gpu-unlock-peek: read-only diagnostic DKMS tree (gtuu-mining 10) --
+# Pre-driver BAR0 sampler for remote triage. Ships blacklisted and unitless:
+# only /usr/local/sbin/cmp-peek insmods it, on explicit operator demand.
+log "staging the gpu-unlock-peek diagnostic module tree"
+peek_src="${stage}/usr/src/gpu-unlock-peek-${driver_version}"
+mkdir -p "${peek_src}"
+tar -C "${root}/gpu-peek" --exclude='*.o' --exclude='*.ko' --exclude='*.mod' --exclude='*.mod.c' --exclude='Module.symvers' --exclude='modules.order' --exclude='./.*' -cf - . | tar -C "${peek_src}" -xf -
+[[ -s "${peek_src}/dkms.conf" ]] || { printf 'gpu-unlock-peek staging produced no dkms.conf (excludes too greedy?)\n' >&2; exit 6; }
+
 # --- 3. runtime tree under /opt/cmp50hx-unlock ------------------------------
 opt="${stage}/opt/cmp50hx-unlock"
 mkdir -p "${opt}/cache" "${opt}/deb" "${opt}/efi" "${opt}/bin"
@@ -200,9 +209,15 @@ sed 's#^ExecStart=.*#ExecStart=/usr/lib/cmp50hx-unlock/cmp90hx-claim.sh#' \
 install -m 0644 "${root}/deb/blacklist-cmp-unlock.conf" "${stage}/etc/modprobe.d/cmp-unlock.conf"
 printf 'options nvidia cmp50_rebar_size=8\n' > "${stage}/etc/modprobe.d/cmp50hx-unlock.conf"
 install -m 0644 "${root}/deb/blacklist-gpu-unlock-claim.conf" "${stage}/etc/modprobe.d/gpu-unlock-claim.conf"
+install -m 0644 "${root}/deb/blacklist-gpu-unlock-peek.conf" "${stage}/etc/modprobe.d/gpu-unlock-peek.conf"
 install -m 0644 "${root}/tuning/profiles.conf" "${stage}/etc/cmp-tune.conf"
 mkdir -p "${stage}/etc/cmp50hx"
 install -m 0755 "${root}/claim-90hx/cmp90hx-claim.sh" "${libdir}/cmp90hx-claim.sh"
+# peek wrapper: a pure operator tool with no unit to invoke it, so unlike the
+# claim script it ships at its real path, /usr/local/sbin/cmp-peek (ticket 10;
+# dpkg tracks and removes it like any package file).
+mkdir -p "${stage}/usr/local/sbin"
+install -m 0755 "${root}/gpu-peek/cmp-peek" "${stage}/usr/local/sbin/cmp-peek"
 log "extracting the 90HX claim firmware assets (deterministic: source bindata + official .run)"
 bash "${root}/claim-90hx/firmware/extract.sh" "${src_tree}" "${run_file}" "${opt}/firmware-90hx" >/dev/null
 install -m 0644 "${root}/deb/boot.conf" "${stage}/etc/cmp50hx/boot.conf"
