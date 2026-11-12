@@ -43,6 +43,19 @@ build:linux-efi:
     expire_in: 1 week
 
 # -------------------------------------------------------------------
+# host-harness: claim-module failure-injection scenarios (gtuu-mining
+# t11). Pure gcc: production sources verbatim against tests/shim/.
+# -------------------------------------------------------------------
+test:host-harness:
+  stage: build
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends build-essential
+  script:
+    - bash claim-90hx/tests/run-host-harness.sh
+
+# -------------------------------------------------------------------
 # package: assemble the self-contained .deb (with smoke test)
 # -------------------------------------------------------------------
 package:linux:
