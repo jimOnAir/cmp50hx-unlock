@@ -108,7 +108,23 @@ dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./opt/cmp50hx-unlock/efi/50HXUNLK.EFI
     || { printf '50HXUNLK.EFI missing from payload\n' >&2; rm -f "${_efibin}"; exit 1; }
 grep -aq "50HX-UNLOCK-TX-1" "${_efibin}" \
     || { printf '50HXUNLK.EFI lacks the TX build banner (wrong artifact?)\n' >&2; rm -f "${_efibin}"; exit 1; }
-rm -f "${_efibin}"
+# gtuu-mining t13 (row X5, P27): asset manifest + license/provenance
+# notice ship beside the EFI; the recorded EFI digest must match the
+# packaged binary itself (field-proven-hash self-consistency).
+dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./opt/cmp50hx-unlock/efi/SOURCE-MANIFEST.sha256 > "${_efibin}.m" \
+    || { printf 'SOURCE-MANIFEST.sha256 missing from payload\n' >&2; exit 1; }
+grep -Eq '^([0-9a-f]{64}  [^ /]+\n)+$' "${_efibin}.m" \
+    || { printf 'SOURCE-MANIFEST.sha256 malformed (want: 64-hex + two spaces + name per line)\n' >&2; exit 1; }
+grep -c . "${_efibin}.m" | grep -qx 10 \
+    || { printf 'SOURCE-MANIFEST.sha256 should pin 10 assets, has %s\n' "$(grep -c . "${_efibin}.m")" >&2; exit 1; }
+dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./opt/cmp50hx-unlock/efi/NOTICE-ASSETS.md | grep -q "P22 zero badge" \
+    || { printf 'NOTICE-ASSETS.md missing or lacks the zero-badge documentation\n' >&2; exit 1; }
+dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./opt/cmp50hx-unlock/efi/50HXUNLK.EFI.sha256 > "${_efibin}.sha"
+_efisum="$(sha256sum "${_efibin}" | cut -d' ' -f1)"
+grep -q "${_efisum}" "${_efibin}.sha" \
+    || { printf 'packaged 50HXUNLK.EFI.sha256 does not match the packaged EFI binary\n' >&2; exit 1; }
+_rm_efi() { rm -f "${_efibin}" "${_efibin}.m" "${_efibin}.sha"; }
+_rm_efi
 while IFS= read -r unit; do
     [[ -n "${unit}" ]] || continue
     body="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO "${unit}")"

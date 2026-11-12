@@ -165,6 +165,8 @@ cp "${root}/efi-unlock/50HXUNLK.EFI" \
    "${root}/efi-unlock/install-linux.sh" \
    "${root}/efi-unlock/sign-efi.sh" "${opt}/efi/"
 (cd "${opt}/efi" && sha256sum 50HXUNLK.EFI > 50HXUNLK.EFI.sha256)
+install -m 0644 "${root}/efi-unlock/blobs/SOURCE-MANIFEST.sha256" "${opt}/efi/"
+install -m 0644 "${root}/efi-unlock/blobs/NOTICE-ASSETS.md" "${opt}/efi/"
 
 # --- 4. compiled runtime binaries -------------------------------------------
 libdir="${stage}/usr/lib/cmp50hx-unlock"
@@ -228,6 +230,10 @@ mkdir -p "${stage}/usr/local/sbin"
 install -m 0755 "${root}/gpu-peek/cmp-peek" "${stage}/usr/local/sbin/cmp-peek"
 log "extracting the 90HX claim firmware assets (deterministic: source bindata + official .run)"
 bash "${root}/claim-90hx/firmware/extract.sh" "${src_tree}" "${run_file}" "${opt}/firmware-90hx" >/dev/null
+# gtuu-mining t13 (row X5): the EFI asset blobs must be regenerable from
+# this exact source tree — GENERATED-class byte-equality + full-digest
+# manifest gate; a corrupted cache or tampered blob fails the build loudly.
+bash "${root}/efi-unlock/tools/gen-efi-assets.sh" --check --src "${src_tree}" >/dev/null
 install -m 0644 "${root}/deb/boot.conf" "${stage}/etc/cmp50hx/boot.conf"
 
 # --- 5. DEBIAN metadata and maintainer scripts -------------------------------

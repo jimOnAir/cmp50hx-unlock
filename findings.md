@@ -1107,3 +1107,30 @@ cluster chain, non-MZ PE sanitizer, alloc cap). No behavior change on
 non-UB inputs (values identical where old code was defined); EFI
 container build NEW-vs-HEAD baseline: both BUILD_OK, the same single
 known ld .note.GNU-stack, zero new.
+
+## EFI asset blobs: generation gate + the discovery that 40% of them are irreplaceable (gtuu-mining t13, row X5, 2026-11-12)
+
+gen-efi-assets.sh now derives bl_gsp_tu102.bin (= ksec2GetBinArchiveBlUcode
+UCODE_IMAGE), booter_ucode_prod.bin (= BooterLoad TU102 IMAGE_PROD) and
+gsp_rm_boot_dbg.bin (= 131072 zero bytes — the P22 zero badge, now
+documented where third parties will find it) byte-exactly from the pinned
+610.43.03 source, and the .EFI built on a tree whose generated-class
+blobs were deleted then regenerated is sha-IDENTICAL
+(eff516f56ecf…3b27) to the committed-blob build: the pipeline proves it
+rebuilds the field-proven artifact. SOURCE-MANIFEST.sha256 is
+content-derived, timestamp-free, double-run byte-idempotent (P27) and
+gates every build-deb; corrupt cache fails loudly with the expected
+digest (rc=5), one flipped blob byte fails twice over (MISMATCH +
+MANIFEST-FAIL). The honest limit, documented in blobs/NOTICE-ASSETS.md:
+v67_payload.bin and booter_ucode_dbg.bin are the ONLY surviving copies
+of the deleted CMP40HX-Unlock upstream (the ko-side builder
+tools/v67_regen.c, host-compiling the production recipe tables +
+gu_payload_build, byte-differs at offset 0 — the blob predates the
+tables), and fwsec_50hx_*/sec2_ucode_vbios_* come from card VBIOS ROM
+captures (our extractor ships; the ROM does not). Deleting those would
+be data loss, so "blob-free" closes as "generation-gated + pinned-keep
+with provenance" — maintainer's gitignore call documented as follow-up,
+along with the 615 bindata token-format gap for the next driver line.
+Bonus field proof of the t20 banner gate: it caught a stale pre-built
+.EFI entering a deb during this work — exactly the artifact mix-up class
+it was built to catch.
