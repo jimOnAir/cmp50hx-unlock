@@ -1082,3 +1082,28 @@ is their root-caused 0x91 race class); their low-trust verdict on B1
 ("FMLA32" = non-NVIDIA terminology) corroborates the ticket-02 posture from
 a line that never touched B1's code. llm2 down today: all gates this
 session ran local/container only; bench-toolchain evidence predates outage.
+
+## UBSan gate catches first real UB in production boot code (gtuu-mining t12, rows X3/X4, 2026-11-12)
+
+The host sanitizer harness (efi-unlock/tools/asan-gate-selftest.sh:
+cold-state verdict, chip-identity observation, asset attestation, live-
+PROM gate, and the entire cmp90_fat_* FAT parser compiled VERBATIM from
+the production EFI under -fsanitize=address,undefined -Werror) found its
+first real defect in the code it tests — exactly the point of the gate:
+the FAT32 BPB parse computed fatsz via `bpb[39] << 24` on promoted signed
+int; a hostile/quirky USB stick whose BPB carries bit 31 set makes that
+undefined behavior (C11 6.5.7), not merely garbage. Fixed with explicit
+UINT32 casts (scenario F14 keeps 0x80000000 permanently under UBSan
+watch). The gate was itself validated twice over: its ASan bite proof
+(deliberate use-after-free fixture must abort or the suite fails), and
+ASan eating the harness's own fixture bug (8.3-name writer overreading a
+short literal) on first contact before any production code ran. 37
+asserts ALL-PASS: t04 verdict matrix (all-FF cannot read as ALREADY),
+t05 strap WARNING semantics, t09 attest tamper/missing-entry refusals +
+PROM OBSERVE-exact-digest/ENFORCE flip-refuse+forensic dump/length
+field/alloc-fail-skip, and FAT F1-F16 (FAT32+FAT16 synthetic volumes,
+LFN reassembly beating the mangled 8.3, adversarial BPB set, corrupted
+cluster chain, non-MZ PE sanitizer, alloc cap). No behavior change on
+non-UB inputs (values identical where old code was defined); EFI
+container build NEW-vs-HEAD baseline: both BUILD_OK, the same single
+known ld .note.GNU-stack, zero new.

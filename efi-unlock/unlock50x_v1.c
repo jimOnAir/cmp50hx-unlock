@@ -4477,6 +4477,7 @@ static UINT8 cmp90EspGuid[16] = { 0x28,0x73,0x2A,0xC1, 0x1F,0xF8, 0xD2,0x11,
                                   0xBA,0x4B, 0x00,0xA0,0xC9,0x3E,0xC9,0x3B };
 
 /* аллокатор-обёртка (gnu-efi AllocatePool имеет другую арность) */
+/* FAT-PARSER-BEGIN */
 static VOID *cmp90_alloc(UINTN size)
 {
     VOID *p = NULL;
@@ -4566,7 +4567,10 @@ cmp90_fat_open(EFI_BLOCK_IO_PROTOCOL *bio, UINT64 lbaPartStart, Cmp90Fat *f)
     rootEnts = bpb[17] | (bpb[18] << 8);
     fatsz    = bpb[22] | (bpb[23] << 8);                  /* FAT12/16 */
     if (fatsz == 0) {
-        fatsz = bpb[36] | (bpb[37]<<8) | (bpb[38]<<16) | (bpb[39]<<24);
+        /* UINT32 casts: (bpb[39] << 24) is signed-int shift into the sign
+         * bit — UB per C11 6.5.7, caught by the ticket-12 UBSan gate. */
+        fatsz = (UINT32)bpb[36] | ((UINT32)bpb[37] << 8) |
+                ((UINT32)bpb[38] << 16) | ((UINT32)bpb[39] << 24);
         f->fat32 = TRUE;
     } else {
         f->fat32 = FALSE;
@@ -4814,6 +4818,7 @@ cmp90_fat_load_path(Cmp90Fat *f, const CHAR16 *path,
     *fileSize = (UINTN)sz;
     return EFI_SUCCESS;
 }
+/* FAT-PARSER-END */
 
 /* ==== #25: рекурсивный поиск лоадера ПО ИМЕНИ файла ====
  * When every BootOrder path and hardcoded path misses (a distro we did not
@@ -6070,6 +6075,7 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
      * invisible; now it warns. Switching the RM writes to the live value
      * is deliberately NOT done here: unproven silicon acceptance, gated
      * on a hardware ticket. */
+    /* CHIPID-GATE-BEGIN */
     {
         UINT32 boot0 = mmio_read32(0x0u);
         if (boot0 != 0x162000A1u && boot0 != 0u && boot0 != 0xFFFFFFFFu)
@@ -6077,6 +6083,7 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         else
             Print(L"[50HX] PMC_BOOT_0=0x%08x (matches RM constant)\n", boot0);
     }
+    /* CHIPID-GATE-END */
     if (direct_write_probe()) {
         Print(L"[50HX] direct MMIO probe succeeded — skip booter\n");
         g_fg_armed = TRUE;

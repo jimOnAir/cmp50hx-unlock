@@ -54,6 +54,7 @@ test:host-harness:
     - apt-get install -y --no-install-recommends build-essential
   script:
     - bash claim-90hx/tests/run-host-harness.sh
+    - bash efi-unlock/tools/asan-gate-selftest.sh
 
 # -------------------------------------------------------------------
 # package: assemble the self-contained .deb (with smoke test)
