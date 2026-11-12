@@ -90,6 +90,7 @@ static UINTN u40x_w2c(CHAR16 *src, char *dst, UINTN cap) {
  * (open->write->flush->close) worked. Write each line with that proven
  * pattern: open, seek to end, write, flush, close. Slower, but reliable. */
 extern EFI_GUID u40x_li_guid;
+static UINTN u40x_elapsed_ms(void);   /* defined with the clock helpers (flush precedes them) */
 static EFI_HANDLE g_IH;            /* defined with the other globals below */
 static void u40x_flush(void) {
     EFI_FILE_PROTOCOL *root = NULL, *f = NULL;
@@ -110,8 +111,18 @@ static void u40x_flush(void) {
     CopyMem(last, u40x_wide, (l + 1) * sizeof(CHAR16));
     first = FALSE;
 
-    cl = u40x_w2c(u40x_wide, tmp, sizeof(tmp));
-    if (!cl) return;
+    {   /* [+NNNNms] stamp (t20): decimal written by hand, no CRT */
+        char dig[24]; int dn = 0, plen = 0;
+        UINT64 ms = (UINT64)u40x_elapsed_ms();
+        tmp[plen++] = '['; tmp[plen++] = '+';
+        if (ms == 0) dig[dn++] = '0';
+        while (ms) { dig[dn++] = (char)('0' + (ms % 10u)); ms /= 10u; }
+        while (dn) tmp[plen++] = dig[--dn];
+        tmp[plen++] = 'm'; tmp[plen++] = 's'; tmp[plen++] = ']'; tmp[plen++] = ' ';
+        cl = u40x_w2c(u40x_wide, tmp + plen, sizeof(tmp) - (UINTN)plen);
+        if (!cl) return;
+        cl += (UINTN)plen;
+    }
     if (!BS || !g_IH) return;
     if (uefi_call_wrapper(BS->HandleProtocol, 3, g_IH, &u40x_li_guid, (void**)&li))
         return;
@@ -302,6 +313,28 @@ static UINTN u40x_elapsed_s(void)
     now = (UINT32)tt.Hour * 3600u + (UINT32)tt.Minute * 60u + (UINT32)tt.Second;
     return (now >= g_t0) ? (now - g_t0) : (86400u - g_t0 + now);
 }
+
+/* Per-line millisecond clock for the ESP log (row B2-P17, t20): one
+ * GetTime per line — cheaper than the FAT open/write/close it precedes. */
+static UINTN u40x_elapsed_ms(void)
+{
+    EFI_TIME tt;
+    UINT32 now;
+    UINTN sec;
+    if (g_t0 == 0xFFFFFFFFu) return 0;
+    if (uefi_call_wrapper(gRT->GetTime, 2, &tt, NULL)) return 0;
+    now = (UINT32)tt.Hour * 3600u + (UINT32)tt.Minute * 60u + (UINT32)tt.Second;
+    sec = (now >= g_t0) ? (now - g_t0) : (86400u - g_t0 + now);
+    return sec * 1000u + (UINTN)(tt.Nanosecond / 1000000u);
+}
+
+/* Build-identity banner (row B2-P19, t20): the deb smoke gate asserts
+ * this exact ASCII appears in the shipped .EFI — a read-only/diagnostic
+ * artifact can no longer be mislabeled as the unlocking build. */
+#ifndef EFI_BANNER_STR
+#define EFI_BANNER_STR "50HX-UNLOCK-TX-1"
+#endif
+static const char u40x_banner_id[] = EFI_BANNER_STR;
 
 EFI_STATUS EFIAPI
 u40x_entry(EFI_HANDLE ImageHandle_, EFI_SYSTEM_TABLE *SystemTable_)
@@ -5939,6 +5972,13 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     }
     u40x_open_log(ImageHandle);
     Print(L"\n=== CMP50HX Unlock v1-50HX (TU102 GSP WITH_LOADER) ===\n");
+    {   /* startup banner (t20) */
+        CHAR16 bw[40]; UINTN bi;
+        for (bi = 0; u40x_banner_id[bi] && bi + 1 < 40; bi++)
+            bw[bi] = (CHAR16)(UINT8)u40x_banner_id[bi];
+        bw[bi] = 0;
+        Print(L"[50HX] banner=%s\n", bw);
+    }
     returnToGrub = u40x_has_load_option(ImageHandle, L"--return-to-grub");
 #ifdef U40X_FORCE_RETURN
     returnToGrub = TRUE;   /* chaining build: always let firmware continue */

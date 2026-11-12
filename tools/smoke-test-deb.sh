@@ -100,6 +100,15 @@ rtd3cf="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./etc/modprobe.d/cmp50hx-rt
     || { printf 'cmp50hx-rtd3.conf ships an ACTIVE DynamicPowerManagement line (must be opt-in commented)\n' >&2; exit 1; }
 grep -qxF '/etc/modprobe.d/cmp50hx-rtd3.conf' <<<"$(dpkg-deb --ctrl-tarfile "${deb}" | tar -xO ./conffiles)" \
     || { printf 'cmp50hx-rtd3.conf is not a dpkg conffile\n' >&2; exit 1; }
+# gtuu-mining t20 (row B2-P19): build-identity banner — the shipped
+# unlocking EFI must carry its TX banner; diagnostic/read-only artifacts
+# can no longer be mislabeled as the unlocking build.
+_efibin="$(mktemp)"
+dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./opt/cmp50hx-unlock/efi/50HXUNLK.EFI > "${_efibin}" \
+    || { printf '50HXUNLK.EFI missing from payload\n' >&2; rm -f "${_efibin}"; exit 1; }
+grep -aq "50HX-UNLOCK-TX-1" "${_efibin}" \
+    || { printf '50HXUNLK.EFI lacks the TX build banner (wrong artifact?)\n' >&2; rm -f "${_efibin}"; exit 1; }
+rm -f "${_efibin}"
 while IFS= read -r unit; do
     [[ -n "${unit}" ]] || continue
     body="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO "${unit}")"
