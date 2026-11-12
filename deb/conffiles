@@ -4,3 +4,4 @@
 /etc/cmp50hx/boot.conf
 /etc/modprobe.d/gpu-unlock-claim.conf
 /etc/modprobe.d/gpu-unlock-peek.conf
+/etc/modprobe.d/cmp50hx-rtd3.conf

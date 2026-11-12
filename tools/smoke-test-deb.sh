@@ -92,6 +92,14 @@ grep -qx "blacklist gpu_peek" <<<"${peekcf}" \
     || { printf 'gpu-unlock-peek.conf missing line: blacklist gpu_peek\n' >&2; exit 1; }
 grep -qxF '/etc/modprobe.d/gpu-unlock-peek.conf' <<<"$(dpkg-deb --ctrl-tarfile "${deb}" | tar -xO ./conffiles)" \
     || { printf 'gpu-unlock-peek.conf is not a dpkg conffile\n' >&2; exit 1; }
+# gtuu-mining t22 (row B2-P26): RTD3 insurance ships as a conffile,
+# COMMENTED — an active line would change boot behavior unasked.
+rtd3cf="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO ./etc/modprobe.d/cmp50hx-rtd3.conf)"
+[[ -n "${rtd3cf}" ]] || { printf 'cmp50hx-rtd3.conf missing from payload\n' >&2; exit 1; }
+! grep -Eq '^[[:space:]]*options[[:space:]]+nvidia[[:space:]]+.*NVreg_DynamicPowerManagement' <<<"${rtd3cf}" \
+    || { printf 'cmp50hx-rtd3.conf ships an ACTIVE DynamicPowerManagement line (must be opt-in commented)\n' >&2; exit 1; }
+grep -qxF '/etc/modprobe.d/cmp50hx-rtd3.conf' <<<"$(dpkg-deb --ctrl-tarfile "${deb}" | tar -xO ./conffiles)" \
+    || { printf 'cmp50hx-rtd3.conf is not a dpkg conffile\n' >&2; exit 1; }
 while IFS= read -r unit; do
     [[ -n "${unit}" ]] || continue
     body="$(dpkg-deb --fsys-tarfile "${deb}" | tar -xO "${unit}")"

@@ -216,6 +216,8 @@ install -m 0644 "${root}/deb/blacklist-cmp-unlock.conf" "${stage}/etc/modprobe.d
 printf 'options nvidia cmp50_rebar_size=8\n' > "${stage}/etc/modprobe.d/cmp50hx-unlock.conf"
 install -m 0644 "${root}/deb/blacklist-gpu-unlock-claim.conf" "${stage}/etc/modprobe.d/gpu-unlock-claim.conf"
 install -m 0644 "${root}/deb/blacklist-gpu-unlock-peek.conf" "${stage}/etc/modprobe.d/gpu-unlock-peek.conf"
+# gtuu-mining t22 (B2-P26): D3cold insurance, shipped commented — opt-in only.
+install -m 0644 "${root}/deb/rtd3-keep-powered.conf" "${stage}/etc/modprobe.d/cmp50hx-rtd3.conf"
 install -m 0644 "${root}/tuning/profiles.conf" "${stage}/etc/cmp-tune.conf"
 mkdir -p "${stage}/etc/cmp50hx"
 install -m 0755 "${root}/claim-90hx/cmp90hx-claim.sh" "${libdir}/cmp90hx-claim.sh"
