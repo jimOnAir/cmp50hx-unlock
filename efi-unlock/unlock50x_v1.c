@@ -250,6 +250,15 @@ static void u40x_print(const CHAR16 *fmt, ...) {
                 if (!s) s = L"(null)";
                 while (*s && w < 480) u40x_wide[w++] = *s++;
                 fptr++;
+            } else if (*fptr == L'a') {
+                /* %a: ASCII (CHAR8*) string — the shared decode
+                 * dictionary (common/booter_mailbox.h) is plain C for
+                 * both the kernel side and here; widening happens on
+                 * the fly. NULL prints as (null), never blank. */
+                const char *s = va_arg(ap, const char *);
+                if (!s) s = "(null)";
+                while (*s && w < 480) u40x_wide[w++] = (CHAR16)*s++;
+                fptr++;
             } else if (*fptr == L'r') {
                 unsigned long long v = va_arg(ap, unsigned long long);
                 CHAR16 tmp[24]; int i = 0;
@@ -326,6 +335,11 @@ u40x_entry(EFI_HANDLE ImageHandle_, EFI_SYSTEM_TABLE *SystemTable_)
  * header, safe for -ffreestanding. Values verified against
  * open-gpu-kernel-modules GA102 regmaps. */
 #include "../common/cmp50hx_regs.h"
+/* Booter mailbox0/EXCI decode dictionary v3 (gtuu-mining ticket 17,
+ * row B2-P4): ONE shared header with the claim ko; decoders return the
+ * dictionary name or NULL (raw+undecoded) — never a guess. Provenance
+ * of every code and of the EXCI bit layout is in the header itself. */
+#include "../common/booter_mailbox.h"
 #include "sha256.h"
 #define REG_FEAT_OVR_PLM       CMP50_REG_FEAT_OVR_PLM   /* 0xffffffff = open */
 #define REG_FEAT_OVR_SM_SPD    CMP50_REG_FEAT_SS0       /* 0x88888888 = full */
@@ -349,6 +363,12 @@ u40x_entry(EFI_HANDLE ImageHandle_, EFI_SYSTEM_TABLE *SystemTable_)
 
 #define SEC2_MAILBOX0           (NV_PSEC_BASE + 0x040)
 #define SEC2_MAILBOX1           (NV_PSEC_BASE + 0x044)
+/* SEC2 falcon exception register: EXPC[19:0] + EXCAUSE[24:20]
+ * (NV_SOE_FALCON_EXCI 0x00d0, vendored open-gpu-kernel-modules
+ * nvswitch/lr10/dev_soe_ip.h:318-338; same offset B2's halt forensics
+ * reads, loader/src/tx.rs:308 + tx_booter.rs:581). ticket 17 decodes
+ * it into the tu102 failure dump. */
+#define SEC2_EXCI               (NV_PSEC_BASE + 0x0d0)
 #define SEC2_IRQSTAT            (NV_PSEC_BASE + 0x008)
 #define SEC2_IRQSCLR            (NV_PSEC_BASE + 0x004)
 #define SEC2_DEBUGINFO          (NV_PSEC_BASE + 0x094)
@@ -1188,6 +1208,66 @@ u40x_zero_dma_note(const CHAR16 *who, UINT32 cpuctl, UINT32 imem0)
         Print(L"%s: ZERO-DMA FINGERPRINT cpuctl=0x%08x IMEM[0]=0x%08x - "
               L"check BIOS VT-d/intel-IOMMU (DMA protection): ON blocks both "
               L"staging bands (B2 four-cell)\n", who, cpuctl, imem0);
+}
+
+/* ==== Failure-dump decode notes (gtuu-mining ticket 17, row B2-P4) ====
+ * Halt codes get NAMES: dictionary v3 lives in common/booter_mailbox.h,
+ * the single header shared with claim-90hx (its booter_diag.c composes
+ * the identical fragment), so EFI and ko diagnostics cannot drift.
+ * Branch rules, mirrored by the ko formatter line for line:
+ *   poisoned  -> raw=0x%08x undecoded (poisoned readback - no verdict...)
+ *   known     -> 0x%08x decode: <dictionary string>
+ *   unknown   -> raw=0x%08x undecoded
+ * Trap (1) — Turing `sec` readback is ALWAYS scrub-poisoned, the ns/dmem
+ * rows are the verdict: these notes take ONLY ns-visible register values
+ * (SEC2 mailbox0 / EXCI reads via mmio_read32 on the open window); the
+ * secure-port IMEM readback (IMEM_S line in booter_load_tu102_direct)
+ * stays purely observational, no decode and no verdict ever derives
+ * from it. Trap (2) — 0x00900100 (INV_INS@0x100) also appears in
+ * SUCCESSFUL runs: booter_exci_info_class() labels that exact shape
+ * `info`, and no note here may call anything a verdict. */
+static void
+u40x_booter_mailbox_note(const CHAR16 *who, UINT32 mbox0)
+{
+    const char *nm;
+
+    if (booter_reg_poisoned(mbox0)) {
+        Print(L"%s: halt-decode mailbox0 raw=0x%08x undecoded "
+              L"(poisoned readback - no verdict derived from it)\n",
+              who, mbox0);
+        return;
+    }
+    nm = booter_mailbox0_name(mbox0);
+    if (nm)
+        Print(L"%s: halt-decode mailbox0 0x%08x decode: %a\n", who, mbox0, nm);
+    else
+        Print(L"%s: halt-decode mailbox0 raw=0x%08x undecoded\n", who, mbox0);
+}
+
+static void
+u40x_booter_exci_note(const CHAR16 *who, UINT32 exci)
+{
+    const char *nm, *info;
+    UINT32 cause = BOOTER_EXCI_EXCAUSE(exci), expc = BOOTER_EXCI_EXPC(exci);
+
+    if (booter_reg_poisoned(exci)) {
+        Print(L"%s: halt-decode exci raw=0x%08x undecoded "
+              L"(poisoned readback - no verdict derived from it)\n",
+              who, exci);
+        return;
+    }
+    nm = booter_exci_cause_name(cause);
+    if (!nm) {
+        Print(L"%s: halt-decode exci raw=0x%08x undecoded\n", who, exci);
+        return;
+    }
+    info = booter_exci_info_class(exci);
+    if (info)
+        Print(L"%s: halt-decode exci 0x%08x EXPC=0x%x EXCAUSE=0x%x "
+              L"decode: %a - %a\n", who, exci, expc, cause, nm, info);
+    else
+        Print(L"%s: halt-decode exci 0x%08x EXPC=0x%x EXCAUSE=0x%x "
+              L"decode: %a\n", who, exci, expc, cause, nm);
 }
 
 /* Включить MEM_EN + BUS_MASTER в command-регистре GPU.
@@ -2404,6 +2484,22 @@ fwsec_boot_gsp_50hx(UINT64 fwsecPhys)
             Print(L"fwsec50: FWSEC gate REJECT [MAILBOX] mbox0=0x%08x "
                   L"mbox1=0x%08x poisoned halted@%dms\n",
                   mb0, mb1, (INTN)haltMs);
+            /* Decode note (ticket 17): attach only where the branch
+             * itself is a poisoning statement — a POISONED mb0 is named
+             * as poison ('raw=... undecoded (poisoned readback...)'),
+             * never dressed in a dictionary name. When this branch
+             * fires on mb1 alone, mb0 may be any GSP value: printing a
+             * booter-dictionary meaning for a GSP-FWSECLIC producer's
+             * register would be guessing, so the note is deliberately
+             * gated on the poison predicate here. Scope note, honestly:
+             * the OTHER fwsec50 failure prints carry GSP-FWSECLIC
+             * mailbox values (a different producer than the SEC2
+             * booter the v3 dictionary describes — B2's own FWSEC
+             * forensics print them raw, tx_fwsec.rs:704/976), and
+             * mailbox1 has no dictionary at all: no decode attached to
+             * either. Never guess. */
+            if (booter_reg_poisoned(mb0))
+                u40x_booter_mailbox_note(L"fwsec50-gate", mb0);
             return FALSE;
         }
         Print(L"fwsec50: *** FWSEC gate PASS: wpr2=0x%08x:0x%08x @%dms "
@@ -3062,6 +3158,11 @@ booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys,
         mmio_write32(SEC2_IMEMC0, 0x100u | (1u << 28));
         rbSec = mmio_read32(SEC2_IMEMD0);
         mmio_write32(SEC2_DMEMC0, 0x200u);
+        /* TRAP, encoded as a rule (ticket 17, trap 1): the SEC=1 port
+         * readback (IMEM_S) is ALWAYS scrub-poisoned on Turing — this
+         * value stays observational and NEVER feeds a decode or a
+         * verdict; the ns/dmem rows (IMEM[0], DMEM[0x200]) are the
+         * verdict of the portal load. */
         Print(L"tu102: rb IMEM[0]=0x%08x(exp 0x%08x) IMEM_S[0x100]=0x%08x "
               L"DMEM[0x200]=0x%08x(exp sig 0x%08x)\n",
               rbNs, *(UINT32 *)(img + 0x0u), rbSec, mmio_read32(SEC2_DMEMD0),
@@ -3119,6 +3220,11 @@ booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys,
         m0  = mmio_read32(SEC2_MAILBOX0);
         m1  = mmio_read32(SEC2_MAILBOX1);
         Print(L"tu102:   m0=0x%x m1=0x%x\n", m0, m1);
+        /* Halt code gets its dictionary name (ticket 17, v3, shared with
+         * the ko). A mailbox still carrying the input-carrier meta address
+         * is NOT in the dictionary and prints raw+undecoded — never a
+         * guess. */
+        u40x_booter_mailbox_note(L"tu102", m0);
         Print(L"tu102: RESULT: PLM=0x%08x SS0=0x%08x SS1=0x%08x\n",
               mmio_read32(REG_FEAT_OVR_PLM), mmio_read32(REG_FEAT_OVR_SM_SPD),
               mmio_read32(REG_FEAT_OVR_SM_SPD_1));
@@ -3143,10 +3249,17 @@ booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys,
          * never DMA'd — the VT-d-class death shape, named not derived.
          * IMEM[0] read via the file's own port-readback idiom, read-only. */
         {
-            UINT32 im0;
+            UINT32 im0, ex;
             mmio_write32(SEC2_IMEMC0, 0x0u);
             im0 = mmio_read32(SEC2_IMEMD0);
             u40x_zero_dma_note(L"tu102", cpu, im0);
+            /* EXCI halt forensics (ticket 17): the falcon exception
+             * register (SEC2+0x0d0, NV_SOE_FALCON_EXCI — see defines
+             * and common/booter_mailbox.h provenance) named alongside
+             * the halt code; B2's halt dump reads the identical offset
+             * (loader/src/tx_booter.rs:581). */
+            ex = mmio_read32(SEC2_EXCI);
+            u40x_booter_exci_note(L"tu102-halt", ex);
         }
         if (attempt == 0) {
             /* V551-defer (issue 15): a failed attempt A on a still-ARMED
@@ -5359,6 +5472,11 @@ staging_band_fallback(U40X_STAGE *st, UINT32 lastBooterExit)
         else
             Print(L"[BAND-HIGH] STAGING-FALLBACK: not armed (booter halt=0x%08x, ladder arms only on the 0x89 staging-undelivered signature) - refusal stands\n",
                   lastBooterExit);
+        /* Named halt (ticket 17): same shared dictionary; the 0x91 line
+         * states its own contract (delta EXACTLY 1 MiB) so the ticket-15
+         * "mirror read-lock class" reading and B2's geometry reading
+         * appear as one sentence, not two vocabularies. */
+        u40x_booter_mailbox_note(L"STAGING-FALLBACK", lastBooterExit);
         return FALSE;
     }
     /* gate 2: host-side magic intact (cache flush first — the file's own
@@ -5450,6 +5568,7 @@ staging_band_fallback(U40X_STAGE *st, UINT32 lastBooterExit)
     }
     Print(L"[BAND-LOW] STAGING-FALLBACK: LOW-band retry also failed (halt=0x%08x) - the band alone was not the whole story; canonical failure path follows\n",
           retryExit);
+    u40x_booter_mailbox_note(L"STAGING-FALLBACK", retryExit);
     {   /* still the zero-DMA shape after BOTH bands? name the translation
          * layer (B2 four-cell: VT-d ON kills both bands) */
         UINT32 im0;
@@ -5990,6 +6109,8 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
                                                   &booterExit);
                 Print(L"[50HX] booter_load_tu102_direct returned %r (halt=0x%08x)\n",
                       Status, booterExit);
+                if (EFI_ERROR(Status))
+                    u40x_booter_mailbox_note(L"[9][warm]", booterExit);
                 if (!EFI_ERROR(Status)) break;
                 if (tr < 5) {
                     UINT32 m0o = mmio_read32(SEC2_MAILBOX0);

@@ -7,6 +7,7 @@
  */
 #include <linux/version.h>
 #include "aperture_compat.h"
+#include "booter_diag.h"
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/firmware.h>
@@ -80,7 +81,7 @@ struct unlock_transaction_work {
 };
 
 struct gu_boot_state {
-	u32 ctl, engine, reset_plm, mailbox0, mailbox1, acr, csberr, fhstate;
+	u32 ctl, engine, reset_plm, mailbox0, mailbox1, exci, acr, csberr, fhstate;
 	u32 wpr_lo, wpr_hi;
 	u32 tracepc_lo, tracepc_hi, riscv, rpc, priv_err, priv_info;
 	u32 priv_addr, priv_addr_hi, hub_err;
@@ -221,6 +222,7 @@ static void gu_read_boot_state(struct unlock_transaction_work *work,
 	GU_BOOT_RD(reset_plm, GU_SEC2_RESET_PLM_OFFSET);
 	GU_BOOT_RD(mailbox0, GU_SEC2_BASE + GU_FALCON_MAILBOX0_OFFSET);
 	GU_BOOT_RD(mailbox1, GU_SEC2_BASE + GU_FALCON_MAILBOX1_OFFSET);
+	GU_BOOT_RD(exci, GU_SEC2_BASE + GU_FALCON_EXCI_OFFSET);
 	GU_BOOT_RD(acr, GU_ACR_SCRATCH_OFFSET);
 	GU_BOOT_RD(csberr, GU_SEC2_BASE + GU_SEC2_CSBERRSTAT_OFFSET);
 	GU_BOOT_RD(fhstate, GU_SEC2_BASE + GU_FALCON_FHSTATE_OFFSET);
@@ -288,10 +290,35 @@ static void gu_snapshot(struct unlock_transaction_work *work, const char *functi
 		"gpu_unlock: boot reset_plm=%#x ctl=%#x engine=%#x fhstate=%#x mbox=%#x:%#x acr=%#x csberr=%#x ok=%u\n",
 		b.reset_plm, b.ctl, b.engine, b.fhstate, b.mailbox1, b.mailbox0,
 		b.acr, b.csberr, b.ok);
+	/* Halt forensics get NAMES (gtuu-mining ticket 17, row B2-P4): the
+	 * dictionary is common/booter_mailbox.h — the single source shared
+	 * with the EFI, so these decode lines cannot drift from the EFI's.
+	 * Trap (1): Turing `sec` readback is always scrub-poisoned — the
+	 * ns/dmem rows are the verdict; these lines consume only the two
+	 * ns-visible SEC2 registers below and a poisoned one prints raw,
+	 * never a name.  Trap (2): 0x00900100 (INV_INS@0x100) also appears
+	 * in SUCCESSFUL runs — the formatter labels it `info`, never a
+	 * verdict.  Reads are read_bar-only (records last read; snapshot
+	 * runs on first error, happy path untouched — ticket-07 idiom). */
+	{
+		char diag[320];
+
+		dev_err(&work->pdev->dev, "gpu_unlock: booter-diag mailbox0 %s\n",
+			gu_booter_mailbox_diag(b.mailbox0, diag, sizeof(diag)));
+	}
 	dev_err(&work->pdev->dev,
 		"gpu_unlock: riscv tracepc=%#x:%#x priv_access=%#x rpc=%#x priv_err=%#x info=%#x addr=%#x:%#x hub_err=%#x\n",
 		b.tracepc_hi, b.tracepc_lo, b.riscv, b.rpc, b.priv_err,
 		b.priv_info, b.priv_addr_hi, b.priv_addr, b.hub_err);
+	/* EXCI decode lands alongside ticket-07's riscv snapshot: the
+	 * falcon-window exception register (GU_FALCON_EXCI_OFFSET) names
+	 * the trap shape the riscv block shows the PC of. */
+	{
+		char diag[320];
+
+		dev_err(&work->pdev->dev, "gpu_unlock: booter-diag exci %s\n",
+			gu_booter_exci_diag(b.exci, diag, sizeof(diag)));
+	}
 	dev_err(&work->pdev->dev,
 		"gpu_unlock: wpr2 lo=%#x hi=%#x start=%#llx end=%#llx frts=%#x:%#x saved=%u\n",
 		b.wpr_lo, b.wpr_hi, (unsigned long long)start,
@@ -1115,7 +1142,9 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 		 engine, GU_SEC2_RESET_PLM_OFFSET, reset_plm, mailbox1, mailbox0,
 		 scratch, csberr, fhstate, wpr_hi, wpr_lo, feat, wpr_cfg,
 		 fresh, cleanup_complete, ret);
-	if (ret || !cleanup_complete)
+	if (ret || !cleanup_complete) {
+		char diag[320];
+
 		dev_err(&work->pdev->dev,
 			"invocation failed: index=%zu attempt=%u cpuctl=%#x engine=%#x reset_plm=%#x mailbox=%#x:%#x acr=%#x csberr=%#x fhstate=%#x wpr2=%#x:%#x plm_feat=%#x plm_wpr_cfg=%#x target=%#x:%#x reset=%u/%u reload=%u start=%u fresh=%u cleanup=%u error=%d\n",
 			work->write_index, work->attempt, ctl, engine, reset_plm,
@@ -1123,6 +1152,15 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 			feat, wpr_cfg, work->target_addr, work->target_value,
 			launch.reset_asserted, launch.reset_released, launch.reloaded,
 			launch.started, fresh, cleanup_complete, ret ? ret : -EIO);
+		/* Halt codes get names (gtuu-mining ticket 17, shared
+		 * common/booter_mailbox.h dictionary): a dictionary code
+		 * decodes; a payload completion echo (V67 returns the meta
+		 * pointer here) and anything unknown print raw+undecoded —
+		 * never a guess. */
+		dev_err(&work->pdev->dev,
+			"gpu_unlock: booter-diag mailbox0 %s\n",
+			gu_booter_mailbox_diag(mailbox0, diag, sizeof(diag)));
+	}
 	return GU_RESULT(ret ? ret : cleanup_complete ? 0 : -EIO);
 }
 

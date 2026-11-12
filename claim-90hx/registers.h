@@ -21,6 +21,12 @@
 
 #define GU_FALCON_MAILBOX0_OFFSET     0x00000040u
 #define GU_FALCON_MAILBOX1_OFFSET     0x00000044u
+/* SEC2 falcon exception register (gtuu-mining ticket 17): EXPC[19:0] +
+ * EXCAUSE[24:20], names/offset vendored in open-gpu-kernel-modules
+ * src/common/inc/swref/published/nvswitch/lr10/dev_soe_ip.h:318-338
+ * (NV_SOE_FALCON_EXCI 0x00d0, Falcon IP common); same offset B2 reads
+ * on live TU10x silicon in its halt forensics (loader/src/tx.rs:308). */
+#define GU_FALCON_EXCI_OFFSET         0x000000d0u
 #define GU_FALCON_RM_OFFSET           0x00000084u
 #define GU_FALCON_HWCFG2_OFFSET       0x000000f4u
 #define GU_FALCON_CPUCTL_OFFSET       0x00000100u

@@ -2,7 +2,13 @@
 # Product build (map 90hx-gen2-610 ticket 06): T09 gate-first table is the
 # product shape — verified via symbol size in CI/smoke (0x60 = 6 entries).
 ccflags-y += -DGU_CMP90HX_T09
+# Shared decode dictionary (gtuu-mining ticket 17): booter_diag.c quoted-
+# includes "booter_mailbox.h" — in-tree this lands on the single common/
+# header; in the packaged DKMS tree (no sibling common/) the byte copy
+# staged by tools/build-deb.sh wins from the source dir itself.
+ccflags-y += -I$(src)/../common
 # SPDX-License-Identifier: GPL-2.0-only
 obj-m += gpu_unlock.o
 gpu_unlock-y := main.o gfw_eval.o prep_610.o layout_610.o \
-	vbios_610.o recipes.o payload.o firmware_610.o falcon.o unlock_610.o
+	vbios_610.o recipes.o payload.o firmware_610.o falcon.o unlock_610.o \
+	booter_diag.o

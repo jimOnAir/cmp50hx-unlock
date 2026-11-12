@@ -100,6 +100,11 @@ typedef char CHAR16; typedef int BOOLEAN;
 typedef INTN EFI_STATUS;
 #define EFI_SUCCESS 0
 
+/* ticket 17: the [MAILBOX] reject branch consults booter_reg_poisoned()
+ * from the shared dictionary header — compiled from the SAME source the
+ * firmware build uses (anti-drift, same rule as the defines closure). */
+#include "''' + hdr_path.rsplit("/", 1)[0] + '''/booter_mailbox.h"
+
 /* ---- virtual clock: the gate's loops are 1 iteration per 1 ms stall ---- */
 static UINT64 g_vms;
 static EFI_STATUS stub_stall(UINTN us) { g_vms += us / 1000; return EFI_SUCCESS; }
@@ -156,6 +161,16 @@ static int g_zerodma_calls;
 static void u40x_zero_dma_note(const CHAR16 *who, UINT32 c, UINT32 m) {
     (void)who; (void)c; (void)m; g_zerodma_calls++;
 }
+/* ticket 17 wiring: the [MAILBOX]-reject branch now attaches the shared
+ * dictionary decode note (VERBATIM call is part of the extracted
+ * function; both values on that branch are poisoned by construction, so
+ * the real helper always lands on its poison line — never names a GSP
+ * value with the booter dictionary). Inertized here; the dictionary and
+ * that guarantee are gated by mailbox-dict-selftest.sh. */
+static int g_mbnote_calls;
+static void u40x_booter_mailbox_note(const CHAR16 *who, UINT32 m) {
+    (void)who; (void)m; g_mbnote_calls++;
+}
 static const UINT8 gsp_bl_tu102[0x400];
 static UINT8 g_blob[0x10000];   /* stands in for the physical FWSEC blob */
 
@@ -165,6 +180,7 @@ static UINT8 g_blob[0x10000];   /* stands in for the physical FWSEC blob */
 static int fails;
 static void fx_reset(void) {
     g_vms = 0; g_logn = 0; g_writes = 0; g_zerodma_calls = 0;
+    g_mbnote_calls = 0;
     memset(g_blob, 0, sizeof g_blob);
     f_wpr_lo = g_wpr2LoUp;  f_wpr_hi = g_wpr2HiUp;   /* exact expected window */
     f_wpr_lo_pre = 0;       f_wpr_hi_pre = 0;        /* down before FRTS */
@@ -186,7 +202,15 @@ static void check(const char *name, int want, const char *tag, UINT64 min_vms) {
      * everywhere else (the hook is read-only advice on the failure path) */
     int zdma_ok = (tag && strcmp(tag, "[WPR2]") == 0)
                   ? g_zerodma_calls == 1 : g_zerodma_calls == 0;
-    if (got != want || (tag && !saw(tag)) || g_vms < min_vms || !zdma_ok) {
+    /* ticket 17: the dictionary note rides the [MAILBOX] reject only,
+     * and only when mb0 ITSELF is poisoned — a branch entered on mb1
+     * alone must not print any attribution for a GSP-produced mb0 */
+    int mb_poison = f_mb0 == 0xFFFFFFFFu ||
+                    (f_mb0 & 0xFFFF0000u) == 0xBADF0000u;
+    int mbnote_want = (tag && strcmp(tag, "[MAILBOX]") == 0) && mb_poison;
+    int mbnote_ok = g_mbnote_calls == (mbnote_want ? 1 : 0);
+    if (got != want || (tag && !saw(tag)) || g_vms < min_vms ||
+        !zdma_ok || !mbnote_ok) {
         printf("FAIL %s want=%d/%s/>=%llums got=%d/%llums\\n",
                name, want, tag ? tag : "-", (unsigned long long)min_vms,
                got, (unsigned long long)g_vms);

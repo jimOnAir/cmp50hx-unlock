@@ -135,6 +135,12 @@ claim_src="${stage}/usr/src/gpu-unlock-claim-${driver_version}"
 mkdir -p "${claim_src}"
 tar -C "${root}/claim-90hx" --exclude='*.o' --exclude='*.ko' --exclude='*.mod' --exclude='*.mod.c' --exclude='Module.symvers' --exclude='modules.order' --exclude='./.*' -cf - . | tar -C "${claim_src}" -xf -
 [[ -s "${claim_src}/dkms.conf" ]] || { printf 'gpu-unlock-claim staging produced no dkms.conf (excludes too greedy?)\n' >&2; exit 6; }
+# gtuu-mining ticket 17: the claim tree builds standalone under DKMS (no
+# sibling common/), so stage a BYTE copy of the shared decode dictionary
+# next to the module sources; booter_diag.c's quoted include finds it
+# there, in-tree builds use common/ directly (Kbuild -I). Same staging
+# copy = no drift path; mailbox-dict-selftest.sh asserts this line exists.
+install -m 0644 "${root}/common/booter_mailbox.h" "${claim_src}/booter_mailbox.h"
 
 # --- 2c. gpu-unlock-peek: read-only diagnostic DKMS tree (gtuu-mining 10) --
 # Pre-driver BAR0 sampler for remote triage. Ships blacklisted and unitless:

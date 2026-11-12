@@ -237,6 +237,14 @@ static UINT32 mmio_read32(UINTN off) {
 }
 static UINT32 g_writes;
 static void mmio_write32(UINTN off, UINT32 v) { (void)off; (void)v; g_writes++; }
+/* ticket 17 wiring: the refusal lines now attach the shared-dictionary
+ * decode note (the VERBATIM call is part of the extracted function).
+ * Inertized here — the dictionary itself, both traps and the
+ * refusal-site attachment are gated by mailbox-dict-selftest.sh. */
+static int g_mailnote_calls;
+static void u40x_booter_mailbox_note(const CHAR16 *who, UINT32 m0) {
+    (void)who; (void)m0; g_mailnote_calls++;
+}
 static void CopyMem(VOID *d, const VOID *s, UINTN n) { memcpy(d, s, n); }
 static void SetMem(VOID *d, UINTN n, UINT8 v) { memset(d, n, v); }
 static UINT8 fwsec_50hx_prod_bin[FW50_BLOB_SIZE];
@@ -255,6 +263,7 @@ static void fx_reset(void) {
     f_fwsec_ok = f_booter_ok = 1; f_retry_exit = 0;
     f_wpr2hi = f_wpr2lo = 0; f_sec_cpu = 2u; f_sec_imem0 = 0xDEAD5EC1u;
     g_logn = 0; g_events[0] = 0; g_bands[0] = 0;
+    g_mailnote_calls = 0;
 }
 static UINT64 hi_alloc(UINTN pages) {
     EFI_PHYSICAL_ADDRESS p;
@@ -295,6 +304,8 @@ int main(void) {
     expect("1 success-high: no retry (no flr/bme/fwsec/booter, decline named)",
            !r && !g_flr && !g_bme && !g_fwsec && !g_booter &&
            saw("STAGING-FALLBACK: not armed") &&
+           g_mailnote_calls == 1 &&   /* ticket 17: the named halt gets its
+                                       * dictionary note on the refusal */
            saw_not("exactly ONE retry"));
 
     /* 2. 0x89 + magic intact + all-HIGH: exactly one LOW retry, vehicle
@@ -334,6 +345,7 @@ int main(void) {
     expect("4 0x89+magic-corrupt: NO retry, corruption named",
            !r && !g_booter && !g_flr && !g_fwsec &&
            saw("host meta page magic CORRUPT") &&
+           g_mailnote_calls == 0 &&   /* host-side verdict, not a halt-code dump */
            saw_not("exactly ONE retry"));
 
     /* 5. second 0x89 (retry fails identically): final refusal, still
@@ -346,6 +358,7 @@ int main(void) {
     expect("5 second 0x89: final refusal, exactly one retry (no loop), band history HIGH+LOW",
            !r && g_booter == 2 &&
            saw("LOW-band retry also failed") &&
+           g_mailnote_calls == 1 &&   /* ticket 17: retry-fail halt decoded once */
            saw("exactly ONE retry") &&
            strcmp(g_bands, "HL") == 0);   /* HIGH attempt, then the ONE
                                            * LOW retry — band history, and
@@ -376,7 +389,11 @@ int main(void) {
     r = staging_band_fallback(&s, 0x91u);
     expect("7 0x91 mirror class: never armed",
            !r && !g_booter && !g_flr &&
-           saw("mirror sub-4GiB read-lock") && saw_not("exactly ONE retry"));
+           saw("mirror sub-4GiB read-lock") &&
+           g_mailnote_calls == 1 &&   /* ticket 17: 0x91 refusal gets the
+                                       * dictionary line stating the
+                                       * EXACTLY-1MiB contract */
+           saw_not("exactly ONE retry"));
 
     /* 8. already-LOW staging (the alloc_fwsec_buffer allocation-time
      *     fallback class): guard names it, nothing to descend */
