@@ -1057,3 +1057,28 @@ containers green, W=1 clean. Package gate: full deb
 → PASS_CMP_DEB_SMOKE including the new peek assertions (blacklist line
 grep -qx, no-unit-reference scan, wrapper 0755, maintainer-script
 downgrade-sweep locks). Live proof awaiting llm2 (down 2026-11-12).
+
+## B2 sweep landed: independent convergence + eight new tickets (gtuu-mining t02 complete, 2026-11-12)
+
+The nv-uefi-unlocker static sweep (P1-P42, table in
+.scratch/gtuu-mining/source-eval.md) says three things worth recording.
+(1) CONVERGENCE: their TU102 EFI chain independently reaches A's exact
+design on portal quirks, BOOT_DIRECT, BTL1 slot rule (they cite OUR
+prep_610.c as authority), FAT log discipline, and the PM-notifier ordering
+(A's resume priority proven correct from their corpus; the gap is only
+force-D0-on-wake, ticket 18). (2) THIRD-PARTY VALIDATION: their
+peer-landscape independently reproduces and cites xrip/cmp50hx-unlock's
+31.7×/28.4× closed-loop, the FEAT 0x409650/64/6c block, AGESA-CF8, and
+adopts issue #25's pre-OS-retrain-hang as their own reason to keep link
+policy OS-side — quotable validation, pinned to their commit, not our
+memory. (3) SELF-DISCOVERY: the "provenance-pinned Turing BOOT_DIRECT
+bootloader" byte-pinned by their release pipeline is OUR all-zero
+placeholder (verified sha256(0x00…) = fa43239b…/de676bae… of
+efi-unlock/blobs/gsp_rm_boot_dbg.bin) — harmless (payload mode never
+consumes the BL slot, now twice independently proven) but ticket 13 must
+either generate a real BL or document the zero-badge. New tickets 14-22
+from their leads (FWSEC completion gate first — A's WPR2-match-only success
+is their root-caused 0x91 race class); their low-trust verdict on B1
+("FMLA32" = non-NVIDIA terminology) corroborates the ticket-02 posture from
+a line that never touched B1's code. llm2 down today: all gates this
+session ran local/container only; bench-toolchain evidence predates outage.
