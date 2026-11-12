@@ -2001,41 +2001,128 @@ fwsec_boot_gsp_50hx(UINT64 fwsecPhys)
         Print(L"\n");
     }
 
-    /* 7. poll WPR2 → FRTS succeeded则 up；读 GSP cpu/dbg/scratch 判failed原因 */
-    for (i = 0; i < 5000; i++) {
-        UINT32 lo = mmio_read32(REG_PFB_MMU_WPR2_LO);
-        UINT32 hi = mmio_read32(REG_PFB_MMU_WPR2_HI);
-        if ((lo & 0xFFFFFFF0u) == g_wpr2LoUp &&
-            (hi & 0xFFFFFFF0u) == g_wpr2HiUp) {
-            Print(L"fwsec50: *** WPR2 UP lo=0x%08x hi=0x%08x after %dms ***\n",
-                  lo, hi, (INTN)i);
-            return TRUE;
+    /* 7. poll WPR2 → FRTS succeeded则 up；读 GSP cpu/dbg/scratch 判failed原因
+     *
+     * v-t14 (gtuu-mining ticket 14, row B2-P1): WPR2-up ALONE is not FWSEC
+     * completion. The kernel contract — kgspExecuteHsFalcon_TU102 writes
+     * mailboxes, STARTCPU, then kflcnWaitForHalt; kgspExecuteFwsec_TU102
+     * validates scratch0e[31:16] FRTS_ERR_CODE == 0 and reads back the
+     * mailbox AFTER the halt (kernel_gsp_frts_tu102.c:486-530; reference
+     * ports loader/src/tx_fwsec.rs:997-1060 + docs/tu10x-c-parity-diff.md
+     * B0/B0.1). #62 measured WPR2-up at 3 ms vs HALT at 156 ms: firing the
+     * booter inside that tail is the instruction-level-deterministic
+     * booter-0x91 class. The old code returned TRUE on the WPR2 match —
+     * that race is the bug being fixed; the timeout branch already returned
+     * FALSE and still does (now with a named gate line). Completion here
+     * requires ALL FOUR: exact WPR2 lo+hi window, observed GSP falcon
+     * HALT (bounded 10 s at the file's 1 ms poll idiom), scratch0e hi16==0,
+     * non-poisoned mailbox read-back. Each rejection names its condition,
+     * the observed value and the elapsed ms; the pass line logs all four.
+     * Vocabulary mirrors the claim module's FWSEC-completion triage
+     * (claim-90hx/unlock_610.c: "FWSEC result: scratch=... halted=...",
+     * "FWSEC WPR2: low=... high=...") so one collector parses both. */
+    {
+        UINT32 wprMs = 0, haltMs = 0, cpuctl = 0, scratch, mb0, mb1;
+        BOOLEAN wprUp = FALSE;
+
+        for (i = 0; i < 5000; i++) {
+            UINT32 lo = mmio_read32(REG_PFB_MMU_WPR2_LO);
+            UINT32 hi = mmio_read32(REG_PFB_MMU_WPR2_HI);
+            if ((lo & 0xFFFFFFF0u) == g_wpr2LoUp &&
+                (hi & 0xFFFFFFF0u) == g_wpr2HiUp) {
+                Print(L"fwsec50: *** WPR2 UP lo=0x%08x hi=0x%08x after %dms ***\n",
+                      lo, hi, (INTN)i);
+                wprMs = (UINT32)i;
+                wprUp = TRUE;
+                break;
+            }
+            if ((i % 500) == 0) {
+                UINT32 vIM, vD;
+                /* BL DMA succeeded的判据: IMEM[0]=FWSEC ns code[0], DMEM[0x10]=data sig */
+                mmio_write32(GSP_BASE + 0x180, 0);
+                vIM = mmio_read32(GSP_BASE + 0x184);
+                mmio_write32(GSP_BASE + 0x1C0, 0x10);
+                vD  = mmio_read32(GSP_BASE + 0x1C4);
+                mmio_write32(GSP_BASE + 0x1C0, 0);
+                mmio_write32(GSP_BASE + 0x180, 0);
+                Print(L"fwsec50: t=%dms wpr2lo=0x%08x wpr2hi=0x%08x gspcpu=0x%x "
+                      L"dbg=0x%x mbox0=0x%x IMEM[0]=0x%08x(exp 0x%08x) "
+                      L"DMEM[0x10]=0x%08x(exp 0x%08x)\n",
+                      (INTN)i, lo, hi, mmio_read32(GSP_CPUCTL),
+                      mmio_read32(GSP_BASE + 0x94), mmio_read32(GSP_MAILBOX0),
+                      vIM, *(UINT32 *)(UINTN)fwsecPhys,
+                      vD, *(UINT32 *)(UINTN)(fwsecPhys + FW50_DATA_OFF + 0x10));
+            }
+            uefi_call_wrapper(BS->Stall, 1, 1000);
         }
-        if ((i % 500) == 0) {
-            UINT32 vIM, vD;
-            /* BL DMA succeeded的判据: IMEM[0]=FWSEC ns code[0], DMEM[0x10]=data sig */
-            mmio_write32(GSP_BASE + 0x180, 0);
-            vIM = mmio_read32(GSP_BASE + 0x184);
-            mmio_write32(GSP_BASE + 0x1C0, 0x10);
-            vD  = mmio_read32(GSP_BASE + 0x1C4);
-            mmio_write32(GSP_BASE + 0x1C0, 0);
-            mmio_write32(GSP_BASE + 0x180, 0);
-            Print(L"fwsec50: t=%dms wpr2lo=0x%08x wpr2hi=0x%08x gspcpu=0x%x "
-                  L"dbg=0x%x mbox0=0x%x IMEM[0]=0x%08x(exp 0x%08x) "
-                  L"DMEM[0x10]=0x%08x(exp 0x%08x)\n",
-                  (INTN)i, lo, hi, mmio_read32(GSP_CPUCTL),
-                  mmio_read32(GSP_BASE + 0x94), mmio_read32(GSP_MAILBOX0),
-                  vIM, *(UINT32 *)(UINTN)fwsecPhys,
-                  vD, *(UINT32 *)(UINTN)(fwsecPhys + FW50_DATA_OFF + 0x10));
+        /* gate condition 1: the FRTS WPR2 window (lo AND hi of the expected
+         * window — the file's proven masked-compare predicate). */
+        if (!wprUp) {
+            Print(L"fwsec50: FWSEC gate REJECT [WPR2] lo=0x%08x hi=0x%08x "
+                  L"want=0x%08x:0x%08x after 5000ms gspcpu=0x%x dbg=0x%x "
+                  L"mbox0=0x%x scratch0e=0x%x\n",
+                  mmio_read32(REG_PFB_MMU_WPR2_LO), mmio_read32(REG_PFB_MMU_WPR2_HI),
+                  g_wpr2LoUp, g_wpr2HiUp,
+                  mmio_read32(GSP_CPUCTL), mmio_read32(GSP_BASE + 0x94),
+                  mmio_read32(GSP_MAILBOX0), mmio_read32(0x001438));
+            return FALSE;
         }
-        uefi_call_wrapper(BS->Stall, 1, 1000);
+
+        /* gate condition 2: the GSP falcon itself HALTed (CPUCTL bit 4) —
+         * kflcnWaitForHalt equivalence, 10 s budget per the reference; the
+         * 0xBADF sentinel check keeps the file's gated-domain idiom. */
+        for (i = 0; i < 10000; i++) {
+            cpuctl = mmio_read32(GSP_CPUCTL);
+            if (cpuctl & NV_PFALCON_FALCON_CPUCTL_HALTED_TRUE) {
+                haltMs = (UINT32)i;
+                break;
+            }
+            if ((cpuctl & 0xBADF0000u) == 0xBADF0000u) {
+                Print(L"fwsec50: FWSEC gate REJECT [GSP-RELOCK] CPUCTL=0x%08x "
+                      L"after %dms — GSP gated again mid-tail\n",
+                      cpuctl, (INTN)i);
+                return FALSE;
+            }
+            if ((i % 2000) == 0)
+                Print(L"fwsec50: waiting GSP HALT: t=%dms cpuctl=0x%08x mbox0=0x%08x\n",
+                      (INTN)i, cpuctl, mmio_read32(GSP_MAILBOX0));
+            uefi_call_wrapper(BS->Stall, 1, 1000);
+        }
+        if (!(cpuctl & NV_PFALCON_FALCON_CPUCTL_HALTED_TRUE)) {
+            Print(L"fwsec50: FWSEC gate REJECT [HALT] GSP CPUCTL=0x%08x never "
+                  L"set HALT within 10000ms (WPR2 was up at %dms)\n",
+                  cpuctl, (INTN)wprMs);
+            return FALSE;
+        }
+
+        /* gate conditions 3+4: the FWSEC result registers, read AFTER the
+         * halt as the kernel does. scratch0e =
+         * NV_VBIOS_FWSECLIC_SCRATCH_INDEX_0E, [31:16] FRTS_ERR_CODE; the
+         * mailbox read-back must not be bus-poison (all-ones) nor the
+         * gated-domain 0xBADF pattern. */
+        mb0 = mmio_read32(GSP_MAILBOX0);
+        mb1 = mmio_read32(GSP_MAILBOX1);
+        scratch = mmio_read32(0x001438);
+        if (scratch >> 16) {
+            Print(L"fwsec50: FWSEC gate REJECT [SCRATCH0E] FRTS_ERR_CODE=0x%04x "
+                  L"scratch0e=0x%08x halted@%dms\n",
+                  (UINT32)(scratch >> 16), scratch, (INTN)haltMs);
+            return FALSE;
+        }
+        if (mb0 == 0xFFFFFFFFu || mb1 == 0xFFFFFFFFu ||
+            (mb0 & 0xBADF0000u) == 0xBADF0000u ||
+            (mb1 & 0xBADF0000u) == 0xBADF0000u) {
+            Print(L"fwsec50: FWSEC gate REJECT [MAILBOX] mbox0=0x%08x "
+                  L"mbox1=0x%08x poisoned halted@%dms\n",
+                  mb0, mb1, (INTN)haltMs);
+            return FALSE;
+        }
+        Print(L"fwsec50: *** FWSEC gate PASS: wpr2=0x%08x:0x%08x @%dms "
+              L"cpuctl=0x%08x HALT @%dms scratch0e=0x%08x mbox=0x%08x:0x%08x ***\n",
+              mmio_read32(REG_PFB_MMU_WPR2_LO), mmio_read32(REG_PFB_MMU_WPR2_HI),
+              (INTN)wprMs, cpuctl, (INTN)haltMs, scratch, mb0, mb1);
+        return TRUE;
     }
-    Print(L"fwsec50: WPR2 NOT up: lo=0x%08x hi=0x%08x gspcpu=0x%x dbg=0x%x "
-          L"mbox0=0x%x scratch0e=0x%x\n",
-          mmio_read32(REG_PFB_MMU_WPR2_LO), mmio_read32(REG_PFB_MMU_WPR2_HI),
-          mmio_read32(GSP_CPUCTL), mmio_read32(GSP_BASE + 0x94),
-          mmio_read32(GSP_MAILBOX0), mmio_read32(0x001438));
-    return FALSE;
 }
 
 /* ==== THE EXPLOIT PRIMITIVE: SEC2 booter load with V67 signature ====
