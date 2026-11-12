@@ -1353,6 +1353,50 @@ is_unlocked(void)
     return cold_state_verdict() == COLD_ALREADY;
 }
 
+/* FINAL-GATE-BEGIN */
+/* Fresh-MMIO final gate (row B2-P36-C4, gtuu-mining ticket 19): the last
+ * MMIO-touching code before the handoff. These reads are the LAST INSTANT
+ * truth of the state we CLAIM — availability rules the other way: a
+ * failing gate NEVER blocks chainload (a locked boot must still boot), it
+ * turns a green log into a named false-success. B2-P33 taxonomy honored:
+ * a relocked gate (0xFFFFFF8F) with an intact SS pair is NOT a loss — the
+ * selectors are the throughput truth. Armed only where this boot CLAIMS
+ * the unlocked state. */
+static BOOLEAN g_fg_armed = FALSE;
+
+static BOOLEAN
+u40x_final_gate(void)
+{
+    UINT32 plm = mmio_read32(REG_FEAT_OVR_PLM);
+    UINT32 ss0 = mmio_read32(REG_FEAT_OVR_SM_SPD);
+    UINT32 ss1 = mmio_read32(REG_FEAT_OVR_SM_SPD_1);
+
+    if (((plm & 0xFFFF0000u) == 0xBADF0000u) ||
+        ((ss0 & 0xFFFF0000u) == 0xBADF0000u) ||
+        ((ss1 & 0xFFFF0000u) == 0xBADF0000u)) {
+        Print(L"[50HX] FINAL-GATE UNTRUSTED: badf plm=0x%08x ss=0x%08x/0x%08x — silicon state unknown, handoff continues, do NOT trust the unlocked claim\n",
+              plm, ss0, ss1);
+        return FALSE;
+    }
+    if (ss0 == VAL_SS0_UNLOCKED && ss1 == VAL_SS1_UNLOCKED) {
+        if (plm == VAL_PLM_OPEN) {
+            Print(L"[50HX] FINAL-GATE ok: plm=OPEN ss=0x%08x/0x%08x\n", ss0, ss1);
+            return TRUE;
+        }
+        Print(L"[50HX] FINAL-GATE ok RELOCKED-GATE plm=0x%08x SS intact — not a loss (B2-P33)\n", plm);
+        return TRUE;
+    }
+    if ((ss0 == VAL_SS0_UNLOCKED) != (ss1 == VAL_SS1_UNLOCKED)) {
+        Print(L"[50HX] FINAL-GATE REFUSED-STATE PARTIAL plm=0x%08x ss=0x%08x/0x%08x at handoff — chainload continues\n",
+              plm, ss0, ss1);
+        return FALSE;
+    }
+    Print(L"[50HX] FINAL-GATE REFUSED-STATE LOST plm=0x%08x ss=0x%08x/0x%08x at handoff — chainload continues\n",
+          plm, ss0, ss1);
+    return FALSE;
+}
+/* FINAL-GATE-END */
+
 /* ==== Reset-scratch canary (row B2-P3, gtuu-mining ticket 16) ====
  * Fleet mystery answered from logs: unlock green one boot, locked the
  * next — WHO wiped it? Mechanism ported READ-ONLY from nv-uefi-unlocker
@@ -5064,6 +5108,10 @@ static EFI_STATUS chainload_preloaded(EFI_HANDLE ImageHandle)
     EFI_HANDLE h = NULL;
     EFI_STATUS st;
 
+    /* last MMIO-touching code before StartImage (ticket 19, B2-P36-C4) */
+    if (g_fg_armed)
+        (void)u40x_final_gate();
+
     /* which volume WE were loaded from - correlates with the FS#N list below */
     {
         EFI_LOADED_IMAGE *li = NULL;
@@ -5963,6 +6011,7 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         int cs = cold_state_verdict();
         if (cs == COLD_ALREADY) {
             Print(L"[50HX] cold-state: ALREADY_MODIFIED (SS0/SS1 exact) — skip injection\n");
+            g_fg_armed = TRUE;
             goto done;
         }
         if (cs == COLD_PARTIAL) {
@@ -5990,6 +6039,7 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     }
     if (direct_write_probe()) {
         Print(L"[50HX] direct MMIO probe succeeded — skip booter\n");
+        g_fg_armed = TRUE;
         /* Success path (row B2-P3): the unlock is live at handoff, so
          * arm our witness slot. This is one of exactly TWO arm sites
          * (the other is [10c] after sanitize); every refusal/goto-done
@@ -6267,8 +6317,10 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         Print(L"[50HX] RESULT: PLM=0x%08x SS0=0x%08x SS1=0x%08x\n", plm, ss0, ss1);
         Print(L"[tick] final RESULT @ +%d s since EFI entry\n",
               (INTN)u40x_elapsed_s());
-        if (is_unlocked())
+        if (is_unlocked()) {
             Print(L"[50HX] *** UNLOCKED (SS0=0x88888888 SS1=0x8) ***\n");
+            g_fg_armed = TRUE;
+        }
         else if (plm == VAL_PLM_OPEN || plm == 0xFFFFFF8Fu)
             Print(L"[50HX] PLM %s — SS0 still gated\n",
                   plm == VAL_PLM_OPEN ? L"OPEN" : L"STAGED");
