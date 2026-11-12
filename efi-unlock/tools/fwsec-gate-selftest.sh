@@ -148,6 +148,14 @@ static void falcon_wait_reset_ready(UINT32 r) { (void)r; }
 static BOOLEAN falcon_wait_scrub_done(UINT32 a, UINT32 b, const CHAR16 *t) {
     (void)a; (void)b; (void)t; return TRUE;
 }
+/* ticket 15 wiring: the [WPR2]-reject branch now consults the zero-DMA
+ * fingerprint helper (VERBATIM call is part of the extracted function).
+ * Inertized here — the fingerprint itself is gated by its own harness in
+ * staging-ladder-selftest.sh (fixtures 6a/6b/6c). */
+static int g_zerodma_calls;
+static void u40x_zero_dma_note(const CHAR16 *who, UINT32 c, UINT32 m) {
+    (void)who; (void)c; (void)m; g_zerodma_calls++;
+}
 static const UINT8 gsp_bl_tu102[0x400];
 static UINT8 g_blob[0x10000];   /* stands in for the physical FWSEC blob */
 
@@ -156,7 +164,7 @@ static UINT8 g_blob[0x10000];   /* stands in for the physical FWSEC blob */
 /* ---- fixtures + matrix ---- */
 static int fails;
 static void fx_reset(void) {
-    g_vms = 0; g_logn = 0; g_writes = 0;
+    g_vms = 0; g_logn = 0; g_writes = 0; g_zerodma_calls = 0;
     memset(g_blob, 0, sizeof g_blob);
     f_wpr_lo = g_wpr2LoUp;  f_wpr_hi = g_wpr2HiUp;   /* exact expected window */
     f_wpr_lo_pre = 0;       f_wpr_hi_pre = 0;        /* down before FRTS */
@@ -174,7 +182,11 @@ static int saw(const char *tag) {
 }
 static void check(const char *name, int want, const char *tag, UINT64 min_vms) {
     int got = fwsec_boot_gsp_50hx((UINT64)(UINTN)g_blob);
-    if (got != want || (tag && !saw(tag)) || g_vms < min_vms) {
+    /* zero-DMA consult: required on the WPR2-reject dump, forbidden
+     * everywhere else (the hook is read-only advice on the failure path) */
+    int zdma_ok = (tag && strcmp(tag, "[WPR2]") == 0)
+                  ? g_zerodma_calls == 1 : g_zerodma_calls == 0;
+    if (got != want || (tag && !saw(tag)) || g_vms < min_vms || !zdma_ok) {
         printf("FAIL %s want=%d/%s/>=%llums got=%d/%llums\\n",
                name, want, tag ? tag : "-", (unsigned long long)min_vms,
                got, (unsigned long long)g_vms);
@@ -187,7 +199,7 @@ int main(void) {
     /* condition 1: WPR2 must match EXACTLY (lo AND hi of the window) */
     fx_reset(); f_wpr_lo = g_wpr2LoUp ^ 0x10u;        check("WPR2 lo mismatch reject", 0, "[WPR2]", 0);
     fx_reset(); f_wpr_hi = 0;                         check("WPR2 hi zero (legacy lo-only accept class) reject", 0, "[WPR2]", 0);
-    fx_reset(); f_wpr_up_at = ~(UINT64)0;             check("WPR2 never up reject", 0, "[WPR2]", 0);
+    fx_reset(); f_wpr_up_at = ~(UINT64)0;             check("WPR2 never up reject (+zero-DMA hook consulted on the dump)", 0, "[WPR2]", 0);
     /* proven predicate keeps its nibble-mask: flag bits tolerated */
     fx_reset(); f_wpr_lo |= 5u; f_wpr_hi |= 1u;       check("WPR2 low-nibble flags tolerated", 1, "FWSEC gate PASS", 0);
     /* condition 2: GSP falcon must be OBSERVED halted (bounded 10s) */

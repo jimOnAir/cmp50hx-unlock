@@ -30,7 +30,10 @@
  *   find card -> BAR0 -> GFW wait + PTIMER seed -> alloc >4GB
  *   -> fake GSP fw image + radix3 + WPR meta (V67 payload as signature)
  *   -> kill GFW -> [FWSEC fallback] -> SEC2 Booter load (TU102 image,
- *   SIG_PROD patched at 0x8700) -> canary ROP opens FECS PLM
+ *   SIG_PROD patched at 0x8700; on booter halt-0x89 with the host meta
+ *   magic intact, exactly ONE retry with staging in the LOW band:
+ *   FLR -> FWSEC re-ignite -> re-stage low -> fire — ticket 15)
+ *   -> canary ROP opens FECS PLM
  *   -> SS0=0x88888888 / SS1=0x8 -> SEC2 sanitize -> chainload OS
  *   with no POST in between.
  *
@@ -1094,6 +1097,99 @@ alloc_fwsec_buffer(UINTN Pages, EFI_PHYSICAL_ADDRESS *Phys)
     return alloc_below_4g(Pages, Phys);
 }
 
+/* ==== Staging-band ladder vocabulary (gtuu-mining ticket 15, row B2-P2) ====
+ * B2's corpus proves the required staging band is per-machine in BOTH
+ * directions: the unreachable-high class (#74 TB4 eGPU, #156 DGFF, #191
+ * Legion 7 — booter halts with mailbox0=0x89 while the HOST view of the
+ * meta page is bit-intact: our write landed, SEC2's >=4GiB DMA read of it
+ * did not deliver) vs the mirror sub-4GiB read-lock class (#16: LOW always
+ * 0x91 — opposite exit code, opposite remedy; a LOW retry there re-fails
+ * by design). Fleet default therefore stays HIGH (driver-exact); the
+ * ladder adds exactly ONE LOW-band retry gated on 0x89+magic-intact.
+ *
+ * NOT to be conflated with alloc_fwsec_buffer's own fallback just above
+ * (:1093 idiom): that is a HOST-side, per-buffer ALLOCATION fallback — the
+ * high-slot AllocatePages calls were refused by the firmware, so this one
+ * buffer silently lands below 4 GiB. It says nothing about the card's DMA
+ * reachability and never revisits the booter. This ticket's ladder is the
+ * CARD-side, whole-transaction retry, armed only after the booter itself
+ * reported the read as undelivered. The all-high guard below keeps the two
+ * from stacking: if the allocation-time fallback already produced
+ * low-band buffers, the LOW band was de facto tried and the ladder has
+ * nothing to descend. */
+#define STAGE_BAND_HIGH 0u
+#define STAGE_BAND_LOW  1u
+
+/* Booter exit vocabulary (B2 GA-plaintext code table, 0x2784/0x2995): */
+#define BOOTER_EXIT_STAGING_UNDELIVERED 0x89u /* second-magic compare: the meta page AS READ BY THE CARD was wrong */
+#define BOOTER_EXIT_SUB4G_READLOCK      0x91u /* mirror class: sub-4GiB read lock / WPR-window geometry reject */
+
+/* Physical roster of everything the booter DMA-reads from sysmem, plus the
+ * host-side dummy-FW source the radix rebuild copies from. The booter IMAGE
+ * (ucodePhys) is portal-copied through the IMEM/DMEM registers, never
+ * sysmem-DMA'd, and does not move between bands (B2: "the booter IMAGE is
+ * portal-copied and stays"). */
+typedef struct {
+    UINT64 v67Phys, blPhys, radixPhys, metaPhys, ucodePhys;
+    UINT64 fwPhys, fwSize;
+} U40X_STAGE;
+
+static const CHAR16 *
+u40x_band_name(UINT32 band)
+{
+    return (band == STAGE_BAND_LOW) ? L"[BAND-LOW]" : L"[BAND-HIGH]";
+}
+
+static BOOLEAN
+u40x_phys_is_high(UINT64 phys)
+{
+    return phys >= 0x100000000ULL;
+}
+
+/* Band-parameterized staging allocator: HIGH = the fleet-default >4GiB slot
+ * ladder (alloc_fwsec_buffer, with its own allocation-time fallback);
+ * LOW = the <4GiB DMA band (alloc_below_4g). */
+static EFI_STATUS
+alloc_stage(UINTN Pages, EFI_PHYSICAL_ADDRESS *Phys, UINT32 band)
+{
+    EFI_STATUS st;
+
+    if (band != STAGE_BAND_LOW)
+        return alloc_fwsec_buffer(Pages, Phys);
+    st = alloc_below_4g(Pages, Phys);
+    if (!EFI_ERROR(st))
+        Print(L"alloc_low: OK @0x%lx (%d pages)\n", *Phys, (UINT32)Pages);
+    return st;
+}
+
+/* TRUE when EVERY sysmem-DMA'd booter buffer sits in the HIGH band — the
+ * ladder precondition (a low member means the allocation-time fallback
+ * already tried that band for this buffer set). */
+static BOOLEAN
+u40x_staging_all_high(const U40X_STAGE *st)
+{
+    return u40x_phys_is_high(st->v67Phys) && u40x_phys_is_high(st->blPhys) &&
+           u40x_phys_is_high(st->radixPhys) && u40x_phys_is_high(st->metaPhys);
+}
+
+/* ==== Zero-DMA fingerprint (row B2-P2; B2 docs/tu10x-round3-conclusions
+ * §3.1 four-cell matrix: same build, only the BIOS VT-d setting toggled —
+ * VT-d ON kills BOTH staging bands, VT-d OFF makes BOTH pass: the address
+ * band is not the variable, the translation layer is. Their diagnostic
+ * directive: do not burn seconds on band retries; detect the fingerprint
+ * and print the named advisory).
+ * A post-STARTCPU diagnostic with cpuctl==0 AND IMEM[0]==0xffffffff means
+ * not ONE staged DMA landed. Advice only: this helper reads nothing and
+ * touches no config space, no BIOS poking. */
+static void
+u40x_zero_dma_note(const CHAR16 *who, UINT32 cpuctl, UINT32 imem0)
+{
+    if (cpuctl == 0x00000000u && imem0 == 0xFFFFFFFFu)
+        Print(L"%s: ZERO-DMA FINGERPRINT cpuctl=0x%08x IMEM[0]=0x%08x - "
+              L"check BIOS VT-d/intel-IOMMU (DMA protection): ON blocks both "
+              L"staging bands (B2 four-cell)\n", who, cpuctl, imem0);
+}
+
 /* Включить MEM_EN + BUS_MASTER в command-регистре GPU.
  * У устройства без UEFI-драйвера (нет GOP) прошивка может оставить
  * command=0 → все MMIO-чтения BAR0 возвращают 0xFFFFFFFF. */
@@ -2058,6 +2154,7 @@ fwsec_boot_gsp_50hx(UINT64 fwsecPhys)
         /* gate condition 1: the FRTS WPR2 window (lo AND hi of the expected
          * window — the file's proven masked-compare predicate). */
         if (!wprUp) {
+            UINT32 vIM;
             Print(L"fwsec50: FWSEC gate REJECT [WPR2] lo=0x%08x hi=0x%08x "
                   L"want=0x%08x:0x%08x after 5000ms gspcpu=0x%x dbg=0x%x "
                   L"mbox0=0x%x scratch0e=0x%x\n",
@@ -2065,6 +2162,13 @@ fwsec_boot_gsp_50hx(UINT64 fwsecPhys)
                   g_wpr2LoUp, g_wpr2HiUp,
                   mmio_read32(GSP_CPUCTL), mmio_read32(GSP_BASE + 0x94),
                   mmio_read32(GSP_MAILBOX0), mmio_read32(0x001438));
+            /* zero-DMA fingerprint on the failure dump (row B2-P2): "WPR2
+             * never came up, zero residue" is the VT-d-class death shape —
+             * name it instead of letting the reader re-derive it. GSP IMEM
+             * read via the file's own port-readback idiom. */
+            mmio_write32(GSP_BASE + 0x180, 0);
+            vIM = mmio_read32(GSP_BASE + 0x184);
+            u40x_zero_dma_note(L"fwsec50", mmio_read32(GSP_CPUCTL), vIM);
             return FALSE;
         }
 
@@ -2654,7 +2758,8 @@ u40x_dmem_write(UINT32 dst, const UINT32 *src, UINT32 sizeBytes)
  *   前置探测print RESET_PLM/WPR2，对照driver CMP40_STOCKFLOW_V551 判定。
  * ===================================================================== */
 static EFI_STATUS
-booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys)
+booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys,
+                         UINT32 band, UINT32 *booterExit)
 {
     UINT8 *img = (UINT8 *)(UINTN)ucodePhys;
     UINT64 metaLow = 0;
@@ -2663,7 +2768,16 @@ booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys)
     UINTN attempt;
     UINTN i;
 
+    /* ticket 15: booterExit carries the FINAL halt status (mailbox0) out of
+     * the transaction so the staging-band ladder can gate on 0x89 without
+     * re-reading a possibly-scrubbed register; 0 while the sequence has not
+     * failed. band only labels logs — which band this attempt stages in is
+     * decided by the caller (the wprMetaPhys address it passes). */
+    if (booterExit)
+        *booterExit = 0u;
     Print(L"\n=== v67: TU102 BOOT + 40HX FWSEC (BCR=1, port-load code) ===\n");
+    Print(L"%s tu102: booter transaction begins (meta@0x%lx)\n",
+          u40x_band_name(band), wprMetaPhys);
     /* v60: pre 探测逐register单发读（每行只读证security的register；读挂时log
      * 能精确定bit）。RESET_PLM(0x8403C4) 在 kill-GFW 后的裸 SEC2 上read会
      * 挂死（v59 实测：log停在call点，pre parameter求值阶segment卡死）——故从 pre
@@ -2774,7 +2888,8 @@ booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys)
          * = 64 bit寻址，meta 由 RM memdesc allocate在 >4GB（实测 0x110BB0000）。
          * v55 的 cmp90_meta_low(<4GB) 是 90HX/GA102 老假设；TU102 lock卡上
          * <4GB 读反而被lock（869 行 v2.63 comment：exit 0x91）。 */
-        Print(L"tu102: mailbox=wprMetaPhys>4G (no low copy)...\n");
+        Print(L"tu102: mailbox=wprMetaPhys %s (no in-fn copy)...\n",
+              u40x_band_name(band));
         metaLow = wprMetaPhys;
         Print(L"tu102: BOOTVEC=0, mailbox0=0x%08x mailbox1=0x%08x, STARTCPU...\n",
               (UINT32)(metaLow & 0xFFFFFFFFu), (UINT32)(metaLow >> 32));
@@ -2826,13 +2941,28 @@ booter_load_tu102_direct(UINT64 wprMetaPhys, UINT64 ucodePhys)
               mmio_read32(REG_PFB_MMU_WPR2_HI), mmio_read32(REG_PFB_MMU_WPR2_LO));
 
         if (m0 == 0u) {
-            Print(L"tu102: *** mbox0=0 → booter OK (attempt %d) ***\n",
-                  (INTN)attempt + 1);
+            Print(L"tu102: *** mbox0=0 → booter OK (attempt %d) %s ***\n",
+                  (INTN)attempt + 1, u40x_band_name(band));
+            if (booterExit)
+                *booterExit = 0u;
             return EFI_SUCCESS;
         }
-        Print(L"tu102: attempt %d not-OK (m0=0x%x halted=%d)\n",
+        Print(L"tu102: attempt %d not-OK (m0=0x%x halted=%d) %s\n",
               (INTN)attempt + 1, m0,
-              (cpu & NV_PFALCON_FALCON_CPUCTL_HALTED_TRUE) ? 1 : 0);
+              (cpu & NV_PFALCON_FALCON_CPUCTL_HALTED_TRUE) ? 1 : 0,
+              u40x_band_name(band));
+        if (booterExit)
+            *booterExit = m0;   /* final halt status; a later attempt overwrites */
+        /* zero-DMA fingerprint on the booter failure dump (row B2-P2):
+         * cpuctl==0 && IMEM[0]==0xffffffff post-STARTCPU = the staged image
+         * never DMA'd — the VT-d-class death shape, named not derived.
+         * IMEM[0] read via the file's own port-readback idiom, read-only. */
+        {
+            UINT32 im0;
+            mmio_write32(SEC2_IMEMC0, 0x0u);
+            im0 = mmio_read32(SEC2_IMEMD0);
+            u40x_zero_dma_note(L"tu102", cpu, im0);
+        }
         if (attempt == 0) {
             /* V551-defer (issue 15): a failed attempt A on a still-ARMED
              * SEC2 (RESET_PLM=0xff) must NOT fall through to attempt B -
@@ -4950,9 +5080,12 @@ static EFI_STATUS u40x_build_dummy_fw(UINT64 *dataPhys, UINT64 *dataSize)
     return EFI_SUCCESS;
 }
 
-/* radix-3 page表（root→L1→L2→data，v2.86 教训：booter 要page表非 raw ELF） */
-static EFI_STATUS u40x_build_radix(UINT64 dataPhys, UINT64 dataSize,
-                                   UINT64 *tabPhysOut)
+/* radix-3 page表（root→L1→L2→data，v2.86 教训：booter 要page表非 raw ELF）
+ * ticket 15: band-parameterized for the staging ladder — the radix buffer
+ * (table + embedded image copy) is booter-DMA'd, so the LOW retry rebuilds
+ * one below 4GiB. u40x_build_radix keeps the fleet-default HIGH band. */
+static EFI_STATUS u40x_build_radix_band(UINT64 dataPhys, UINT64 dataSize,
+                                        UINT64 *tabPhysOut, UINT32 band)
 {
     UINT64 nData = (dataSize + 0xFFFu) >> 12;
     UINT64 nL2 = ((nData - 1) >> 9) + 1;
@@ -4963,9 +5096,10 @@ static EFI_STATUS u40x_build_radix(UINT64 dataPhys, UINT64 dataSize,
     UINT64 i;
     EFI_STATUS st;
 
-    st = alloc_fwsec_buffer((UINTN)((allocSz + 0xFFFu) >> 12), &tab);
+    st = alloc_stage((UINTN)((allocSz + 0xFFFu) >> 12), &tab, band);
     if (EFI_ERROR(st)) {
-        Print(L"[40HX rt] alloc radix-table: %r\n", st);
+        Print(L"[40HX rt] alloc radix-table (%s): %r\n",
+              u40x_band_name(band), st);
         return st;
     }
     SetMem((VOID *)(UINTN)tab, (UINTN)ptSize, 0);
@@ -4977,10 +5111,169 @@ static EFI_STATUS u40x_build_radix(UINT64 dataPhys, UINT64 dataSize,
         *(UINT64 *)(UINTN)(tab + 0x1000 + i * 8) = tab + 0x2000 + (i << 12);
     *(UINT64 *)(UINTN)tab = tab + 0x1000;
     __asm__ volatile("wbinvd" ::: "memory");
-    Print(L"[40HX rt] radix-3 @0x%lx (L2=%d, data@+0x%lx)\n",
-          tab, (INTN)nL2, dataOff);
+    Print(L"[40HX rt] radix-3 @0x%lx (L2=%d, data@+0x%lx) %s\n",
+          tab, (INTN)nL2, dataOff, u40x_band_name(band));
     *tabPhysOut = tab;
     return EFI_SUCCESS;
+}
+
+static EFI_STATUS u40x_build_radix(UINT64 dataPhys, UINT64 dataSize,
+                                   UINT64 *tabPhysOut)
+{
+    return u40x_build_radix_band(dataPhys, dataSize, tabPhysOut,
+                                 STAGE_BAND_HIGH);
+}
+
+/* ==== Staging-band fallback ladder (gtuu-mining ticket 15, row B2-P2) ====
+ * Exactly ONE LOW-band re-run of the whole booter sequence, gated on:
+ *   (1) booter halted with mailbox0 == 0x89 (GA-plaintext 0x2784
+ *       second-magic compare: the meta page AS READ BY THE CARD was wrong),
+ *   (2) the host-staged meta page magic still intact — the same constant
+ *       the cmp90_meta_low verify uses — so our write landed and the
+ *       card-side >=4GiB DMA read did not deliver (#74/#156/#191 class),
+ *   (3) first-attempt staging genuinely HIGH (gate 3 is what keeps this
+ *       ladder apart from — and un-triggered by — alloc_fwsec_buffer's
+ *       allocation-time below-4G fallback; see the vocabulary note).
+ * The mirror 0x91 class (#16/#57: sub-4GiB read lock) never arms it: a LOW
+ * retry there re-fails by design. A corrupt host page is a buffer-side bug
+ * no retry can fix — named, refused.
+ *
+ * Retry vehicle per B2's 1e93 field falsification (compatibility.en.md:222,
+ * loader/src/tx.rs STAGING-FALLBACK): after one completed booter run an
+ * engine reset no longer hands the FBIF write surface back (writes simply
+ * stop sticking), so the vehicle is FUNCTION-LEVEL FLR -> command-reg
+ * re-arm (FLR cleared MEM_EN|BMA; the FWSEC BL fetches its staged image
+ * over sysmem DMA and wedges without bus master — the 1e93 rc2 lesson) ->
+ * FWSEC re-ignition (the FLR wipes WPR2) -> LOW re-stage -> fire.
+ * Nothing is unlocked here — PLM never opened, zero payload writes — so
+ * the FLR has no state to destroy; refusal stays refusal: the retry only
+ * changes how we attempt, and its failure lands on the same canonical
+ * failure path, plus the named evidence lines.
+ *
+ * Exactly ONE retry: the control flow below has no loop, one fire.
+ * Recorded risk (bench-gated, AC4): FLR's effect on the SEC2 RESET_PLM
+ * arm-latch protected by the V551-DEFER is unmeasured — an ENGINE reset
+ * burns it, an FLR resets the FUNCTION (this file's do_flr note: it is the
+ * only reset that clears a latched WPR2 and unlocked masks/selectors
+ * survive it). If an OS-side V551 stockflow ever reads a burned latch on a
+ * card that logged STAGING-FALLBACK, this retry is the suspect by the log. */
+static BOOLEAN
+staging_band_fallback(U40X_STAGE *st, UINT32 lastBooterExit)
+{
+    EFI_PHYSICAL_ADDRESS fwsecLow = 0, v67Low = 0, blLow = 0;
+    EFI_PHYSICAL_ADDRESS radixLow = 0, metaLow = 0;
+    EFI_STATUS stt;
+    GspFwWprMeta *m;
+    UINT64 hostMagic;
+    UINT32 retryExit = 0;
+
+    /* gate 1: the 0x89 signature only */
+    if (lastBooterExit != BOOTER_EXIT_STAGING_UNDELIVERED) {
+        if (lastBooterExit == BOOTER_EXIT_SUB4G_READLOCK)
+            Print(L"[BAND-HIGH] STAGING-FALLBACK: not armed (booter halt=0x91, the mirror sub-4GiB read-lock class) - a LOW retry re-fails by design - refusal stands\n");
+        else
+            Print(L"[BAND-HIGH] STAGING-FALLBACK: not armed (booter halt=0x%08x, ladder arms only on the 0x89 staging-undelivered signature) - refusal stands\n",
+                  lastBooterExit);
+        return FALSE;
+    }
+    /* gate 2: host-side magic intact (cache flush first — the file's own
+     * write->flush->readback idiom) */
+    __asm__ volatile("wbinvd" ::: "memory");
+    hostMagic = *(const UINT64 *)(UINTN)st->metaPhys;
+    if (hostMagic != GSP_FW_WPR_META_MAGIC) {
+        Print(L"[BAND-HIGH] STAGING-FALLBACK: booter 0x89 but host meta page magic CORRUPT (readback=0x%lx want=0x%lx) - buffer-side corruption, not the band, no retry can fix it - refusal named, no retry\n",
+              hostMagic, (UINT64)GSP_FW_WPR_META_MAGIC);
+        return FALSE;
+    }
+    /* gate 3: staging genuinely HIGH (allocation-time fallback guard) */
+    if (!u40x_staging_all_high(st)) {
+        Print(L"[BAND-HIGH] STAGING-FALLBACK: booter 0x89 + magic intact but booter buffers are not all >=4GiB (meta@0x%lx v67@0x%lx bl@0x%lx radix@0x%lx) - the allocation-time fallback already tried LOW for this buffer set, nothing to descend - refusal stands\n",
+              st->metaPhys, st->v67Phys, st->blPhys, st->radixPhys);
+        return FALSE;
+    }
+
+    Print(L"[BAND-LOW] STAGING-FALLBACK: booter 0x89 + host magic intact = the >=4GiB staging read never delivered (#74/#156/#191 class) - exactly ONE retry: FLR -> FWSEC re-ignite -> LOW re-stage -> fire\n");
+
+    if (EFI_ERROR(do_flr())) {
+        Print(L"[BAND-LOW] STAGING-FALLBACK: FLR failed - canonical failure path follows\n");
+        return FALSE;
+    }
+    Print(L"[BAND-LOW] STAGING-FALLBACK: FLR done (function cold; post-FLR WPR2 hi=0x%08x lo=0x%08x) - command re-arm + FWSEC re-ignition next\n",
+          mmio_read32(REG_PFB_MMU_WPR2_HI), mmio_read32(REG_PFB_MMU_WPR2_LO));
+    enable_mem_decode();   /* FLR cleared MEM_EN|BMA: the FWSEC BL's sysmem
+                            * DMA fetch needs bus master (1e93 rc2 lesson) */
+
+    /* FWSEC re-ignition — LOW-staged this time */
+    if (EFI_ERROR(alloc_stage((UINTN)((FW50_BLOB_SIZE + 0xFFFu) >> 12),
+                              &fwsecLow, STAGE_BAND_LOW))) {
+        Print(L"[BAND-LOW] STAGING-FALLBACK: low FWSEC alloc failed - canonical failure path follows\n");
+        return FALSE;
+    }
+    CopyMem((VOID *)(UINTN)fwsecLow, fwsec_50hx_prod_bin, FW50_BLOB_SIZE);
+    __asm__ volatile("wbinvd" ::: "memory");
+    if (!fwsec_boot_gsp_50hx(fwsecLow)) {
+        Print(L"[BAND-LOW] STAGING-FALLBACK: FWSEC re-ignition failed - canonical failure path follows\n");
+        return FALSE;
+    }
+
+    /* re-stage EVERYTHING the booter DMA-reads, LOW. The port-loaded
+     * booter image (ucodePhys) is register-written through the IMEM/DMEM
+     * portal and stays (B2: "the booter IMAGE is portal-copied and
+     * stays"). */
+    if (EFI_ERROR(alloc_stage((V67_SIZE + 0xFFFu) >> 12, &v67Low,
+                              STAGE_BAND_LOW))) {
+        Print(L"[BAND-LOW] STAGING-FALLBACK: low v67 alloc failed - canonical failure path follows\n");
+        return FALSE;
+    }
+    CopyMem((VOID *)(UINTN)v67Low, v67_payload_bin, V67_SIZE);
+    if (EFI_ERROR(alloc_stage((GSP_RM_BOOT_SIZE + 0xFFFu) >> 12, &blLow,
+                              STAGE_BAND_LOW))) {
+        Print(L"[BAND-LOW] STAGING-FALLBACK: low BL alloc failed - canonical failure path follows\n");
+        return FALSE;
+    }
+    CopyMem((VOID *)(UINTN)blLow, gsp_rm_boot_dbg, GSP_RM_BOOT_SIZE);
+    if (EFI_ERROR(u40x_build_radix_band(st->fwPhys, st->fwSize, &radixLow,
+                                        STAGE_BAND_LOW))) {
+        Print(L"[BAND-LOW] STAGING-FALLBACK: low radix rebuild failed - canonical failure path follows\n");
+        return FALSE;
+    }
+    if (EFI_ERROR(alloc_stage((WPR_META_SIZE + 0xFFFu) >> 12, &metaLow,
+                              STAGE_BAND_LOW))) {
+        Print(L"[BAND-LOW] STAGING-FALLBACK: low meta alloc failed - canonical failure path follows\n");
+        return FALSE;
+    }
+    m = (GspFwWprMeta *)(UINTN)metaLow;
+    build_wpr_meta(m, radixLow, st->fwSize, v67Low, g_fbSize, blLow,
+                   GSP_RM_BOOT_SIZE);
+    __asm__ volatile("wbinvd" ::: "memory");
+    if (*(const UINT64 *)(UINTN)metaLow != GSP_FW_WPR_META_MAGIC) {
+        Print(L"[BAND-LOW] STAGING-FALLBACK: meta repack verification failed on the LOW buffer - canonical failure path follows\n");
+        return FALSE;
+    }
+    Print(L"[BAND-LOW] STAGING-FALLBACK: re-staged meta@0x%lx v67@0x%lx bl@0x%lx radix@0x%lx fwsec@0x%lx (all <4GiB; ucode@0x%lx portal-load stays) - firing once\n",
+          metaLow, v67Low, blLow, radixLow, fwsecLow, st->ucodePhys);
+
+    stt = booter_load_tu102_direct(metaLow, st->ucodePhys,
+                                   STAGE_BAND_LOW, &retryExit);
+    if (!EFI_ERROR(stt)) {
+        Print(L"[BAND-LOW] STAGING-FALLBACK: LOW-band retry VERIFIED - staging rebound to the LOW buffers (dead HIGH band stays reserved, never revisited)\n");
+        st->v67Phys = v67Low;
+        st->blPhys  = blLow;
+        st->radixPhys = radixLow;
+        st->metaPhys = metaLow;
+        return TRUE;
+    }
+    Print(L"[BAND-LOW] STAGING-FALLBACK: LOW-band retry also failed (halt=0x%08x) - the band alone was not the whole story; canonical failure path follows\n",
+          retryExit);
+    {   /* still the zero-DMA shape after BOTH bands? name the translation
+         * layer (B2 four-cell: VT-d ON kills both bands) */
+        UINT32 im0;
+        mmio_write32(SEC2_IMEMC0, 0x0u);
+        im0 = mmio_read32(SEC2_IMEMD0);
+        u40x_zero_dma_note(L"STAGING-FALLBACK", mmio_read32(SEC2_CPUCTL),
+                           im0);
+    }
+    return FALSE;
 }
 
 /* ===== [11] best-effort ReBAR activation (BAR1, 16 or 32 GiB) =====
@@ -5159,6 +5452,8 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     UINT64 fwPhys = 0, fwSize = 0;
     UINT64 wprMetaPhys = 0;
     GspFwWprMeta *wprMeta = NULL;
+    U40X_STAGE stage;          /* booter buffer roster (ticket 15 ladder) */
+    UINT32 booterExit = 0;     /* last booter halt status (mailbox0) */
     UINT32 boot0 = 0;
     UINTN i;
 
@@ -5338,6 +5633,20 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     __asm__ volatile("wbinvd" ::: "memory");
     Print(L"[50HX] meta@0x%lx radix@0x%lx ucode@0x%lx v67@0x%lx fb=0x%lx\n",
           wprMetaPhys, radixPhys, ucodePhys, v67Phys, wprMeta->fbSize);
+    /* ticket 15: stage roster for the band ladder + evidence-grade line on
+     * which band the FIRST booter attempt uses (the A/B run docs read it
+     * off \50hx_log.txt; computed from the actual buffer addresses, so the
+     * alloc_fwsec_buffer allocation-time fallback shows up honestly). */
+    stage.v67Phys = v67Phys;
+    stage.blPhys  = blPhys;
+    stage.radixPhys = radixPhys;
+    stage.metaPhys = wprMetaPhys;
+    stage.ucodePhys = ucodePhys;
+    stage.fwPhys  = fwPhys;
+    stage.fwSize  = fwSize;
+    Print(L"[50HX] STAGING-BAND: booter attempt#1 band=%s (meta@0x%lx v67@0x%lx radix@0x%lx bl@0x%lx)\n",
+          u40x_staging_all_high(&stage) ? L"[BAND-HIGH]" : L"[BAND-LOW]",
+          wprMetaPhys, v67Phys, radixPhys, blPhys);
 
     /* ---------- [7.5] v69: 预载探测（必须在任何 engine reset 之前） ----------
      * log53: FWSEC_COMPLETE_GSP_UNTOUCHED — Linux succeededpath里 FWSEC 由
@@ -5474,8 +5783,11 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
             for (tr = 0; tr < 6; tr++) {
                 Print(L"[warm] direct try %d/6 @ +%d s\n",
                       (INTN)tr + 1, (INTN)u40x_elapsed_s());
-                Status = booter_load_tu102_direct(wprMetaPhys, ucodePhys);
-                Print(L"[50HX] booter_load_tu102_direct returned %r\n", Status);
+                Status = booter_load_tu102_direct(wprMetaPhys, ucodePhys,
+                                                  STAGE_BAND_HIGH,
+                                                  &booterExit);
+                Print(L"[50HX] booter_load_tu102_direct returned %r (halt=0x%08x)\n",
+                      Status, booterExit);
                 if (!EFI_ERROR(Status)) break;
                 if (tr < 5) {
                     UINT32 m0o = mmio_read32(SEC2_MAILBOX0);
@@ -5495,6 +5807,24 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         } else {
             Print(L"[warm] no write-window <= 300 s; attempt SKIPPED, card untouched\n");
         }
+    }
+    /* ---------- [9b] staging-band fallback ladder (ticket 15, row B2-P2) ----------
+     * The success path never reaches the fallback (first-attempt OK skips
+     * it whole); on 0x89+magic-intact it is exactly ONE LOW-band re-run
+     * (FLR -> FWSEC re-ignite -> LOW re-stage -> fire — see the function
+     * note), and every decline/retry prints STAGING-FALLBACK with its
+     * [BAND-*] tag. Rejection remains rejection: a refused ladder lands on
+     * the identical canonical failure path; a verified retry rebinds the
+     * booter buffers to the LOW copies so [10b]/XP3G consume the live set. */
+    if (warm_attempted && EFI_ERROR(Status) &&
+        staging_band_fallback(&stage, booterExit)) {
+        v67Phys     = stage.v67Phys;
+        blPhys      = stage.blPhys;
+        radixPhys   = stage.radixPhys;
+        wprMetaPhys = stage.metaPhys;
+        wprMeta     = (GspFwWprMeta *)(UINTN)wprMetaPhys;
+        booterExit  = 0u;
+        Status      = EFI_SUCCESS;
     }
     if (EFI_ERROR(Status) && FALSE) {
         /* v56 fallback：GA102 风格 DMA path（v55 用的那套），结果对比用 */
