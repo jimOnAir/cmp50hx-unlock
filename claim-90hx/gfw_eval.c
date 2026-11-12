@@ -35,3 +35,13 @@ bool gpu_unlock_pmcsr_d0(u16 pmcsr)
 {
 	return (pmcsr & GU_PCI_PM_CTRL_STATE_MASK) == GU_PCI_PM_STATE_D0;
 }
+
+/* PMCSR next value that pins D0 while preserving every upper control bit.
+ * Returns true when a write is needed (state not already D0). Row B2-P13:
+ * FLR is defined only in D0; row P32a: a D3-notified card should be woken
+ * before the claim refuses it. Pure function — harness-extractable. */
+bool gpu_unlock_pm_force_d0_value(u16 pmcsr, u16 *next)
+{
+	*next = (u16)(pmcsr & ~GU_PCI_PM_CTRL_STATE_MASK);
+	return *next != pmcsr;
+}

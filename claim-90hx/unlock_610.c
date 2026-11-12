@@ -677,23 +677,62 @@ out:
 	return GU_RESULT(ret);
 }
 
+/* Wake a non-D0 card once: write D0 into PMCSR preserving upper control
+ * bits, flush, verify. One bounded attempt, loud named outcomes (row
+ * B2-P32a). Returns 1 when the card is now verifiably in D0. */
+static int gu_force_d0(struct unlock_transaction_work *work)
+{
+	u16 pmcsr, next;
+
+	if (!work->pdev->pm_cap)
+		return 0;
+	if (diag_pci_word(work, false, work->pdev->pm_cap + PCI_PM_CTRL, &pmcsr))
+		return 0;
+	if (gpu_unlock_pmcsr_d0(pmcsr))
+		return 1;
+	if (!gpu_unlock_pm_force_d0_value(pmcsr, &next))
+		return 0;
+	if (pci_write_config_word(work->pdev, work->pdev->pm_cap + PCI_PM_CTRL, next)) {
+		dev_err(&work->pdev->dev, "pm: D0 force write failed (pmcsr=%#x)\n", pmcsr);
+		return 0;
+	}
+	if (diag_pci_word(work, false, work->pdev->pm_cap + PCI_PM_CTRL, &pmcsr) ||
+	    !gpu_unlock_pmcsr_d0(pmcsr)) {
+		dev_err(&work->pdev->dev, "pm: D0 force failed (pmcsr=%#x)\n", pmcsr);
+		return 0;
+	}
+	dev_info(&work->pdev->dev, "pm: forced D0 on %s\n", pci_name(work->pdev));
+	return 1;
+}
+
 static int unlock_transaction_claim(struct unlock_transaction_work *work)
 {
 	u16 command, pmcsr;
 	u32 cap;
 	unsigned int i;
+	bool d0_forced = false;
 	int ret;
 
 	dev_dbg(&work->pdev->dev, "claim: power=%d pm_cap=%#x flags=%#x\n",
 		work->pdev->current_state, work->pdev->pm_cap, work->pdev->dev_flags);
 	/* Older kernels (seen on 6.8 and 6.14) leave a device no driver has
-	 * enabled at PCI_UNKNOWN. Accept that only when PMCSR confirms D0. */
-	if ((work->pdev->current_state != PCI_D0 &&
-	     (work->pdev->current_state != PCI_UNKNOWN || !work->pdev->pm_cap)) ||
-	    (work->pdev->pm_cap &&
-	     (diag_pci_word(work, false, work->pdev->pm_cap + PCI_PM_CTRL, &pmcsr) ||
-	      !gpu_unlock_pmcsr_d0(pmcsr))))
-		return GU_RESULT(-EOPNOTSUPP);
+	 * enabled at PCI_UNKNOWN. Accept that only when PMCSR confirms D0.
+	 * B2-P32a (gtuu-mining 18): a card woken into D3 used to be refused
+	 * outright — the resume re-unlock then silently did nothing until
+	 * reboot. Force D0 once first (exactly what the kernel's own
+	 * pci_set_power_state does on bind); still-not-D0 keeps refusing. */
+	if (work->pdev->current_state != PCI_D0 &&
+	    (work->pdev->current_state != PCI_UNKNOWN || !work->pdev->pm_cap)) {
+		if (!gu_force_d0(work))
+			return GU_RESULT(-EOPNOTSUPP);
+		d0_forced = true;
+	}
+	if (work->pdev->pm_cap &&
+	    (diag_pci_word(work, false, work->pdev->pm_cap + PCI_PM_CTRL, &pmcsr) ||
+	     !gpu_unlock_pmcsr_d0(pmcsr))) {
+		if (d0_forced || !gu_force_d0(work))
+			return GU_RESULT(-EOPNOTSUPP);
+	}
 	if ((work->pdev->dev_flags & PCI_DEV_FLAGS_NO_FLR_RESET) ||
 	    !pci_is_pcie(work->pdev) ||
 	    diag_pci_dword(work, true, PCI_EXP_DEVCAP, &cap) ||

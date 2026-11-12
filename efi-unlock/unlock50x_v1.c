@@ -837,6 +837,33 @@ cfg_write32(UINTN offset, UINT32 val)
         pci_cfg_write(offset, val);
 }
 
+/* 16-bit config access (FLR craft, ticket 18): Device Control and COMMAND
+ * must be read-modify-written as WORDS. The old dword RMW at pcie+0x08
+ * wrote Device Status in the same dword (and with only the devctl value in
+ * the low half, effectively a 0-write over it); the totorong FLR row names
+ * exactly this — preserve the rest of the register pair. */
+static UINT16
+cfg_read16(UINTN offset)
+{
+    UINT16 val = 0xFFFF;
+    if (gRb)
+        uefi_call_wrapper(gRb->Pci.Read, 5, gRb, EfiPciIoWidthUint16,
+                          ((UINT64)gBus << 20) | ((UINT64)gDev << 15) |
+                          ((UINT64)gFn << 12) | ((UINT64)offset & 0xFFF),
+                          1, &val);
+    return val;
+}
+
+static void
+cfg_write16(UINTN offset, UINT16 val)
+{
+    if (gRb)
+        uefi_call_wrapper(gRb->Pci.Write, 5, gRb, EfiPciIoWidthUint16,
+                          ((UINT64)gBus << 20) | ((UINT64)gDev << 15) |
+                          ((UINT64)gFn << 12) | ((UINT64)offset & 0xFFF),
+                          1, &val);
+}
+
 /* ==== Config-space access to ARBITRARY BDF + PCIe capability helpers ====
  * Needed by the gen2 phase: retraining the link requires setting target
  * speed AND issuing Retrain Link on the UPSTREAM BRIDGE, not just GPU.
@@ -1524,6 +1551,13 @@ u40x_canary_arm(void)
  * both here so a real card is never silently skipped, which is the class
  * of bug this whole ticket exists to kill. ==== */
 #define PF_CFG_DWORDS 64
+/* Saved layout knowledge for the FLR craft (ticket 18): this walker
+ * already proved the PM and PCIe caps exist, with FLReset+ (DEVCAP
+ * bit28) required, before any unlock write. do_flr uses these offsets
+ * and flag instead of re-walking; zero means "never saved" and the FLR
+ * falls back to its own bounded walk. */
+static UINTN g_pf_pm_cap, g_pf_pcie_cap;
+static BOOLEAN g_pf_flr_plus;
 static UINT8 cfg8_at(const UINT32 *cfg, UINTN off)
 {
     return (UINT8)((cfg[off >> 2] >> ((off & 3U) << 3)) & 0xffU);
@@ -1659,6 +1693,11 @@ u40x_preflight_config(void)
               caps_pm, caps_pcie);
         return FALSE;
     }
+    /* Save layout for do_flr (ticket 18): reaching here already proved
+     * FLReset+ (DEVCAP bit28) and PM presence — no re-walk needed. */
+    g_pf_pm_cap = caps_pm;
+    g_pf_pcie_cap = caps_pcie;
+    g_pf_flr_plus = TRUE;
     Print(L"[50HX] PREFLIGHT ok: pm=0x%x pcie=0x%x steps=%u\n",
           caps_pm, caps_pcie, (UINT32)steps);
     return TRUE;
@@ -3704,26 +3743,87 @@ gsp_mailbox_booter_load(UINT64 wprMetaPhys)
 /* ==== PCIe Function Level Reset ====
  * Walks the capability list, sets Device Control bit 15. FLR is the ONLY
  * reset that clears a latched WPR2 (direct writes bounce even with PLM
- * open); the unlocked masks/selectors survive it. */
+ * open); the unlocked masks/selectors survive it.
+ *
+ * FLR craft (row B2-P13, totorong-derived; gtuu-mining ticket 18):
+ *   D0 pinning first — "PCIe defines FLR only in D0": force PMCSR
+ *   PowerState=D0 (upper control bits preserved) when the card is not
+ *   in D0, with flush read.  Transactions-Pending drain: bounded 1 s
+ *   wait on STATUS bit4; STUCK IS ADVISORY — we proceed (the device is
+ *   about to be reset anyway) but the line names it.  Devctl write is
+ *   now a WORD RMW — the old dword RMW at pcie+0x08 also wrote the
+ *   Device Status half of that dword (0 into RW1C bits; harmless today,
+ *   a footgun tomorrow).  After the >=100 ms silence (200 ms kept) the
+ *   config identity must return, bounded 2 s, named timeout — the old
+ *   flat fire-and-forget stall could continue against a dead function.
+ *   Post-FLR PMCSR: D0 re-pinned, saved upper bits restored; COMMAND is
+ *   NEVER touched here — the flow arms BME explicitly where needed. */
+/* FLR-CRAFT-BEGIN */
 static EFI_STATUS
 do_flr(void)
 {
-    UINT32 capPtr = cfg_read32(0x34) & 0xFF;
-    while (capPtr && capPtr < 0x100) {
-        UINT32 hdr = cfg_read32(capPtr);
-        if ((hdr & 0xFF) == 0x10) {           /* PCIe Express capability */
-            UINT16 devctl;                    /* Device Control = cap+0x08 */
-            devctl = (UINT16)cfg_read32(capPtr + 0x08);
-            cfg_write32(capPtr + 0x08, devctl | (1 << 15));  /* Initiate FLR */
-            uefi_call_wrapper(BS->Stall, 1, 200000);  /* 200ms */
-            Print(L"FLR: issued (pcie cap @0x%x)\n", capPtr);
-            return EFI_SUCCESS;
+    UINTN pcie = g_pf_pcie_cap, pm = g_pf_pm_cap;
+    UINT16 devctl, status, pmcsr_saved = 0xFFFF;
+    UINT32 vendev_saved = cfg_read32(0x00);
+    UINTN i;
+
+    if (pcie == 0 || pcie > 0xff) {
+        UINT32 capPtr = cfg_read32(0x34) & 0xFF;      /* diag paths before [2b] */
+        while (capPtr >= 0x40 && capPtr < 0x100) {
+            UINT32 hdr = cfg_read32(capPtr);
+            if ((hdr & 0xFF) == 0x10) { pcie = capPtr; break; }
+            capPtr = (hdr >> 8) & 0xFF;
         }
-        capPtr = (hdr >> 8) & 0xFF;
     }
-    Print(L"FLR: PCIe capability not found\n");
-    return EFI_NOT_FOUND;
+    if (pcie == 0) {
+        Print(L"FLR: PCIe capability not found\n");
+        return EFI_NOT_FOUND;
+    }
+
+    if (pm) {
+        pmcsr_saved = cfg_read16(pm + 0x04);          /* PMCSR: bits[1:0] power state */
+        if ((pmcsr_saved & 3U) != 0U) {
+            cfg_write16(pm + 0x04, (UINT16)(pmcsr_saved & ~3U));
+            (void)cfg_read16(pm + 0x04);              /* posted-write flush */
+            Print(L"FLR: PMCSR 0x%04x -> D0 forced pre-FLR\n", pmcsr_saved);
+        }
+    }
+
+    for (i = 0; i < 100; i++) {                       /* TP drain: 100 x 10 ms */
+        status = cfg_read16(0x06);
+        if ((status & (1U << 4)) == 0U)
+            break;
+        uefi_call_wrapper(BS->Stall, 1, 10000);
+    }
+    if (i >= 100)
+        Print(L"FLR: [TP] transactions pending after 1s — proceeding (advisory)\n");
+
+    devctl = cfg_read16(pcie + 0x08);                 /* Device Control WORD */
+    cfg_write16(pcie + 0x08, (UINT16)(devctl | (1U << 15)));
+    uefi_call_wrapper(BS->Stall, 1, 200000);          /* >=100 ms silence, 200 kept */
+
+    for (i = 0; i < 200; i++) {                       /* identity: 200 x 10 ms */
+        if (cfg_read32(0x00) == vendev_saved)
+            break;
+        uefi_call_wrapper(BS->Stall, 1, 10000);
+    }
+    if (i >= 200) {
+        Print(L"FLR: [IDENTITY] config absent after 2s (read 0x%08x want 0x%08x)\n",
+              cfg_read32(0x00), vendev_saved);
+        return EFI_TIMEOUT;
+    }
+
+    if (pm && pmcsr_saved != 0xFFFF) {
+        UINT16 w = cfg_read16(pm + 0x04);
+        w = (UINT16)(((pmcsr_saved & ~3U)) | (w & 3U));
+        cfg_write16(pm + 0x04, (UINT16)(w & ~3U));    /* D0 re-pinned, controls restored */
+    }
+    Print(L"FLR: issued+verified cap=0x%02x devctl=0x%04x->0x%04x flr+=%u wait=%ums\n",
+          (unsigned int)pcie, devctl, (UINT16)(devctl | (1U << 15)),
+          (unsigned int)g_pf_flr_plus, (unsigned int)(i * 10));
+    return EFI_SUCCESS;
 }
+/* FLR-CRAFT-END */
 
 /* ==== PCIe gen unlock experiments (flag PCIE_GEN_EXPERIMENT) ====
  * Method verified on CMP 170HX/GA100 (cmp170hx-gen2): phase 1 publishes

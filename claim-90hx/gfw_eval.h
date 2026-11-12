@@ -44,4 +44,7 @@ u16 gpu_unlock_command_restore(u16 original, u16 live);
 /* PMCSR reports D0. PCI_D0 is the kernel's pci_power_t, not a PMCSR field. */
 bool gpu_unlock_pmcsr_d0(u16 pmcsr);
 
+/* Compute the D0-forcing PMCSR write value; true when a write is needed. */
+bool gpu_unlock_pm_force_d0_value(u16 pmcsr, u16 *next);
+
 #endif

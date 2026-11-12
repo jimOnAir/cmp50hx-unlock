@@ -31,6 +31,7 @@ typedef int BOOLEAN;
 #define FALSE 0
 #define PF_CFG_DWORDS 64
 static UINT32 g_cfg[PF_CFG_DWORDS];
+static UINTN g_pf_pm_cap, g_pf_pcie_cap; static int g_pf_flr_plus;
 static UINT32 cfg_read32(UINTN off) { return g_cfg[off / 4]; }
 static int Print(const CHAR16 *f, ...) { (void)f; return 0; }
 ''' + body + '''
