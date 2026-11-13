@@ -1310,3 +1310,21 @@ pad rule, both measured from the pinned 615 tarball, both adversarially
 probed; 610 path byte-identical to MANIFEST.sha256 through the patched code.
 The t13 follow-up ("non-byte token" rejection) is closed before the bump,
 not during. Extraction validity != install validity — stated in the ticket.
+
+## Build ergonomics: pre-baked docker images (user-requested), + gtuu8 ready
+The ad-hoc recipe reinstalled apt deps AND re-downloaded the 440MB NVIDIA
+.run inside every throwaway container (the rsync dropped cache/). Fixed:
+docker/Dockerfile.build + Dockerfile.smoke (tags cmp50hx-build/smoke) with
+tools/docker-deb.sh — host sha-verified cache/ bind-mounted, images built
+once. Warm run = 53s full stage->EFI->deb->26.04-smoke->sha-check, rc 0,
+no network. Side discoveries: (1) build-deb.sh already honors
+SOURCE_DATE_EPOCH — with it (wrapper derives from `git log -1`), two
+independent containers produced a BYTE-IDENTICAL .deb (the ~42B drift
+without it is timestamps); embedded EFI byte-stability was already known.
+(2) containers now chown /src writes back (root residue broke temp-dir
+cleanup — caught on the first wrapper run). (3) local sudo needs a
+password (the passwordless grant was llm2-only) — docker+alpine removed
+its own root dirs instead. gtuu8 (610.43.03-20261113.gtuu8, deb sha
+a9e2ada1…) = first artifact via the new path: ships phase-2 claim module
+(x2 params default OFF) + unchanged EFI 8237b24b. llm2 is powered off
+(user-confirmed) -> install + DKMS gate on 7.0.0-38 owed at power-on.

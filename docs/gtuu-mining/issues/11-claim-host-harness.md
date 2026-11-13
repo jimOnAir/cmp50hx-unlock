@@ -89,3 +89,6 @@ safe, resume pass re-verifies naturally). Harness: 25 new asserts (S11–S19, no
 with shim call-sequence pins + rollback + reverse assertions; kernel builds 7.2.9 and
 6.18.55 zero warnings. Not done: fwsec/booter image-feed scenarios (knobs pre-stubbed).
 Live row: the param stays 0 until a 90HX returns to the bench for a one-shot trial.
+Packaging: the phase-2 claim module ships in cmp50hx-unlock 610.43.03-20261113.gtuu8
+(deb sha256 a9e2ada1…, smoke PASS; llm2 install + DKMS build on 7.0.0-38 +
+`modinfo gpu_unlock | grep x2_` owed at next power-on — bench was off 2026-11-13).

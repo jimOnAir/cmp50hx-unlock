@@ -1,0 +1,7 @@
+# cmp50hx-smoke — the package-contract image (tools/smoke-test-deb.sh runs
+# the deb on the newer toolchain, mirroring the CI matrix).
+#   docker build -t cmp50hx-smoke:latest -f docker/Dockerfile.smoke docker/
+FROM ubuntu:26.04
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends dpkg-dev \
+    && rm -rf /var/lib/apt/lists/*

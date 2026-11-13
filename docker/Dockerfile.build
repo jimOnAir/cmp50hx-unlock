@@ -1,0 +1,9 @@
+# cmp50hx-build — everything tools/build-deb.sh, efi-unlock/build.sh and the
+# host harness scripts need, baked once. Rebuild only when a dep is added.
+#   docker build -t cmp50hx-build:latest -f docker/Dockerfile.build docker/
+FROM ubuntu:24.04
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential dpkg-dev curl patch kmod binutils ca-certificates \
+        python3 zstd ocl-icd-opencl-dev gnu-efi \
+    && rm -rf /var/lib/apt/lists/*
