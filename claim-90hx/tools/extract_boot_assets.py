@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Build the Booter and GSP boot assets from the NVIDIA 610 generated source."""
+"""Build the Booter and GSP boot assets from NVIDIA generated bindata source.
+
+Supported shapes (both proven against the pinned tarballs 2026-11-13):
+610.43.03 byte arrays (MANIFEST.sha256 regression gate), and 615.78.08
+NV_DECLARE_ALIGNED(NvU64,8) word arrays with <8 zero-byte alignment pad."""
 from __future__ import annotations
 
 import argparse
@@ -44,13 +48,37 @@ def _array_bytes(text: str, label: str) -> tuple[bytes, bool, int]:
     if not declaration:
         raise ValueError('malformed byte-array declaration')
     tokens = declaration[1].strip().rstrip(',').split(',')
-    if any(not re.fullmatch(r"\s*0x[0-9a-fA-F]{2}\s*", x) for x in tokens):
-        raise ValueError('non-byte token in generated array')
-    raw = bytes(int(item, 16) for item in tokens)
+    # Element width comes from the C declaration itself: 610-era files are
+    # NvU8 arrays of 0xab tokens; 615.78.08 switched every array to
+    # NV_DECLARE_ALIGNED(NvU64, 8) words of 0x6dd34a2892d39de4ULL tokens
+    # (verified across all nine SOURCES against the pinned 615 tarball).
+    # C stores each word little-endian in memory — the byte sequence the
+    # DEFLATE stream and the record layouts below are parsed from.
+    elem = re.search(r"NV_DECLARE_ALIGNED\((NvU(?:8|16|32|64)), \d+\)\s*\w*\s*$",
+                     text[max(0, start - 200):start])
+    width = {'NvU8': 1, 'NvU16': 2, 'NvU32': 4, 'NvU64': 8}.get(elem[1], 1) if elem else 1
+    if width == 1:
+        if any(not re.fullmatch(r"\s*0x[0-9a-fA-F]{2}\s*", x) for x in tokens):
+            raise ValueError('non-byte token in generated array')
+        raw = bytes(int(item, 16) for item in tokens)
+    else:
+        if any(not re.fullmatch(rf"\s*0x[0-9a-fA-F]{{{width * 2}}}ULL\s*", x) for x in tokens):
+            raise ValueError(f'non-NvU{width * 8} token in generated word array')
+        raw = b''.join(int(item.strip()[:-3], 16).to_bytes(width, 'little') for item in tokens)
     if compressed:
         stored = re.findall(r"COMPRESSED SIZE \(bytes\): (\d+)", window)
-        if not stored or len(raw) != int(stored[-1]):
+        if not stored:
+            raise ValueError('missing storage declaration for label')
+        stored = int(stored[-1])
+        # 615.78.08 stores the arrays as NvU64 words: the real storage
+        # stream is zero-padded up to an 8-byte boundary (303 -> 304 etc.,
+        # measured across all nine pinned sources). 610 was byte-exact,
+        # which this also accepts (pad = 0). The pad must be zero and
+        # under a word — anything else is corruption, not alignment.
+        pad = len(raw) - stored
+        if stored <= 0 or pad < 0 or pad >= 8 or raw[stored:] != b'\x00' * pad:
             raise ValueError('compressed storage size mismatch')
+        raw = raw[:stored]
         inflater = zlib.decompressobj(-15)
         data = inflater.decompress(raw, expected + 1)
         # NVIDIA BINDATA stores raw DEFLATE followed by the gzip CRC32/ISIZE
@@ -61,7 +89,10 @@ def _array_bytes(text: str, label: str) -> tuple[bytes, bool, int]:
         if size != expected or crc != zlib.crc32(data):
             raise ValueError('compressed checksum or size mismatch')
     else:
-        data = raw
+        pad = len(raw) - expected
+        if pad < 0 or pad >= 8 or raw[expected:] != b'\x00' * pad:
+            raise ValueError('uncompressed storage size mismatch')
+        data = raw[:expected]
     if len(data) != expected:
         raise ValueError(f"{label}: inflated {len(data)} bytes, header says {expected}")
     return data, compressed, expected

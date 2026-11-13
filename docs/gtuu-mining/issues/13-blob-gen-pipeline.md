@@ -93,3 +93,17 @@ supply-chain rule from source-eval.md (fetch **download.nvidia.com only**
   generates a real BL from pinned kernel source or documents the
   zero-badge explicitly in NOTICE (payload-mode non-consumption proven by
   two independent lineages).
+
+### Follow-up closed (2026-11-13): 615.78.08 bindata format supported ahead of the driver bump
+`extract_boot_assets.py` now parses both generated-source shapes. 615 differences
+measured across all nine pinned SOURCES: (1) every array is
+`NV_DECLARE_ALIGNED(NvU64, 8)` words `0x…ULL` (decoded little-endian — C memory
+order, which the DEFLATE streams and record layouts are parsed from); (2) storage
+is zero-padded to an 8-byte boundary (303->304, 4->8, 12->16; pad must be zero and
+<8 bytes else hard error). Labels, comment block, BlUcode descriptor literal
+(0xfd…) unchanged. Evidence: 610 extraction byte-identical to MANIFEST.sha256
+(3/3 OK) with the patched parser; full 615 extraction succeeds producing all 12
+assets with every internal validator (descriptor fields, CRC/ISIZE, range gates)
+passing; adversarial probes prove both layers bite (pad byte corrupt -> storage
+mismatch; trailer corrupt -> checksum mismatch; clean file still passes). Not
+claimed: 615 assets are driver-install-verified — that's the bump itself.

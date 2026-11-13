@@ -1303,3 +1303,10 @@ capability, resize-fail, pre-aperture ordering, full-gauntlet X2 inside
 the transaction with legacy removal first). Native builds 7.2.9 + 6.18.55
 zero warnings. Live row owed: one-shot trial on a 90HX when it returns
 (param default off until then; 50HX fleet untouched).
+
+## F closed: 615.78.08 bindata format now parses (driver-bump unblocked offline)
+extract_boot_assets.py: NvU64-word arrays (LE decode) + <8 zero-byte alignment
+pad rule, both measured from the pinned 615 tarball, both adversarially
+probed; 610 path byte-identical to MANIFEST.sha256 through the patched code.
+The t13 follow-up ("non-byte token" rejection) is closed before the bump,
+not during. Extraction validity != install validity — stated in the ticket.
