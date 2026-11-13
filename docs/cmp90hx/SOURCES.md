@@ -134,7 +134,10 @@ outcome. (Bash-greppable: one URL per bullet.)
   mechanism precedent (WPR2-up triage anchored on GFW-completed + GSP-not-
   started, RTD3 power-loss caveat, re-apply every cold boot, no-retry-after-
   STOP discipline) + lineage anchors below. Reflected: not yet analyzed in
-  depth — recorded 2026-10-31, user-provided pointer.
+  depth — recorded 2026-10-31, user-provided pointer. Delta 2026-11-11:
+  cloned at HEAD `36b4089` (was `16e9dc5`; 2.3k★ now, v2.1.11 +
+  v2.1.12-rc2 — still GTX 16/RTX 20/30/40 only, GA100 excluded); pinned
+  record in `work/upstream/` CLONES.md.
 - https://github.com/JustAResearcher/gpu-unlock-ada — GPL-2.0; AD10x
   four-write chain source, per nv-uefi-unlocker credits (new via the entry
   above).
@@ -157,6 +160,25 @@ outcome. (Bash-greppable: one URL per bullet.)
   **Candidate lever for the CMP 50HX 615-EFI-only Gen2 gap** (ticket 11 §9):
   untested on Turing; GA102 (`0x88fe8=0xffffffcf`, `VSEC_DEVICE` fuse-shadow) is
   the negative control — probe `0x88fe8`/`0x2241C` on TU102 before any write.
+
+## Found 2026-11-11 (user-provided pointers)
+
+- https://github.com/MindAllik/GPU-Tensor-Unlock-Universal — HEAD `ab7bfc0`
+  (2026-11-11, v1.3.0, repo created 2026-10-30), GPL-2.0-only, C, ~20★.
+  Guided GUI aggregator of the consumer RTX 20/30/40 tensor-unlock line
+  (Windows 10/11 UEFI-USB `BOOTX64.EFI` + Linux `gpu_unlock.ko` via
+  DKMS/initramfs), self-described as combining Zagitta / JustAResearcher /
+  KohakuBlueleaf / impacifist / TOTORONG et al. Sibling downstream of the
+  nv-uefi-unlocker entry above, same V67/SS-selector mechanism; its Turing
+  `SS0/SS1` addressing (`0x00409664`/`0x0040966c`) is the FEAT-block family
+  our repo pinned (`0x409650/64/6c`, cited in nv-uefi-unlocker's credits).
+  **No CMP support → zero applicability to 50HX/90HX.** Recorded for corpus
+  completeness + three transferable bits: 7-kernel randomized-input PTX
+  benchmark methodology (mmapeak zero-fragment overcounting caution
+  precedent), in-OS divider readback via `/dev/nvidiactl` ioctl
+  `0x20801230` without a CUDA context, and pre-flight `NV_PROM_DATA`
+  (BAR0+0x300000) ROM dry-run gating. Cloned 2026-11-11; pinned record in
+  `work/upstream/` CLONES.md.
 
 ## NVIDIA firmware inputs (Zagitta build deps, pinned)
 

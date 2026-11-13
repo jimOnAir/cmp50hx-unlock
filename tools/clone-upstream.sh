@@ -30,6 +30,8 @@ REPOS=(
   "bendy2/cmp90hx"                     # V67 stockflow origin
   "impacifist/Windows-GPU-UNLOCK"      # Zagitta Windows port
   "haohervchb/Turing-unlock"           # Kohak executor upstream
+  "physicsdolphin/nv-uefi-unlocker"    # consumer-line EFI unlocker (credits us; GA100 excl.)
+  "MindAllik/GPU-Tensor-Unlock-Universal" # consumer-line GUI suite, RTX 20/30/40 only
 )
 
 declare -a LINES=() FAILED=()
