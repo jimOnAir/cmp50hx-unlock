@@ -1134,3 +1134,44 @@ along with the 615 bindata token-format gap for the next driver line.
 Bonus field proof of the t20 banner gate: it caught a stale pre-built
 .EFI entering a deb during this work — exactly the artifact mix-up class
 it was built to catch.
+
+## llm2 boot saga 2026-11-12: two real bugs caught by field contact (gate1 false-reject + gate3 post-mortem)
+
+(1) PREFLIGHT lived-fire proved the t08 gate's refuse-never-bricks design
+(boot #2 refused, chainloaded, OS fine — card stayed locked). The reject
+itself was a FALSE POSITIVE with an old, familiar signature: on CF8-found
+hosts (enc=2 — the finder reports it, the [40HX bar] path uses it),
+gRb->Pci config reads return zeros; t08/t18 cfg_read/write wrappers
+reintroduced exactly the issue-#47 trap the rebar path had worked around
+years ago. Evidence chain: CF8 read/write of COMMAND shows MEM=1 and the
+card DECODES MMIO (canary reads real PLM 0xffffff8f) while the RPI path
+reads 0 in the same microsecond. Fix: all four cfg wrappers now delegate
+to the finder-encode helpers (u40x_pci_rbdf/wbdf); preflight rejects also
+print the raw cmd dword; new all-FF guard distinguishes wedge from
+lock-out. Harnesses stayed valid untouched (they stub the wrapper
+symbols) — the accessor-vs-firmware class is inherently invisible to
+host stubs: field contact remains the final gate, one-shot BootNext only.
+
+(2) gate2 (556c6a0f) WEDGED the bench: the t20 clock seed placed at the
+TOP of efi_main dereferenced gRT BEFORE InitializeLib() fills it (crt0
+defines nothing — InitializeLib sets gST/gBS/gRT). NULL->GetTime = fault
+before the log opens = stale ESP log, dead boot entry, no OS. The
+unlocker's per-line log discipline saved the diagnosis: boot #2's log
+survived untouched, and the ABSENCE of the new (cmd=) telemetry proved
+gate2 never wrote a line — narrowing to pre-log death in one read.
+Restored .28 from the staged rollback (db5ffdf7 re-verified on ESP), box
+back via the "Ubuntu" entry. Relocated below InitializeLib + the rule
+documented in-code. Recovery cost: ~1 evening; prevention rules now in
+boot-runbook.md: (a) debug EFIs ship as their OWN ESP file + ONE-SHOT
+BootNext — never the permanent BootOrder path; (b) protocol-global use
+below InitializeLib only; (c) rollback EFI hash re-verified after every
+restore.
+
+(3) BIOS baseline drift after the week-long power loss (dead RTC → CMOS
+defaults): VT-d now ON (ACPI DMAR present; kernel boots iommu=pt) and
+01:00.0 link trains x4 (was x16) — fleet BIOS expectations (VT-d off per
+the B2 four-cell matrix on DMA translation, slot at x16) should be
+physically re-verified before the next unlock-flow test; gate3's first
+live unlock chain will otherwise be a confounded experiment. The t16
+canary nailed the inter-boot event class from its first live line:
+"verdict=power-cycle".

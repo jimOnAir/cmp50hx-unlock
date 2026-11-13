@@ -854,47 +854,57 @@ mmio_write32(UINTN offset, UINT32 value)
     *p = value;
 }
 
+/* issue #47, re-learned the hard way (llm2 boot 2026-11-12): config access
+ * MUST use the finder's discovery encode. gRb->Pci with one fixed layout
+ * returns ZEROS on CF8-found (enc=2) hosts: [40HX bar] wrote COMMAND via
+ * CF8 (landed — the card decoded, PLM read true 0xffffff8f) while t08's
+ * preflight re-read it through gRb, saw 0, and FALSE-rejected "MEM space
+ * not enabled". Forward declarations: the rbdf/wbdf helpers live further
+ * down with the discovery code. */
+static INTN u40x_enc_found = 0;
+static UINT32 u40x_pci_rbdf(UINTN bus, UINTN dev, UINTN fn, UINTN off, INTN enc);
+static void u40x_pci_wbdf(UINTN bus, UINTN dev, UINTN fn, UINTN off,
+                          UINT32 val, INTN enc);
+
 static UINT32
 cfg_read32(UINTN offset)
 {
-    UINT32 val = 0;
-    if (gRb)
-        pci_cfg_read(offset, &val);
-    return val;
+    return u40x_pci_rbdf(gBus, gDev, gFn, offset, u40x_enc_found);
 }
 
 static void
 cfg_write32(UINTN offset, UINT32 val)
 {
-    if (gRb)
-        pci_cfg_write(offset, val);
+    u40x_pci_wbdf(gBus, gDev, gFn, offset, val, u40x_enc_found);
 }
 
 /* 16-bit config access (FLR craft, ticket 18): Device Control and COMMAND
  * must be read-modify-written as WORDS. The old dword RMW at pcie+0x08
  * wrote Device Status in the same dword (and with only the devctl value in
  * the low half, effectively a 0-write over it); the totorong FLR row names
- * exactly this — preserve the rest of the register pair. */
+ * exactly this — preserve the rest of the register pair. CF8 has no WORD
+ * access, so this reads the dword, swaps the target half, writes back:
+ * the sibling half re-writes its own value (RW1C bits clear-on-written-1:
+ * preserved ones get cleared — acceptable on the FLR path where the reset
+ * invalidates Device Status anyway; anyone reusing this elsewhere, read
+ * this first). */
 static UINT16
 cfg_read16(UINTN offset)
 {
-    UINT16 val = 0xFFFF;
-    if (gRb)
-        uefi_call_wrapper(gRb->Pci.Read, 5, gRb, EfiPciIoWidthUint16,
-                          ((UINT64)gBus << 20) | ((UINT64)gDev << 15) |
-                          ((UINT64)gFn << 12) | ((UINT64)offset & 0xFFF),
-                          1, &val);
-    return val;
+    UINT32 d = cfg_read32(offset & ~(UINTN)3U);
+    return (UINT16)(d >> ((offset & 2U) ? 16 : 0));
 }
 
 static void
 cfg_write16(UINTN offset, UINT16 val)
 {
-    if (gRb)
-        uefi_call_wrapper(gRb->Pci.Write, 5, gRb, EfiPciIoWidthUint16,
-                          ((UINT64)gBus << 20) | ((UINT64)gDev << 15) |
-                          ((UINT64)gFn << 12) | ((UINT64)offset & 0xFFF),
-                          1, &val);
+    UINTN base = offset & ~(UINTN)3U;
+    UINT32 d = cfg_read32(base);
+    if ((offset & 2U) != 0)
+        d = (d & 0x0000FFFFu) | ((UINT32)val << 16);
+    else
+        d = (d & 0xFFFF0000u) | val;
+    cfg_write32(base, d);
 }
 
 /* ==== Config-space access to ARBITRARY BDF + PCIe capability helpers ====
@@ -1663,14 +1673,16 @@ u40x_preflight_config(void)
     has_caps = (cfg16_at(cfg, 0x06) & 0x0010U) != 0;   /* STATUS cap-list */
     mem_en   = (cfg16_at(cfg, 0x04) & 0x0002U) != 0;   /* COMMAND memory */
     rom_off  = (cfg[0x30 / 4] & 1U) == 0;              /* ROM BAR decode */
-    if (!mem_en)
+    if ((cfg[0] & 0xFFFFU) == 0xFFFFU)
+        why = L"config reads all-FF (wedged/absent)";
+    else if (!mem_en)
         why = L"MEM space not enabled";
     else if (!rom_off)
         why = L"option ROM decode enabled";
     else if (!has_caps)
         why = L"no capability list";
     if (why) {
-        Print(L"[50HX] PREFLIGHT reject: %s\n", why);
+        Print(L"[50HX] PREFLIGHT reject: %s (cmd=0x%08x)\n", why, cfg[1]);
         return FALSE;
     }
 
@@ -5300,7 +5312,7 @@ static void u40x_pci_wbdf(UINTN bus, UINTN dev, UINTN fn, UINTN off,
 
 /* 找到卡时用的addressencode（0=specification bus<<24，1=紧凑 bus<<20）——BAR/command
  * 的后续config读必须沿用同一encode，否则在非specificationfirmware上会读错device。 */
-static INTN u40x_enc_found = 0;
+/* (u40x_enc_found defined above with the cfg wrappers — issue #47) */
 
 /* issue #24: on AGESA / Ryzen APU boards the spec/compact RootBridgeIo
  * paths corrupt the stack (AGESA bug on unmodelled Type-0 devices —
@@ -5948,6 +5960,19 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     UINTN i;
 
     InitializeLib(ImageHandle, SystemTable);
+    /* t20 stamp clock: seed the epoch NOW — InitializeLib is what fills
+     * gRT (crt0 does not), and the late 'time:' block never runs on a
+     * refuse path (llm2 2026-11-12 boot #2: all [+0ms] after a preflight
+     * refusal). FATAL-position lesson from boot #3: this block ran BEFORE
+     * InitializeLib in 556c6a0f-gate2 -> NULL->GetTime -> the app died
+     * before opening the log and wedged the boot entry. Anything
+     * touching protocol globals MUST sit below InitializeLib. */
+    {
+        EFI_TIME tt_e;
+        if (!uefi_call_wrapper(gRT->GetTime, 2, &tt_e, NULL))
+            g_t0 = (UINT32)tt_e.Hour * 3600u + (UINT32)tt_e.Minute * 60u
+                   + (UINT32)tt_e.Second;
+    }
     /* [warm] disarm boot watchdog if armed (firmware resets at ~5 min) */
     uefi_call_wrapper(BS->SetWatchdogTimer, 4, (UINTN)0, (UINT64)0,
                              (UINTN)0, (CHAR16 *)NULL);
