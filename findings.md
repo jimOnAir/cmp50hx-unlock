@@ -1225,3 +1225,23 @@ resets both scratch and FEAT witnesses — warm reads identical to cold
 no-reboot event classes (RTD3 park, manual FLR between boots) which skip
 POST. No forced PARTIAL/injection-failure experiments were run on the
 serving host — those rows stay harness-only per the runbook's rule.
+
+## llm2 is dual-stacked (2026-11-13 ~13:1x): another unlocker lineage took the boot path
+
+Post-promotion validation never observed our binary: the 13:13/13:25
+boots ran old-style (no banner/stamps/gates) unlocker logs from a
+DIFFERENT stack present on the box — dpkg shows
+cmp90hx-unlock-nvidia 610.43.03-cmpunlock.7.0.0-38 (a second DKMS
+nvidia) plus 90hx-boot-ladder/90hx-solo services and
+/var/lib/cmpunlocker-rs — the cmpunlocker-rs lineage; BootOrder was
+reset to 0000-first again. Our promoted artifacts remain in place and
+sound: ESP 50HXUNLK.EFI = gate4 8eed5574 (sha-verified), gtuu6 installed,
+gate4 already has FOUR successful live boots of validation behind it as
+BootNext one-shot (12:16 full chain, 12:31 ENFORCE-ok, 12:35 ENFORCE-
+mismatch+dump, 12:39 OBSERVE-restore+unlock). Both 50HX currently
+UNLOCKED (SS exact; other stack or ours, state is equivalent at
+register level). 03:00.0 (RTX 5060 Ti) answers our TU102-offset reads
+with the badf5040 sentinel — correct, it is not a CMP. Pause: boot-path
+ownership of this machine must be settled before further promotion
+boots. Our canary script gracefully reported the missing-90HX case
+(verdict=unreadable) rather than misbehaving.
