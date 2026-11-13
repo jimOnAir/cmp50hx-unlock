@@ -11,11 +11,41 @@ permissions:
 
 jobs:
   # -------------------------------------------------------------------
+  # Host gates: the extraction-harness suite (the EFI logic's offline
+  # verification — same scripts as the .gitlab-ci.yml test:host-harness
+  # job, plus the 8 prebuilt selftests) runs BEFORE a release builds.
+  # gcc + python3 only; no EFI toolchain needed. These same gates
+  # caught the MSI-length and clock-seed bugs via field contact — they
+  # must stand between a broken merge and a tagged release.
+  # -------------------------------------------------------------------
+  host-gates:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the extraction-harness suite
+        run: |
+          set -eux
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential python3
+          for t in preflight fwsec-gate staging-ladder reset-canary \
+                   mailbox-dict flr-craft final-gate memmap; do
+            bash "efi-unlock/tools/${t}-selftest.sh"
+          done
+          bash efi-unlock/tools/asan-gate-selftest.sh
+
+      - name: Run the claim host harness
+        run: |
+          set -eux
+          bash claim-90hx/tests/run-host-harness.sh
+
+  # -------------------------------------------------------------------
   # Linux: build the EFI binary and assemble the self-contained .deb
   # (embedded pinned NVIDIA .run + patched DKMS module tree + UEFI
   # ESP unlock + services). The .deb replaces the old .run installer.
   # -------------------------------------------------------------------
   linux:
+    needs: host-gates
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
