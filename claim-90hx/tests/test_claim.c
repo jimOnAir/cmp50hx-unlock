@@ -28,6 +28,7 @@ u32 *fix_config(void);
 int log_has(const char *frag);
 void log_clear(void);
 extern int k_pmcsr_stuck, k_cmd_allf, k_fail_alloc_at;
+extern int k_flr_ret, k_flr_identity_gone, k_flr_wedge;
 extern unsigned long vms;
 extern unsigned dma_live;
 extern u64 fix_rebar_sizes;
@@ -90,6 +91,23 @@ static void claim_ready(struct unlock_transaction_work *w)
 	w->card = &fx_card;
 	fix_config()[PCI_COMMAND >> 2] = 0x0006;	/* MSE | BME */
 	fix_config()[(0x40 + PCI_PM_CTRL) >> 2] = 0x0100; /* PMCSR D0 */
+}
+
+/* Seed the fixture for a full unlock_transaction_reset gauntlet run
+ * (S19+): success up to the post-FLR checks, x2 left at the caller's
+ * discretion. */
+static void reset_seeded(void)
+{
+	struct unlock_transaction_work w;
+
+	claim_ready(&w);
+	bar_w32(GU_FEAT_SS0_OFFSET, GU_SS0_UNLOCK);
+	bar_w32(GU_FEAT_SS1_OFFSET, GU_SS1_UNLOCK);
+	bar_w32(GU_PMC_BOOT_0_OFFSET, fx_card.chip);
+	bar_w32(GU_GFW_PLM_OFFSET, 0x1);
+	bar_w32(GU_GFW_BOOT_OFFSET, 0xff);
+	bar_w32(GU_GFW_CPUCTL_OFFSET, GU_GFW_CPUCTL_HALTED);
+	fix_config()[PCI_COMMAND >> 2] = 0x0006;	/* MSE+BME; prod clears BME */
 }
 
 int main(void)
@@ -384,6 +402,83 @@ int main(void)
 		(void)ret;	/* later gauntlet stages may legitimately stop the flow */
 	}
 	x2_aperture = false;
+
+	/* ---- S20: FLR itself fails (k_flr_ret) -> transaction dies at the
+	 * FLR call: legacy removal already ran (it precedes FLR), X2 must
+	 * NOT (it lives strictly after the post-FLR verify). ---- */
+	reset_seeded();
+	{
+		struct unlock_transaction_work rw = w;
+
+		rw.state = GU_STOCK;
+		rw.bar = (void __iomem *)fix_mmio();
+		rw.bar_len = 16u << 20;
+		k_flr_ret = -EOPNOTSUPP;
+		x2_aperture = true;
+		ret = unlock_transaction_reset(&rw);
+		k_flr_ret = 0;
+		ck("S20 FLR -EOPNOTSUPP propagates", ret == -EOPNOTSUPP);
+		ck("S20 removal ran, X2 did not",
+		   fix_aperture_rm_n == 1 && fix_seq_n == 0 && !rw.x2_claimed);
+		x2_aperture = false;
+	}
+
+	/* ---- S21: card dies across FLR (identity all-FF after) -> named
+	 * post-FLR -ENODEV; X2 stays off a dead card. ---- */
+	reset_seeded();
+	{
+		struct unlock_transaction_work rw = w;
+
+		rw.state = GU_STOCK;
+		rw.bar = (void __iomem *)fix_mmio();
+		rw.bar_len = 16u << 20;
+		k_flr_identity_gone = 1;
+		x2_aperture = true;
+		ret = unlock_transaction_reset(&rw);
+		k_flr_identity_gone = 0;
+		ck("S21 identity loss -> -ENODEV", ret == -ENODEV);
+		ck("S21 dead card never sees X2 or a claim",
+		   fix_seq_n == 0 && !rw.x2_claimed);
+		ck("S21 refusal snapshotted",
+		   log_has("failure unlock_transaction_reset"));
+		x2_aperture = false;
+	}
+
+	/* ---- S22: config wedges all-FF ACROSS the FLR window
+	 * (k_flr_wedge — the pre-FLR reads stay clean) -> post-FLR
+	 * identity check refuses -ENODEV; X2 still untouched. ---- */
+	reset_seeded();
+	{
+		struct unlock_transaction_work rw = w;
+
+		rw.state = GU_STOCK;
+		rw.bar = (void __iomem *)fix_mmio();
+		rw.bar_len = 16u << 20;
+		x2_aperture = true;
+		k_flr_wedge = 1;
+		ret = unlock_transaction_reset(&rw);
+		k_flr_wedge = 0; k_cmd_allf = 0;
+		ck("S22 wedge across FLR -> post-FLR -ENODEV", ret == -ENODEV);
+		ck("S22 X2 did not run", fix_seq_n == 0 && !rw.x2_claimed);
+		x2_aperture = false;
+	}
+
+	/* ---- S23 (reverse pair of S19): same gauntlet WITHOUT x2 (fleet
+	 * default) — transaction behaves exactly as before phase-2: no
+	 * rebar/resize/request calls at all, legacy removal only. ---- */
+	reset_seeded();
+	{
+		struct unlock_transaction_work rw = w;
+
+		rw.state = GU_STOCK;
+		rw.bar = (void __iomem *)fix_mmio();
+		rw.bar_len = 16u << 20;
+		x2_aperture = false;
+		ret = unlock_transaction_reset(&rw);
+		ck("S23 default-off: legacy removal only, zero X2 calls",
+		   fix_aperture_rm_n == 1 && fix_seq_n == 0 && !rw.x2_claimed);
+		ck("S23 no x2 log lines at all", !log_has("x2:"));
+	}
 
 	printf(fails ? "%d FAILURES\n" : "ALL-PASS\n", fails);
 	return fails != 0;

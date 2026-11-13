@@ -20,6 +20,7 @@ int k_alloc_calls;
 int k_pmcsr_stuck;                 /* PMCSR writes do not take effect */
 int k_flr_ret;                     /* pcie_flr() return value */
 int k_flr_identity_gone;           /* config identity absent after FLR */
+int k_flr_wedge;                   /* config wedges all-FF *across* FLR */
 int k_cmd_allf;                    /* wedge: every config read is 0xffff */
 int k_fw_name_fail = 1;            /* request_firmware fails until fed */
 int k_bme_stuck_off;               /* pci_set_master does not stick */
@@ -233,6 +234,8 @@ int pcie_flr(struct pci_dev *p)
 	(void)p;
 	if (k_flr_identity_gone)
 		fix_cfg[0] = 0xffffffffu;   /* identity lost after reset */
+	if (k_flr_wedge)
+		k_cmd_allf = 1;           /* dies during the reset window */
 	return k_flr_ret;
 }
 struct pci_dev *pci_dev_get(struct pci_dev *p) { p->refs++; return p; }
@@ -244,7 +247,7 @@ void fix_reset(void)
 	memset(fix_bar, 0, sizeof fix_bar);
 	memset(fix_cfg, 0, sizeof fix_cfg);
 	k_fail_alloc_at = -1; k_alloc_calls = 0; k_pmcsr_stuck = 0; k_flr_ret = 0;
-	k_flr_identity_gone = 0; k_cmd_allf = 0; k_bme_stuck_off = 0; vms = 0; dma_live = 0;
+	k_flr_identity_gone = 0; k_cmd_allf = 0; k_flr_wedge = 0; k_bme_stuck_off = 0; vms = 0; dma_live = 0;
 	k_x2_req_busy = 0; k_x2_resize_fail = 0; fix_aperture_rm_n = 0;
 	fix_seq_n = 0;
 	fix_rebar_sizes = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 6); /* 4,16,64,256 MiB */
