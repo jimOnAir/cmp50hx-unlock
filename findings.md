@@ -1328,3 +1328,18 @@ its own root dirs instead. gtuu8 (610.43.03-20261113.gtuu8, deb sha
 a9e2ada1…) = first artifact via the new path: ships phase-2 claim module
 (x2 params default OFF) + unchanged EFI 8237b24b. llm2 is powered off
 (user-confirmed) -> install + DKMS gate on 7.0.0-38 owed at power-on.
+
+## Push executed — the stream is off the single disk (2026-11-13)
+Owner said "push"; configured `fork` remote (github.com:jimOnAir/cmp50hx-unlock,
+the owner's own public fork — author-identity and prior-shared-history verified)
+accepted master by fast-forward: 37 stream commits (80dde56..dd477d5), then
+8ff75da (integrity pass; its -f flag rewrote only my own seconds-old dd477d5
+to fix a self-introduced citation typo — fork/master==master re-verified by
+sha after every push). Gate kept: pre-push scan of the pushed diff = 0
+credential patterns, max blob 300 KB source, zero .run/.deb artifacts.
+origin (xrip third-party) untouched. docs/agents/issue-tracker.md now codifies
+the target so future sessions don't re-ask. Same pass: NOTICE license
+preservations made true (claim-90hx/licenses/), full host-gate suite green
+at HEAD (8 extraction selftests + ASan + memmap + 74-assert claim harness).
+Backup concern CLOSED. Machine-dependent queue unchanged: gtuu8 install +
+DKMS/modinfo gates at llm2 power-on.
