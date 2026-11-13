@@ -5154,6 +5154,63 @@ static void preload_os_loader(EFI_HANDLE ImageHandle)
 static EFI_GUID u40x_dp_guid = {0x09576e91,0x6d3f,0x11d2,
     {0x8e,0x39,0x00,0xa0,0xc9,0x69,0x72,0x3b}};
 
+/* MEMMAP-STATS-BEGIN */
+/* P16 residue (ticket 21 closed WONTFIX: Windows bootmgr chainload is not
+ * a deployment mode for this fleet, so the pool-freeing fix is not
+ * ported — but the largest-block LOG line is kept per the ticket's own
+ * carve-out: handoff-time allocation pressure is otherwise invisible on
+ * the ESP log, and the "loader was OOM at handoff" class (documented
+ * 0xc000009a-family in the nv-uefi-unlocker corpus) becomes readable
+ * from a dead boot's log. Pure walker first (harness-extracted), then
+ * the GetMemoryMap plumbing. */
+static void
+u40x_memmap_stats(const EFI_MEMORY_DESCRIPTOR *map, UINTN sz, UINTN dsz,
+                  UINT64 *largest, UINTN *blocks)
+{
+    UINTN i;
+    *largest = 0;
+    *blocks = 0;
+    if (!map || dsz < sizeof(EFI_MEMORY_DESCRIPTOR))
+        return;
+    for (i = 0; i + dsz <= sz; i += dsz) {
+        const EFI_MEMORY_DESCRIPTOR *d =
+            (const EFI_MEMORY_DESCRIPTOR *)((const UINT8 *)map + i);
+        if (d->Type == EfiConventionalMemory && d->NumberOfPages > 0) {
+            UINT64 bytes = d->NumberOfPages * 4096ULL;
+            (*blocks)++;
+            if (bytes > *largest)
+                *largest = bytes;
+        }
+    }
+}
+
+static void u40x_log_memmap_stats(void)
+{
+    EFI_MEMORY_DESCRIPTOR *map = NULL;
+    UINTN sz = 0, dsz = 0, key = 0;
+    UINT32 ver = 0;
+    UINT64 largest = 0;
+    UINTN blocks = 0;
+
+    if (!BS)
+        return;
+    if (uefi_call_wrapper(BS->GetMemoryMap, 5, &sz, NULL, &key, &dsz, &ver)
+            != EFI_BUFFER_TOO_SMALL || sz == 0)
+        return;
+    sz += 2 * dsz;                    /* headroom: map may grow between calls */
+    if (EFI_ERROR(uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, sz,
+                                    (VOID **)&map)) || !map)
+        return;
+    if (!EFI_ERROR(uefi_call_wrapper(BS->GetMemoryMap, 5, &sz, map, &key,
+                                     &dsz, &ver))) {
+        u40x_memmap_stats(map, sz, dsz, &largest, &blocks);
+        Print(L"[50HX] MEMMAP stats: largest-free=0x%lx (%lu MB) free-blocks=%u\n",
+              largest, (UINTN)(largest >> 20), (UINT32)blocks);
+    }
+    uefi_call_wrapper(BS->FreePool, 1, map);
+}
+/* MEMMAP-STATS-END */
+
 static EFI_STATUS chainload_preloaded(EFI_HANDLE ImageHandle)
 {
     EFI_HANDLE h = NULL;
@@ -5162,6 +5219,11 @@ static EFI_STATUS chainload_preloaded(EFI_HANDLE ImageHandle)
     /* last MMIO-touching code before StartImage (ticket 19, B2-P36-C4) */
     if (g_fg_armed)
         (void)u40x_final_gate();
+
+    /* ticket 21 (wontfix-with-line): free evidence, firmware bookkeeping
+     * only — deliberately AFTER the final gate (the gate stays the last
+     * MMIO-touching code). */
+    u40x_log_memmap_stats();
 
     /* which volume WE were loaded from - correlates with the FS#N list below */
     {
