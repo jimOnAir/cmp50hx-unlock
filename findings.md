@@ -1270,3 +1270,36 @@ an unbound CMP card; refusal-guard proven), t04 PARTIAL + t15 LOW-band
 host), t01 locked cell (stock-driver window, owner-scheduled), t13
 guinea-pig boot row (satisfied: unlocked boot with generated-payload
 binary eff516f5-lineage… gate4 itself, digest chain in runs doc).
+
+## t11 phase-2: X2 aperture claim — plus a self-correction on the phase-1 record
+
+Verification-before-claim caught two things during phase-2 scoping: (a) the
+earlier working note said the claim harness "extracts from unlock_610.c
+between GEN2-CLAIM markers" — WRONG: test_claim.c #includes the PRODUCTION
+unlock_610.c verbatim (whole-file, two-build pattern) and the canary/gen2
+production logic lives in cmp90hx-claim.sh (itself the extraction source of
+reset-canary-selftest.sh); the shipped harness was always stronger than the
+note claimed (real code under test, not a copy). (b) the aperture wrapper
+name check (gpu_unlock_remove_apertures, header+call site match) — fine.
+
+Landed: X2 claim in unlock_transaction_reset right after the post-FLR BAR
+verify (FLR resets BAR registers, so resize survives only from there on).
+Params x2_aperture (default 0 — legacy remove-and-free stays the fleet
+path) + x2_size_mb (256). Semantics mined from B1 (static-read-only):
+resize BAR1 + request it ("gpu_unlock") so the aperture window is
+provably the transaction's; ours differs by DERIVING state from the live
+BAR every run — carry path when size+busy match (resume re-unlock: the
+flow runs again before nvidia resumes, pci_save/restore around the phases
+carries the resized BAR; a lost resize re-claims), no global claim
+memory (multi-card safe). Contract sequence release->resize->request with
+rollback-resize on busy window; every skip path named (-EOPNOTSUPP
+non-prefetch, -EINVAL <4MiB want, -EOPNOTSUPP empty capability, -EIO
+resize fail, -EBUSY refused+rolled back). PCIe §7.8.6 index discipline
+caught once by fixture (256 MiB = idx6 = 2^28, initial fixture assumed
+idx4=64 MiB and the harness immediately failed the length pin — the
+value of pinning byte-exact effects, not just return codes). Harness
+63/63 (25 new: picker, happy sequence, rollback, guard, carry, capped
+capability, resize-fail, pre-aperture ordering, full-gauntlet X2 inside
+the transaction with legacy removal first). Native builds 7.2.9 + 6.18.55
+zero warnings. Live row owed: one-shot trial on a 90HX when it returns
+(param default off until then; 50HX fleet untouched).

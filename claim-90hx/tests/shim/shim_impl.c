@@ -23,6 +23,12 @@ int k_flr_identity_gone;           /* config identity absent after FLR */
 int k_cmd_allf;                    /* wedge: every config read is 0xffff */
 int k_fw_name_fail = 1;            /* request_firmware fails until fed */
 int k_bme_stuck_off;               /* pci_set_master does not stick */
+u64 fix_rebar_sizes;               /* possible-sizes bitmap offered to X2 */
+int k_x2_req_busy;                 /* request_selected_regions returns -EBUSY */
+int k_x2_resize_fail;              /* pci_resize_resource fails */
+int fix_aperture_rm_n;             /* legacy removal call counter (reverse asserts) */
+char fix_seq[64][12];              /* ordered stub-call codes for sequencing pins */
+int fix_seq_n;
 
 unsigned long vms;                 /* virtual ms clock */
 unsigned dma_live;                 /* outstanding dma_alloc_coherent blocks */
@@ -154,10 +160,62 @@ int pci_is_pcie(struct pci_dev *p) { (void)p; return 1; }
 int pci_select_bars(struct pci_dev *p, unsigned long f) { (void)p; (void)f; return 1; }
 int pci_request_region(struct pci_dev *p, int bar, const char *n) { (void)p; (void)bar; (void)n; return 0; }
 void pci_release_region(struct pci_dev *p, int bar) { (void)p; (void)bar; }
-int aperture_remove_conflicting_pci_devices(struct pci_dev *p, const char *n) { (void)p; (void)n; return 0; }
+int aperture_remove_conflicting_pci_devices(struct pci_dev *p, const char *n) { (void)p; (void)n; fix_aperture_rm_n++; return 0; }
 int pci_enable_device_mem(struct pci_dev *p) { (void)p; return 0; }
 void pci_disable_device(struct pci_dev *p) { (void)p; }
-resource_size_t pci_resource_len(struct pci_dev *p, int bar) { (void)p; (void)bar; return FIX_BAR_SIZE; }
+resource_size_t pci_resource_len(struct pci_dev *p, int bar) { return p->resource[bar].end - p->resource[bar].start + 1; }
+resource_size_t pci_resource_start(struct pci_dev *p, int bar) { return p->resource[bar].start; }
+
+/* ---- X2 aperture fixtures: fake Resizable BAR core + call sequence
+ * (globals declared with the fault knobs above; the aperture stub already
+ * uses the counter) ---- */
+static void seq_push(const char *code)
+{
+	if (fix_seq_n < 64) {
+		snprintf(fix_seq[fix_seq_n], sizeof fix_seq[0], "%s", code);
+		fix_seq_n++;
+	}
+}
+int fix_seq_has(const char *code)
+{
+	for (int i = 0; i < fix_seq_n; i++)
+		if (!strcmp(fix_seq[i], code))
+			return 1;
+	return 0;
+}
+u64 pci_rebar_get_possible_sizes(struct pci_dev *p, int bar) { (void)p; (void)bar; return fix_rebar_sizes; }
+int pci_resize_resource(struct pci_dev *p, int bar, int size, int exclude)
+{
+	resource_size_t newlen = (resource_size_t)SZ_4M << size;
+
+	(void)exclude;
+	snprintf(fix_seq[fix_seq_n % 64], sizeof fix_seq[0], "rsz%d:%d", bar, size);
+	fix_seq_n++;
+	if (k_x2_resize_fail)
+		return -EIO;
+	if (!(fix_rebar_sizes & ((u64)1 << size)))
+		return -EINVAL;
+	p->resource[bar].end = p->resource[bar].start + newlen - 1;
+	return 0;
+}
+int pci_request_selected_regions(struct pci_dev *p, int bars, const char *name)
+{
+	(void)name;
+	seq_push("req");
+	if (k_x2_req_busy)
+		return -EBUSY;
+	for (int bar = 0; bar < 6; bar++)
+		if (bars & BIT(bar))
+			p->resource[bar].flags |= IORESOURCE_BUSY;
+	return 0;
+}
+void pci_release_selected_regions(struct pci_dev *p, int bars)
+{
+	seq_push("rel");
+	for (int bar = 0; bar < 6; bar++)
+		if (bars & BIT(bar))
+			p->resource[bar].flags &= ~IORESOURCE_BUSY;
+}
 void __iomem *pci_iomap(struct pci_dev *p, int bar, unsigned long f) { (void)p; (void)bar; (void)f; return (void __iomem *)fix_bar; }
 void pci_iounmap(struct pci_dev *p, void __iomem *m) { (void)p; (void)m; }
 void *pci_map_rom(struct pci_dev *p, size_t *sz) { (void)p; *sz = 0; return NULL; }
@@ -187,6 +245,9 @@ void fix_reset(void)
 	memset(fix_cfg, 0, sizeof fix_cfg);
 	k_fail_alloc_at = -1; k_alloc_calls = 0; k_pmcsr_stuck = 0; k_flr_ret = 0;
 	k_flr_identity_gone = 0; k_cmd_allf = 0; k_bme_stuck_off = 0; vms = 0; dma_live = 0;
+	k_x2_req_busy = 0; k_x2_resize_fail = 0; fix_aperture_rm_n = 0;
+	fix_seq_n = 0;
+	fix_rebar_sizes = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 6); /* 4,16,64,256 MiB */
 	log_clear();
 	fix_cfg[0] = 0x1e0910deu;                    /* vendor/device */
 	fix_cfg[PCI_COMMAND >> 2] = 0x0000;          /* MSE off, BME off */

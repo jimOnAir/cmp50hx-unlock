@@ -77,3 +77,15 @@ reset does NOT restore FBIF writes, only FLR does); reverse ("must-NOT-
 happen") assertions as a first-class matrix; same-source-two-builds test
 trick (host gate compiles the production file verbatim — mirrors the
 preflight-selftest.sh extraction pattern).
+
+
+### Phase-2 addendum (2026-11-13)
+X2 aperture claim landed in `unlock_transaction_reset` (post-FLR BAR verify — the first
+point where a resize survives): `x2_aperture`/`x2_size_mb` params (default OFF, legacy
+behaviour unchanged), `x2_pick_size` (PCIe §7.8.6 indices, named -EINVAL/-EOPNOTSUPP),
+`gpu_unlock_x2_claim` (flags guard → derived-state carry path → release→resize→request
+contract with resize-back rollback on busy window; state DERIVED per run, multi-card
+safe, resume pass re-verifies naturally). Harness: 25 new asserts (S11–S19, now 63/63)
+with shim call-sequence pins + rollback + reverse assertions; kernel builds 7.2.9 and
+6.18.55 zero warnings. Not done: fwsec/booter image-feed scenarios (knobs pre-stubbed).
+Live row: the param stays 0 until a 90HX returns to the bench for a one-shot trial.

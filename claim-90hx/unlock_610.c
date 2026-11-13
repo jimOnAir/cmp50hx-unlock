@@ -44,6 +44,7 @@ struct unlock_transaction_work {
 	bool resume;	/* bound to nvidia, which suspended it before sleep */
 	void __iomem *bar;
 	resource_size_t bar_len;
+	bool x2_claimed;	/* BAR1 resized+requested this run (x2_aperture) */
 	u16 original_cmd;
 	bool cmd_valid;
 	bool enabled;
@@ -675,6 +676,115 @@ static int unlock_transaction_radix(struct unlock_transaction_work *work)
 out:
 	kvfree(addresses);
 	return GU_RESULT(ret);
+}
+
+/* X2 aperture claim (gtuu-mining ticket 11 phase-2; the claim semantics
+ * were mined from GPU-Tensor-Unlock-Universal @ ab7bfc0 — evaluated
+ * static-read-only, see docs/gtuu-mining/source-eval.md row K-series —
+ * reimplemented here on kernel APIs). Default OFF: the battle-tested
+ * remove-apertures-and-leave-the-window-free behaviour stays the fleet
+ * path until a card is proven on this one. When enabled, after the
+ * post-FLR BARs are verified stable (FLR resets BAR registers, so this
+ * is the first point where a resize survives), the module resizes BAR1
+ * to x2_size_mb and requests it for the session: the aperture window
+ * then provably belongs to the unlock transaction, and the "something
+ * else mapped BAR1 mid-boot" class becomes a named refusal instead of
+ * a mystery. State is DERIVED from the live BAR every run (never
+ * remembered across transactions), so it is multi-card safe and the
+ * resume pass (this same flow runs before nvidia resumes the card)
+ * re-verifies or re-claims on its own. */
+static bool x2_aperture;
+module_param(x2_aperture, bool, 0644);
+MODULE_PARM_DESC(x2_aperture, "resize+claim BAR1 at x2_size_mb after post-FLR BAR verify (default: off, legacy window handling)");
+
+static uint x2_size_mb = 256;
+module_param(x2_size_mb, uint, 0644);
+MODULE_PARM_DESC(x2_size_mb, "BAR1 claim size in MiB for x2_aperture (must be a Resizable BAR size; default: 256)");
+
+#define X2_BAR 1
+
+/* Largest Resizable-BAR size index whose byte size (PCIe r4.0 §7.8.6:
+ * 2^(20+N) bytes, our index counts from 4 MiB = 2^22) fits want_mib.
+ * Returns 0 and stores the index, or -EINVAL for an impossible request
+ * (< 4 MiB) and -EOPNOTSUPP when the capability offers nothing at or
+ * below the want (B2-P23: named outcomes, no silent downsize). */
+static int x2_pick_size(u64 possible, u32 want_mib, int *best)
+{
+	int idx, target = -1;
+
+	if (want_mib < 4)
+		return -EINVAL;
+	for (idx = 0; idx < 64; idx++) {
+		u64 bytes = (u64)SZ_4M << idx;
+
+		if (bytes > (u64)want_mib * SZ_1M)
+			break;
+		if (possible & ((u64)1 << idx))
+			target = idx;
+	}
+	if (target < 0)
+		return -EOPNOTSUPP;
+	*best = target;
+	return 0;
+}
+
+static int gpu_unlock_x2_claim(struct unlock_transaction_work *work)
+{
+	struct pci_dev *pdev = work->pdev;
+	struct resource *res = &pdev->resource[X2_BAR];
+	resource_size_t want = (resource_size_t)x2_size_mb * SZ_1M;
+	resource_size_t cur = pci_resource_len(pdev, X2_BAR);
+	unsigned long flags = res->flags;
+	u64 possible;
+	int idx, ret;
+
+	if (!(flags & IORESOURCE_MEM) || !(flags & IORESOURCE_MEM_64) ||
+	    !(flags & IORESOURCE_PREFETCH)) {
+		dev_warn(&pdev->dev, "x2: BAR1 not 64-bit prefetchable (flags=%#lx), claim skipped\n",
+			 flags);
+		return -EOPNOTSUPP;
+	}
+	if (cur == want && (res->flags & IORESOURCE_BUSY)) {
+		/* Derived-state fast path: the window is already at the
+		 * requested size and claimed — covers "resume carried it"
+		 * and a module re-run. No resize, no re-request. */
+		work->x2_claimed = true;
+		dev_info(&pdev->dev, "x2: BAR1 carried at %u MiB, window busy (ours)\n",
+			 x2_size_mb);
+		return 0;
+	}
+	possible = pci_rebar_get_possible_sizes(pdev, X2_BAR);
+	ret = x2_pick_size(possible, x2_size_mb, &idx);
+	if (ret) {
+		dev_warn(&pdev->dev, "x2: no Resizable BAR size for %u MiB (possible=%#llx), claim skipped\n",
+			 x2_size_mb, (unsigned long long)possible);
+		return ret;
+	}
+	/* Order is contractual (harness pins the exact sequence): the
+	 * kernel may only resize an unclaimed BAR; and if the claim then
+	 * fails the card must not sit resized with an unrequested window
+	 * for someone else to grab — resize back before returning. */
+	pci_release_selected_regions(pdev, BIT(X2_BAR));
+	ret = pci_resize_resource(pdev, X2_BAR, idx, pci_select_bars(pdev, IORESOURCE_MEM) & ~BIT(X2_BAR));
+	if (ret) {
+		dev_warn(&pdev->dev, "x2: BAR1 resize to %u MiB failed (%d), claim skipped\n",
+			 x2_size_mb, ret);
+		return ret;
+	}
+	ret = pci_request_selected_regions(pdev, BIT(X2_BAR), "gpu_unlock");
+	if (ret) {
+		int back = pci_resize_resource(pdev, X2_BAR,
+					       cur ? ilog2((u64)cur) - 22 : 0,
+					       pci_select_bars(pdev, IORESOURCE_MEM) & ~BIT(X2_BAR));
+
+		dev_warn(&pdev->dev, "x2: BAR1 window claim refused (%d), rolled back to %pa%s\n",
+			 ret, &cur, back ? " (rollback FAILED, BAR stays resized)" : "");
+		return ret;
+	}
+	work->x2_claimed = true;
+	dev_info(&pdev->dev, "x2: BAR1 claimed %llu MiB @%pa (idx=%d)\n",
+		 (u64)pci_resource_len(pdev, X2_BAR) >> 20, &res->start, idx);
+	return 0;
 }
 
 /* Wake a non-D0 card once: write D0 into PMCSR preserving upper control
@@ -1655,6 +1765,13 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 			return GU_RESULT(-EIO);
 		}
 	}
+	/* First point where a BAR1 resize survives (FLR above resets BAR
+	 * registers; the loop just proved config matches the restored
+	 * image). Failure here never fails the transaction: the legacy
+	 * free-window behaviour is a supported mode (x2_aperture=0 ships
+	 * that way). */
+	if (x2_aperture)
+		(void)gpu_unlock_x2_claim(work);
 	ret = wait_post_flr_bar(work, chip);
 	if (ret)
 		return GU_RESULT(ret);

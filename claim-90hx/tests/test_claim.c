@@ -30,6 +30,10 @@ void log_clear(void);
 extern int k_pmcsr_stuck, k_cmd_allf, k_fail_alloc_at;
 extern unsigned long vms;
 extern unsigned dma_live;
+extern u64 fix_rebar_sizes;
+extern int k_x2_req_busy, k_x2_resize_fail, fix_aperture_rm_n, fix_seq_n;
+extern char fix_seq[64][12];
+int fix_seq_has(const char *code);
 
 static const struct gu_family fx_fam = {
 	.name = "harness",
@@ -49,6 +53,14 @@ static void pdev_reset(void)
 	fx_pdev.device = 0x1e09;
 	fx_pdev.pm_cap = 0x40;
 	fx_pdev.current_state = PCI_D0;
+	/* resource[] backs the shim pci_resource_* accessors (kernel shape:
+	 * the resources live in the pci_dev). BAR0 = 16 MiB window claimed
+	 * by the module (BUSY), BAR1 = firmware-default 16 MiB, free. */
+	fx_pdev.resource[0] = (struct resource){ 0, (16u << 20) - 1,
+		IORESOURCE_MEM | IORESOURCE_BUSY, NULL };
+	fx_pdev.resource[1] = (struct resource){ 0x40000000ull,
+		0x40000000ull + (16u << 20) - 1,
+		IORESOURCE_MEM | IORESOURCE_MEM_64 | IORESOURCE_PREFETCH, NULL };
 }
 
 static void bar_w32(unsigned off, u32 v)
@@ -249,6 +261,129 @@ int main(void)
 		   ret == -ENOMEM && dma_live == 0);
 		k_fail_alloc_at = -1;
 	}
+
+	/* ================= X2 aperture claim (t11 phase-2) =================
+	 * Direct calls into the production statics (same TU): the claim
+	 * function is the unit; sequence pins via the shim call log prove
+	 * the release -> resize -> request contract and the rollback. */
+
+	/* ---- S11: pure size picker ---- */
+	{
+		int idx = -1;
+
+		ck("S11a x2_pick wants 256 from {4,16,64,256}=0x55 -> idx6 (2^(20+28)B)",
+		   x2_pick_size(0x55, 256, &idx) == 0 && idx == 6);
+		idx = -1;
+		ck("S11b non-pow2 want 50 picks largest <= -> idx2 (16M, 64>50)",
+		   x2_pick_size(0x15, 50, &idx) == 0 && idx == 2);
+		ck("S11c want below 4 MiB floor -> -EINVAL",
+		   x2_pick_size(0x15, 2, &idx) == -EINVAL);
+		ck("S11d capability offers nothing <= want -> -EOPNOTSUPP",
+		   x2_pick_size(0xf0, 8, &idx) == -EOPNOTSUPP);
+	}
+
+	/* ---- S12: claim happy path, exact contract sequence ---- */
+	claim_ready(&w);
+	x2_aperture = true; x2_size_mb = 256;
+	ret = gpu_unlock_x2_claim(&w);
+	ck("S12a claim returns 0", ret == 0 && w.x2_claimed);
+	ck("S12b sequence rel -> rsz1:6 -> req",
+	   fix_seq_n == 3 && !strcmp(fix_seq[0], "rel") &&
+	   !strcmp(fix_seq[1], "rsz1:6") && !strcmp(fix_seq[2], "req"));
+	ck("S12c BAR1 now 256 MiB and busy",
+	   pci_resource_len(&fx_pdev, 1) == 256u << 20 &&
+	   (fx_pdev.resource[1].flags & IORESOURCE_BUSY));
+	ck("S12d named claim line logged", log_has("x2: BAR1 claimed 256 MiB"));
+
+	/* ---- S13: window busy elsewhere -> resize rolled back ---- */
+	claim_ready(&w);
+	k_x2_req_busy = 1;
+	ret = gpu_unlock_x2_claim(&w);
+	ck("S13a refused with -EBUSY, not claimed", ret == -EBUSY && !w.x2_claimed);
+	ck("S13b rollback sequence rel,rsz1:6,req,rsz1:2",
+	   fix_seq_n == 4 && !strcmp(fix_seq[3], "rsz1:2"));
+	ck("S13c BAR1 back to 16 MiB after rollback",
+	   pci_resource_len(&fx_pdev, 1) == 16u << 20);
+	ck("S13d refusal named in log", log_has("x2: BAR1 window claim refused"));
+	k_x2_req_busy = 0;
+
+	/* ---- S14: BAR1 not 64-bit prefetchable -> untouched refusal ---- */
+	claim_ready(&w);
+	fx_pdev.resource[1].flags = IORESOURCE_MEM | IORESOURCE_PREFETCH;
+	ret = gpu_unlock_x2_claim(&w);
+	ck("S14a -EOPNOTSUPP, zero kernel calls",
+	   ret == -EOPNOTSUPP && fix_seq_n == 0 && !w.x2_claimed);
+	ck("S14b named skip", log_has("not 64-bit prefetchable"));
+
+	/* ---- S15: carried state (resume / re-run) -> no re-do ---- */
+	claim_ready(&w);
+	fx_pdev.resource[1].end = 0x40000000ull + (256ull << 20) - 1;
+	fx_pdev.resource[1].flags |= IORESOURCE_BUSY;
+	ret = gpu_unlock_x2_claim(&w);
+	ck("S15a carried at size+busy -> success with zero calls",
+	   ret == 0 && w.x2_claimed && fix_seq_n == 0);
+	ck("S15b named carry line", log_has("x2: BAR1 carried at 256 MiB"));
+
+	/* ---- S16: capability tops out below want -> largest <=, no refusal ---- */
+	claim_ready(&w);
+	fix_rebar_sizes = 0x05;                    /* 4 MiB and 16 MiB only */
+	ret = gpu_unlock_x2_claim(&w);
+	ck("S16a claims at 16 MiB (idx2) instead of refusing",
+	   ret == 0 && fix_seq_n == 3 && !strcmp(fix_seq[1], "rsz1:2") &&
+	   pci_resource_len(&fx_pdev, 1) == 16u << 20);
+	fix_rebar_sizes = 0x15;
+
+	/* ---- S17: resize failure leaves the BAR as it was ---- */
+	claim_ready(&w);
+	k_x2_resize_fail = 1;
+	ret = gpu_unlock_x2_claim(&w);
+	ck("S17a -EIO, no request attempted",
+	   ret == -EIO && fix_seq_n == 2 && !strcmp(fix_seq[1], "rsz1:6") &&
+	   !(fx_pdev.resource[1].flags & IORESOURCE_BUSY));
+	ck("S17b named skip", log_has("resize to 256 MiB failed"));
+	k_x2_resize_fail = 0;
+
+	/* ---- S18: integration ordering — reset refuses at the selector
+	 * gate long before any aperture work: legacy removal AND x2 both
+	 * untouched (the transaction gate keeps priority). */
+	claim_ready(&w);
+	{
+		struct unlock_transaction_work rw = w;
+		rw.bar = (void __iomem *)fix_mmio();
+		rw.bar_len = 16u << 20;
+		ret = unlock_transaction_reset(&rw);
+		ck("S18a refusal is pre-aperture", ret != 0);
+		ck("S18b neither aperture path ran",
+		   fix_aperture_rm_n == 0 && fix_seq_n == 0);
+	}
+
+	/* ---- S19: integration — full reset gauntlet reaches X2 after
+	 * the post-FLR BAR verify, legacy removal ran first ---- */
+	claim_ready(&w);
+	{
+		struct unlock_transaction_work rw = w;
+
+		rw.state = GU_STOCK;	/* the transaction phase reset expects */
+		rw.bar = (void __iomem *)fix_mmio();
+		rw.bar_len = 16u << 20;
+		bar_w32(GU_FEAT_SS0_OFFSET, GU_SS0_UNLOCK);
+		bar_w32(GU_FEAT_SS1_OFFSET, GU_SS1_UNLOCK);
+		bar_w32(GU_PMC_BOOT_0_OFFSET, fx_card.chip);
+		bar_w32(GU_GFW_PLM_OFFSET, 0x1);
+		bar_w32(GU_GFW_BOOT_OFFSET, 0xff);
+		bar_w32(GU_GFW_CPUCTL_OFFSET, GU_GFW_CPUCTL_HALTED);
+		fix_config()[PCI_COMMAND >> 2] = 0x0006;	/* MSE+BME; prod clears BME */
+		x2_aperture = true; x2_size_mb = 256;
+		ret = unlock_transaction_reset(&rw);
+		ck("S19a X2 ran inside the transaction",
+		   fix_seq_n >= 3 && !strcmp(fix_seq[fix_seq_n - 3], "rel"));
+		ck("S19b legacy removal preceded X2", fix_aperture_rm_n == 1 &&
+		   log_has("x2: BAR1 claimed 256 MiB"));
+		ck("S19c X2 refused nothing on the happy path",
+		   !log_has("claim refused") && !log_has("claim skipped"));
+		(void)ret;	/* later gauntlet stages may legitimately stop the flow */
+	}
+	x2_aperture = false;
 
 	printf(fails ? "%d FAILURES\n" : "ALL-PASS\n", fails);
 	return fails != 0;

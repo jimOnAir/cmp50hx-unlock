@@ -23,6 +23,7 @@ typedef int32_t s32;
 typedef uint64_t dma_addr_t;
 typedef uint64_t resource_size_t;
 typedef uint64_t ktime_t;
+typedef unsigned int uint;	/* kernel types.h surface used by x2 params */
 typedef unsigned int gfp_t;
 #define __iomem
 #define GFP_KERNEL 0
@@ -70,13 +71,22 @@ void test_device_log(const struct device *dev, const char *, ...) __attribute__(
 #define PCI_EXP_DEVSTA_TRPND 32
 #define PCI_BASE_ADDRESS_0 0x10
 #define IORESOURCE_MEM 0x200
+#define IORESOURCE_PREFETCH 0x2000
+#define IORESOURCE_MEM_64 0x100000
+#define IORESOURCE_BUSY 0x80000000
+#define BIT(n) (1UL << (n))
+#define SZ_1M 0x00100000UL
+#define SZ_4M 0x00400000UL
+#define ilog2(n) __ilog2(n)
+static inline int __ilog2(u64 n) { int r = -1; while (n) { n >>= 1; r++; } return r; }
+struct resource { resource_size_t start, end; unsigned long flags; const char *name; };
 static inline bool list_empty(const struct list_head *h) { return !h->count; }
 #define spin_lock_irqsave(lock, flags) do { (void)(lock); (flags)=0; } while (0)
 #define spin_unlock_irqrestore(lock, flags) do { (void)(lock); (void)(flags); } while (0)
 struct device { u64 *dma_mask; u64 coherent_dma_mask; struct list_head devres_head; int devres_lock; };
 void *devres_open_group(struct device *, void *, int);
 int devres_release_group(struct device *, void *);
-struct pci_dev { struct device dev; unsigned short vendor, device; int current_state, pm_cap, refs; unsigned int dev_flags; };
+struct pci_dev { struct device dev; unsigned short vendor, device; int current_state, pm_cap, refs; unsigned int dev_flags; struct resource resource[6]; };
 struct firmware { size_t size; const u8 *data; };
 void usleep_range(unsigned long, unsigned long);
 unsigned long simple_strtoul(const char *cp, char **endp, unsigned int base);
@@ -114,6 +124,11 @@ int aperture_remove_conflicting_pci_devices(struct pci_dev *, const char *);
 int pci_enable_device_mem(struct pci_dev *);
 void pci_disable_device(struct pci_dev *);
 resource_size_t pci_resource_len(struct pci_dev *, int);
+resource_size_t pci_resource_start(struct pci_dev *, int);
+u64 pci_rebar_get_possible_sizes(struct pci_dev *, int);
+int pci_resize_resource(struct pci_dev *, int, int, int);
+int pci_request_selected_regions(struct pci_dev *, int, const char *);
+void pci_release_selected_regions(struct pci_dev *, int);
 void __iomem *pci_iomap(struct pci_dev *, int, unsigned long);
 void pci_iounmap(struct pci_dev *, void __iomem *);
 void *pci_map_rom(struct pci_dev *, size_t *);
