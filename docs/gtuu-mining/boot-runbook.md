@@ -7,7 +7,12 @@ pushed`). ONE planned session closes every pending boot box. Host: llm2
 5.0 GT/s, 170 W x3 — diff everything against that.
 
 ## Stage 0 — artifacts
-- Build gtuu3+ deb from HEAD (container recipe proven this session:
+- Build the deb from HEAD — PREFERRED path since 2026-11-13:
+  `CMP_DEB_REV=<rev> bash tools/docker-deb.sh --out DIR` (pre-baked
+  cmp50hx-build/smoke images + bind-mounted cache/ => warm full build
+  +smoke ~53 s, zero network, SOURCE_DATE_EPOCH -> byte-identical deb;
+  see docker/README.md). Historical ad-hoc recipe:
+  (container recipe proven this session:
   fresh efi-unlock/build.sh -> tools/build-deb.sh -> smoke green incl.
   banner/peek/rtd3 assertions; deb lives at
   /tmp/opencode/t20b/cmp50hx-unlock_610.43.03-20261112.gtuu3_amd64.deb —
