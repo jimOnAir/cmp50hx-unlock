@@ -4,6 +4,14 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 
 Important for this repo: `origin` is the **upstream public repo** (`xrip/cmp50hx-unlock`). Never open issues/PRs there without explicit human approval — all tracking stays local under `.scratch/` (kept out of git via `.git/info/exclude`).
 
+Push targets (settled 2026-11-13, owner said "push"): the configured `fork` remote
+(`github.com:jimOnAir/cmp50hx-unlock`, the owner's own public fork) is the
+approved destination for branch `master` when the owner asks for a push —
+fast-forward only, after the secret/blob scan (no `.run`/deb artifacts,
+no credential patterns in the pushed diff). `origin` (`xrip/cmp50hx-unlock`)
+remains third-party: never push, open issues, or PRs there without
+explicit per-action approval.
+
 ## Conventions
 
 - One feature per directory: `.scratch/<feature-slug>/`
