@@ -26,9 +26,15 @@ CI runs it as its own gate job (`test:host-harness`, ubuntu:24.04).
   the only fake is the kernel API surface under `tests/shim/`.
 * **Named fault axes** (`shim_impl.c`): `k_pmcsr_stuck` (rail-woken dead
   card), `k_cmd_allf` (config wedge / lost identity), `k_fail_alloc_at`
-  (allocation failure at the Nth call), plus `k_flr_ret`,
-  `k_flr_identity_gone`, `k_bme_stuck_off`, `k_fw_name_fail` — the last
-  three exist for the phase-2 booter/fwsec scenarios (see Scope).
+  (allocation failure at the Nth call), `k_x2_req_busy` /
+   `k_x2_resize_fail` + `fix_rebar_sizes` (X2 aperture claim), plus
+   `k_flr_ret`, `k_flr_identity_gone`, `k_bme_stuck_off`, `k_fw_name_fail`
+   — the last three exist for the booter/fwsec scenarios (see Scope).
+ * **Call-sequence pins**: the Resizable-BAR stubs
+   (`pci_resize_resource`, `pci_request/release_selected_regions`) and the
+   legacy `aperture_remove_conflicting` record into `fix_seq[]`, so the X2
+   scenarios assert the exact ordered contract (release -> resize ->
+   request, plus the resize-back rollback on a busy window).
 * **Reverse assertions**: the happy claim path asserts the log ring
   contains **zero** `dev_err`/`dev_warn` lines (`dev_err` is tagged
   `[E] ` by the shim, so the needle is exact); the cold-GFW pass asserts
@@ -59,7 +65,14 @@ classification (`-EBUSY` power-off-first / `-EALREADY` open-PLM / accept,
 pairing with ticket 04's verdicts), and unwind containment in both
 directions.
 
-Phase-2 (knobs already stubbed): fwsec/booter-phase scenarios need the
+Added in phase-2 (2026-11-13): the `unlock_transaction_reset` gauntlet
+integration (selector-gate ordering pin + a run that reaches the X2 claim
+point inside the transaction, legacy aperture removal first) and the X2
+aperture claim itself (S11-S17: picker, exact contract sequence, busy-
+window rollback, flags guard, derived-state carry for the resume pass,
+capped-capability downsize, resize failure).
+
+Still open (knobs already stubbed): fwsec/booter-phase scenarios need the
 fixture to feed staged images (`request_firmware` currently fails by
 design — real asset fixtures belong there), and the X2 orchestration
 layer (module-init, multi-card targets parsing, bound-driver skip,
