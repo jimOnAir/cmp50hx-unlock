@@ -1245,3 +1245,28 @@ with the badf5040 sentinel — correct, it is not a CMP. Pause: boot-path
 ownership of this machine must be settled before further promotion
 boots. Our canary script gracefully reported the missing-90HX case
 (verdict=unreadable) rather than misbehaving.
+
+## PROMOTION VALIDATED: gate4 is llm2's permanent pre-OS unlocker (2026-11-13 13:33)
+
+BootOrder restored to 0001-first; plain reboot (no BootNext) ->
+BootCurrent 0001 ran the promoted binary (50HXUNLK.EFI sha 8eed5574 =
+gate4, four-time live-validated one-shot first) through the full chain:
+banner, CANARY power-cycle verdict + re-arm 0x0164c0de, PREFLIGHT ok
+0x60/0x78, ATTEST 9/9, PROM OBSERVE (digest identical fifth time —
+stable silicon baseline), [BAND-HIGH] attempt#1, FWSEC gate PASS with
+the HALT tail now measured at 69 ms (vs 7 ms first boot — the per-boot
+variance the t14 gate exists to absorb, logged not raced), booter OK
+attempt 1, *** UNLOCKED *** +7 s, FINAL-GATE RELOCKED-GATE classification.
+OS ground truth: both 50HX SS-exact UNLOCKED, Xid 0, zero failed units.
+The 13:13 "old-format log" anomaly stays formally open (dual-stack box;
+other lineage's services start early enough to write the ESP file from
+userspace — under 0001-first our log is byte-perfect, which is all the
+fleet needs). Tickets 04/05/08/09/14/15/16/19/20 closed with LIVE
+evidence; residual rows: t18 FLR-craft live watch (do_flr not on this
+flow's path — 0 lines, needs a boot that takes [8b] or ladder retry),
+t17 halt-decode (no halts — happy path only), t10 peek positive (needs
+an unbound CMP card; refusal-guard proven), t04 PARTIAL + t15 LOW-band
+(harness-only by policy: no forced-failure experiments on a serving
+host), t01 locked cell (stock-driver window, owner-scheduled), t13
+guinea-pig boot row (satisfied: unlocked boot with generated-payload
+binary eff516f5-lineage… gate4 itself, digest chain in runs doc).
