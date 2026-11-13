@@ -1175,3 +1175,28 @@ physically re-verified before the next unlock-flow test; gate3's first
 live unlock chain will otherwise be a confounded experiment. The t16
 canary nailed the inter-boot event class from its first live line:
 "verdict=power-cycle".
+
+## gate4 full-chain boot: every new instrument fired on real silicon (2026-11-13, llm2 Boot0002 one-shot)
+
+903-line ESP log, BootCurrent 0002 (one-shot discipline held; .28 stayed
+the permanent path): banner -> CANARY verdict=power-cycle -> PREFLIGHT ok
+(pm=0x60 pcie=0x78 steps=3 — the MSI-12B fix confirmed on the live card)
+-> ATTEST ok (9 assets) -> PROM OBSERVE first fleet digest
+ae6497db0064e1fa654c368f09b18a6a06e5374e345016bd4fdeccb1d3263d39
+bytes=0x40000 -> cold-state CLEAN -> PMC_BOOT_0 matches RM constant ->
+[BAND-HIGH] attempt#1 (ladder idle) -> FWSEC gate PASS
+(wpr2 exact, cpuctl HALT @7ms, scratch0e=0, mbox=0) -> *** UNLOCKED ***
+-> xp3g gen2 -> CANARY SET efi@0x1480=0x0164c0de readback ok -> FINAL-GATE
+"ok RELOCKED-GATE plm=0xffffff8f SS intact not a loss" — the B2-P33
+taxonomy in action. OS ground truth via read-only resource0: BOTH 50HX
+SS0=0x88888888 SS1=0x8 UNLOCKED, Xid 0, no failed units. Stamp clock
+real now (+1s..+14s) but 1 s resolution on this firmware (GetTime
+Nanosecond reads zero — recorded; sub-ms needs the PTIMER source, not
+blocking any A/B use). Log contains NUL bytes (grep -a needed) from a
+hexdump section — collect's substring greps unaffected, noted.
+Caveats: 01:00.0 slot trains x4 (BIOS/slot drift — 04:00.0 is x16);
+the 90HX in 03:00.0 was physically replaced by an RTX 5060 Ti (GB206)
+during the outage — claim/canary-gen2 rows n/a until it returns.
+Warm-vs-cold canary distinguishability now testable: efi slot armed with
+0x0164c0de — next boot (warm) must classify differently than this boot
+(cold); that's the t16 live-matrix's second row.
