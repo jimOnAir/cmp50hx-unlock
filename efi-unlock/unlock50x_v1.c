@@ -1718,12 +1718,13 @@ u40x_preflight_config(void)
         case 0x08: /* AGP */
             length = 6;
             break;
-        case 0x05: /* MSI */
-            length = (ctrl & 0x80U) ? 14 : 10;   /* per-vector mask */
-            if (ctrl & 0x01U)
-                length += 10;                    /* 64-bit address (see deviation note) */
-            if (ctrl & 0x80U)
-                length += 8;                     /* pending bits */
+        case 0x05: /* MSI — size per spec: 12 base, +4 64-bit (ctrl bit3),
+                   * +8 per-vector pending/mask (ctrl bit4). The old table
+                   * (10/14 +10 for ctrl bit0 +8 twice) counted ENABLE as
+                   * 64-bit and false-overlapped the PCIe cap at 0x78 —
+                   * live-rejected on the real llm2 GPU list (PM@0x60,
+                   * MSI@0x68 ctrl=0x0081, PCIe@0x78): fixture-covered now. */
+            length = 12 + ((ctrl & 0x08U) ? 4 : 0) + ((ctrl & 0x10U) ? 8 : 0);
             break;
         case 0x10: /* PCIe */
             if (caps_pcie != 0 || (ctrl & 0x0fU) < 1 || (ctrl & 0x0fU) > 2 ||

@@ -61,6 +61,20 @@ static void good_chain(void) {
     g_cfg[(0x90+4)/4] |= (1u << 28);             /* DEVCAP FLReset+ */
     setcap(0xCC, 0x11, 0x00, 0x0000);            /* MSI-X end */
 }
+static void real_llm2_chain(void) {
+    /* Live /sys config dump 2026-11-13 01:00.0 (llm2 TU102, 50HX):
+     * PM@0x60 -> MSI@0x68 ctrl=0x0081 -> PCIe@0x78 FLR+. This exact
+     * layout was FALSE-rejected ("overlap at 0x78") by the old MSI
+     * length table — regression pin. */
+    base();
+    g_cfg[0x34/4] |= 0x60;
+    setcap(0x60, 0x01, 0x68, 0x0003);            /* PM v3, D0 */
+    g_cfg[(0x60+4)/4] = 0xC9C30000u;             /* live PMCSR high, state D0 */
+    setcap(0x68, 0x05, 0x78, 0x0081);            /* live MSI ctrl */
+    g_cfg[(0x68+4)/4] = 0xFEE00938u;             /* live MSI addr lo */
+    setcap(0x78, 0x10, 0x00, 0x0002);            /* PCIe v2 EP, list end */
+    g_cfg[(0x78+4)/4] = 0x10008DE1u;             /* live DEVCAP (FLReset+) */
+}
 int main(void) {
     good_chain();                                    check("valid TU102-like chain", 1);
     good_chain(); g_cfg[0x34/4] = (g_cfg[0x34/4] & ~0xFFu) | 0x41; check("unaligned cap ptr", 0);
@@ -75,6 +89,9 @@ int main(void) {
     good_chain(); setcap(0x50, 0x05, 0x54, 0x0065);  check("MSI overrun into next", 0);
     good_chain(); setcap(0x40, 0x01, 0x08, 0x0003);  check("cap ptr below 0x40", 0);
     good_chain(); { int i; for(i=0;i<45;i++) setcap(0x40+i*4, 0x03, (UINT8)(0x44+i*4), 0); } check("step limit", 0);
+    real_llm2_chain();                               check("REAL llm2 GPU chain (MSI-len regression)", 1);
+    real_llm2_chain(); setcap(0x68, 0x05, 0x78, 0x0089); check("MSI-64 touches PCIe exactly (16B)", 1);
+    real_llm2_chain(); setcap(0x68, 0x05, 0x78, 0x0099); check("MSI-64+mask 24B genuinely overlaps", 0);
     printf(fails ? "%d FAILURES\\n" : "ALL-PASS\\n", fails);
     return fails != 0;
 }
