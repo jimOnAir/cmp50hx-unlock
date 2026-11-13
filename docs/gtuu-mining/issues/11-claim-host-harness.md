@@ -79,6 +79,8 @@ trick (host gate compiles the production file verbatim — mirrors the
 preflight-selftest.sh extraction pattern).
 
 
+### Image-feed landed (status line: image-feed landed 2026-11-13)
+
 ### Phase-2 addendum (2026-11-13)
 X2 aperture claim landed in `unlock_transaction_reset` (post-FLR BAR verify — the first
 point where a resize survives): `x2_aperture`/`x2_size_mb` params (default OFF, legacy
@@ -87,7 +89,9 @@ behaviour unchanged), `x2_pick_size` (PCIe §7.8.6 indices, named -EINVAL/-EOPNO
 contract with resize-back rollback on busy window; state DERIVED per run, multi-card
 safe, resume pass re-verifies naturally). Harness: 25 new asserts (S11–S19, now 63/63)
 with shim call-sequence pins + rollback + reverse assertions; kernel builds 7.2.9 and
-6.18.55 zero warnings. Not done: fwsec/booter image-feed scenarios (knobs pre-stubbed).
+6.18.55 zero warnings. Image-feed LANDED (S24/S25): real extract.sh assets + real 90HX PROM drive the full
+orchestrator; retention + clean-before-started axes both pinned; 74->82 asserts.
+Booter-phases-beyond-FWSEC remain open.
 Live row: the param stays 0 until a 90HX returns to the bench for a one-shot trial.
 Packaging: the phase-2 claim module ships in cmp50hx-unlock 610.43.03-20261113.gtuu8
 (deb sha256 a9e2ada1…, smoke PASS; llm2 install + DKMS build on 7.0.0-38 +

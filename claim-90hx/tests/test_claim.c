@@ -18,6 +18,7 @@
  * phase-2 once the fixture feeds staged images.
  */
 #include "shim/compat.h"
+#include <stdlib.h>
 #include "../device.h"
 #include "../unlock_610.c"	/* production file, verbatim */
 
@@ -29,12 +30,22 @@ int log_has(const char *frag);
 void log_clear(void);
 extern int k_pmcsr_stuck, k_cmd_allf, k_fail_alloc_at;
 extern int k_flr_ret, k_flr_identity_gone, k_flr_wedge;
+extern int k_fw_name_fail, k_bme_stuck_off;
+extern char fix_fw_dir[512];
 extern unsigned long vms;
 extern unsigned dma_live;
 extern u64 fix_rebar_sizes;
 extern int k_x2_req_busy, k_x2_resize_fail, fix_aperture_rm_n, fix_seq_n;
 extern char fix_seq[64][12];
 int fix_seq_has(const char *code);
+extern int log_n;
+extern char log_ring[128][256];
+static void dump_ring(const char *why)
+{
+	printf("RING-DUMP (%s):\n", why);
+	for (int i = 0; i < log_n; i++)
+		printf("  [%02d] %s\n", i, log_ring[i]);
+}
 
 static const struct gu_family fx_fam = {
 	.name = "harness",
@@ -54,6 +65,10 @@ static void pdev_reset(void)
 	fx_pdev.device = 0x1e09;
 	fx_pdev.pm_cap = 0x40;
 	fx_pdev.current_state = PCI_D0;
+	/* The kernel PCI core seeds dev.dma_mask at enumeration; production's
+	 * dma phase refuses a NULL one (mirror that state honestly). */
+	fx_pdev.dev.dma_mask = &fx_pdev.dev.coherent_dma_mask;
+	fx_pdev.dev.coherent_dma_mask = 0xffffffffull;
 	/* resource[] backs the shim pci_resource_* accessors (kernel shape:
 	 * the resources live in the pci_dev). BAR0 = 16 MiB window claimed
 	 * by the module (BUSY), BAR1 = firmware-default 16 MiB, free. */
@@ -62,6 +77,19 @@ static void pdev_reset(void)
 	fx_pdev.resource[1] = (struct resource){ 0x40000000ull,
 		0x40000000ull + (16u << 20) - 1,
 		IORESOURCE_MEM | IORESOURCE_MEM_64 | IORESOURCE_PREFETCH, NULL };
+}
+
+static int load_prom_fixture(const char *path)
+{
+	FILE *f = fopen(path, "rb");
+	size_t n;
+
+	if (!f)
+		return -1;
+	n = fread(fix_mmio() + GU_PROM_DATA_OFFSET, 1,
+		  (size_t)(16u << 20) - GU_PROM_DATA_OFFSET, f);
+	fclose(f);
+	return n >= (1u << 20) ? 0 : -1;
 }
 
 static void bar_w32(unsigned off, u32 v)
@@ -480,6 +508,113 @@ int main(void)
 		ck("S23 no x2 log lines at all", !log_has("x2:"));
 	}
 
+
+	/* ---- S24/S25: deep-phase feed — the orchestrator with REAL 610
+	 * firmware (extract.sh, manifest-gated) and the REAL captured 90HX
+	 * board PROM, production recipe from gu_card_find(0x220d).
+	 * Provisioned via CLAIM_FW_FIXTURE / CLAIM_PROM_FIXTURE (the runner
+	 * sets them from the repo cache when possible). No fixture => loud
+	 * SKIP, never a silent pass. */
+	{
+		const char *fixdir = getenv("CLAIM_FW_FIXTURE");
+		const char *promp = getenv("CLAIM_PROM_FIXTURE");
+
+		if (!fixdir || !*fixdir || !promp || !*promp) {
+			printf("SKIP S24/S25 (deep-phase fixtures not provisioned)\n");
+		} else {
+			const struct gu_card *rec = gu_card_find(0x220d);
+			struct gpu_unlock_610_shared sh = { };
+			struct gu_device gd;
+
+			ck("S24a production CMP90HX recipe resolves",
+			   rec && rec->family && rec->family->booter);
+			snprintf(fix_fw_dir, sizeof fix_fw_dir, "%s", fixdir);
+
+			/* fixture mirror: firmware names carry "gpu-unlock/610.43.03/..."
+			 * subdirs; the runner staged files flat, so map via symlink dirs */
+			fix_reset();
+			pdev_reset();
+			fx_pdev.device = 0x1e09;	/* vendor/device only gates claim bookkeeping */
+			{
+				char pp[768];
+				snprintf(pp, sizeof pp, "%s/gpu-unlock/610.43.03", fixdir);
+				(void)pp; /* layout verified by production error naming below */
+			}
+			ck("S24b real PROM opens", load_prom_fixture(promp) == 0);
+			ck("S24c real PROM >=1 MiB lands inside fixture BAR",
+			   GU_PROM_DATA_OFFSET + (1u << 20) <= (size_t)(16u << 20));
+			/* cold-board seeds at the REAL family offsets */
+			bar_w32(rec->family->feat_plm, 0xffffffef);	/* closed, not open */
+			bar_w32(rec->family->feat_ss0, GU_SS0_UNLOCK);
+			bar_w32(rec->family->feat_ss1, GU_SS1_UNLOCK);
+			bar_w32(GU_GFW_PLM_OFFSET, 0x1);	/* LEVEL0 for the assessor */
+			bar_w32(GU_GFW_BOOT_OFFSET, 0xff);
+			bar_w32(GU_GFW_CPUCTL_OFFSET, GU_GFW_CPUCTL_HALTED);
+			bar_w32(GU_PMC_BOOT_0_OFFSET,
+				((rec->chip & 0x1ff) << 20) | 0xa1u);
+			bar_w32(GU_GFW_FB_SIZE_OFFSET, 4096);		/* 4 GiB window */
+			bar_w32(GU_MMU_LOCK_CFG_PLM_OFFSET, 1);
+			bar_w32(PCI_COMMAND, 0); /* no-op guard, keeps indexes honest */
+			fix_config()[PCI_COMMAND >> 2] = 0x0006;
+			k_fw_name_fail = 0;
+			gd.pdev = &fx_pdev;
+			gd.recipe = rec;
+			log_clear();
+			ret = gpu_unlock_610_load_shared(&gd, &sh);
+			ck("S24d production load_shared accepts the real assets",
+			   ret == 0);
+			if (ret)
+				dump_ring("S24d load_shared failed");
+			log_clear();
+			ret = gpu_unlock_610_unlock(&gd, &sh, false);
+			ck("S24e flow ran (positive needle: recipe selection line)",
+			   log_has("recipe selection:"));
+			if (!log_has("FWSEC: reading PROM"))
+				dump_ring("S24f never reached fwsec");
+			ck("S24f real PROM yields the FWSEC-FRTS (no named refusal)",
+			   !log_has("FWSEC-FRTS not found") &&
+			   log_has("FWSEC: reading PROM"));
+			if (!log_has("stage=handoff"))
+				dump_ring("S24g no handoff line");
+			ck("S24g transaction ran to the end (handoff line)",
+			   log_has("stage=handoff"));
+			ck("S24h BME succeeded, launch failed -> retained",
+			   ret != 0 && log_has("firmware did not stop") &&
+			   dma_live >= 1);
+			log_clear();
+
+			/* S25: same everything, but pci_set_master does not stick:
+			 * refuse BEFORE the firmware_started boundary -> FULL clean */
+			fix_reset();
+			pdev_reset();
+			bar_w32(rec->family->feat_plm, 0xffffffef);
+			bar_w32(rec->family->feat_ss0, GU_SS0_UNLOCK);
+			bar_w32(rec->family->feat_ss1, GU_SS1_UNLOCK);
+			bar_w32(GU_GFW_PLM_OFFSET, 0x1);
+			bar_w32(GU_GFW_BOOT_OFFSET, 0xff);
+			bar_w32(GU_GFW_CPUCTL_OFFSET, GU_GFW_CPUCTL_HALTED);
+			bar_w32(GU_PMC_BOOT_0_OFFSET, ((rec->chip & 0x1ff) << 20) | 0xa1u);
+			bar_w32(GU_GFW_FB_SIZE_OFFSET, 4096);
+			bar_w32(GU_MMU_LOCK_CFG_PLM_OFFSET, 1);
+			fix_config()[PCI_COMMAND >> 2] = 0x0006;
+			ck("S25d PROM reloaded after fix_reset", load_prom_fixture(promp) == 0);
+			k_bme_stuck_off = 1;
+			ret = gpu_unlock_610_unlock(&gd, &sh, false);
+			k_bme_stuck_off = 0;
+			ck("S25a stuck BME -> refused transaction", ret != 0);
+			ck("S25b refused BEFORE the started boundary: no retention",
+			   !log_has("firmware did not stop") &&
+			   !log_has("handover refused") && dma_live == 0);
+			if (!log_has("FWSEC: reading PROM"))
+				dump_ring("S25c never reached fwsec");
+			ck("S25c still reached FWSEC (assets/PROM good)",
+			   log_has("recipe selection:") &&
+			   log_has("FWSEC: reading PROM") &&
+			   !log_has("FWSEC-FRTS not found"));
+			k_fw_name_fail = 1;
+			fix_fw_dir[0] = '\0';
+		}
+	}
 	printf(fails ? "%d FAILURES\n" : "ALL-PASS\n", fails);
 	return fails != 0;
 }

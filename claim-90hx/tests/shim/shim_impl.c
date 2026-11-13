@@ -103,9 +103,18 @@ void *kzalloc(size_t n, int flags)
 
 void *dma_alloc_coherent(struct device *d, size_t n, dma_addr_t *dma, int f)
 {
-	void *p = calloc(1, n);
+	void *p = NULL;
 	(void)d; (void)f;
-	if (p) { *dma = (dma_addr_t)(uintptr_t)p; dma_live++; }
+	/* The kernel's coherent allocator is page-aligned; production's radix
+	 * table builder validates that (GU_RADIX_PAGE mask), so the fixture
+	 * must match the contract, not calloc's 16-byte alignment. */
+	if (posix_memalign(&p, 4096, (n + 4095) & ~(size_t)4095) == 0) {
+		memset(p, 0, n);
+		*dma = (dma_addr_t)(uintptr_t)p;
+		dma_live++;
+	} else {
+		p = NULL;
+	}
 	return p;
 }
 void dma_free_coherent(struct device *d, size_t n, void *p, dma_addr_t a)
@@ -116,14 +125,50 @@ void dma_free_coherent(struct device *d, size_t n, void *p, dma_addr_t a)
 int dma_set_mask(struct device *d, u64 m) { d->dma_mask = &d->coherent_dma_mask; d->coherent_dma_mask = m; return 0; }
 int dma_set_coherent_mask(struct device *d, u64 m) { d->coherent_dma_mask = m; return 0; }
 
+char fix_fw_dir[512];                /* fixture /lib/firmware mirror; empty = no feed */
 int request_firmware(const struct firmware **fw, const char *name, struct device *d)
 {
-	(void)name; (void)d;
+	char path[1024];
+	FILE *f;
+	long n;
+	void *buf;
+	struct firmware *fk;
+
+	(void)d;
+	*fw = NULL;
 	if (k_fw_name_fail)
 		return -ENOENT;
-	return -ENOENT; /* fixture images: t11 phase-2 (booter-phase scenarios) */
+	if (!*fix_fw_dir)
+		return -ENOENT;       /* no feed configured: same class as absent */
+	snprintf(path, sizeof path, "%s/%s", fix_fw_dir, name);
+	f = fopen(path, "rb");
+	if (!f)
+		return -ENOENT;       /* production prints the named refusal itself */
+	if (fseek(f, 0, SEEK_END) || (n = ftell(f)) <= 0 ||
+	    fseek(f, 0, SEEK_SET) || !(buf = malloc((size_t)n)) ||
+	    fread(buf, 1, (size_t)n, f) != (size_t)n) {
+		fclose(f);
+		free(buf);
+		return -EIO;
+	}
+	fclose(f);
+	fk = calloc(1, sizeof *fk);
+	if (!fk) {
+		free(buf);
+		return -ENOMEM;
+	}
+	fk->data = buf;
+	fk->size = (size_t)n;
+	*fw = fk;
+	return 0;
 }
-void release_firmware(const struct firmware *fw) { (void)fw; }
+void release_firmware(const struct firmware *fw)
+{
+	if (fw) {
+		free((void *)fw->data);
+		free((void *)fw);
+	}
+}
 void __module_get(void *m) { (void)m; }
 void *devres_open_group(struct device *d, void *o, int f) { (void)d; (void)o; (void)f; return (void *)1; }
 int devres_release_group(struct device *d, void *o) { (void)d; (void)o; return 0; }

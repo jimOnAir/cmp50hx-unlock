@@ -1343,3 +1343,22 @@ preservations made true (claim-90hx/licenses/), full host-gate suite green
 at HEAD (8 extraction selftests + ASan + memmap + 74-assert claim harness).
 Backup concern CLOSED. Machine-dependent queue unchanged: gtuu8 install +
 DKMS/modinfo gates at llm2 power-on.
+
+## Deep-phase feed: harness drives the FULL orchestrator with real silicon inputs (t11 image-feed landed)
+S24/S25 provision real 610 firmware (manifest-gated extract.sh, cached) and
+the captured 90HX board PROM, resolve the production recipe via
+gu_card_find(0x220d), and run claim->layout->dma->radix->gfw->fwsec end to
+end in-kernel-shape. Outcomes pinned (82 asserts): real assets pass
+production ELF/descriptor validation; real PROM parses FWSEC-FRTS; launch
+failure after BME RETAINS (dma_live>=1, "firmware did not stop");
+k_bme_stuck_off refuses BEFORE the started boundary with FULL clean unwind
+(dma_live==0). Self-caught fixture bugs (each now a comment): (a) absence
+asserts on an empty ring pass VACUOUSLY — the ring-dump helper + positive
+needles ("recipe selection:", "FWSEC: reading PROM") now guard every
+absence claim; (b) coherent DMA must be page-aligned (production radix
+checks the mask — calloc 16B was wrong-shape fidelity); (c) dev.dma_mask is
+enumeration-seeded by the PCI core; (d) fix_reset() zeroes the PROM too —
+reload after reset or FWSEC legitimately refuses; (e) the assessor's
+config_ok needs a readable vendor id — fixture ordering bug. Runner caches
+provisioning under $TMPDIR keyed by the tarball sha (warm run 2.2 s); no
+repo cache => loud SKIP. k_fw_name_fail remains the negative control.

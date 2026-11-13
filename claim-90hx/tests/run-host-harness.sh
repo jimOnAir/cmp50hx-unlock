@@ -22,6 +22,33 @@ SRC=(falcon.c recipes.c firmware_610.c layout_610.c vbios_610.c
      prep_610.c payload.c gfw_eval.c booter_diag.c
      tests/shim/shim_impl.c tests/test_claim.c)
 
+# ---- deep-phase fixture provisioning (S24/S25) --------------------------
+# Real 610 firmware assets + the real 90HX board PROM, produced offline by
+# the manifest-gated production tooling when the repo cache is warm.
+# Cached across runs under ${TMPDIR}; absent cache => loud SKIP downstream.
+prom="${ROOT}/../cache/90hx-prom-0x300000.bin"
+if [[ -z "${CLAIM_FW_FIXTURE:-}" && -s "${ROOT}/../cache/610.43.03.tar.gz" \
+      && -s "${ROOT}/../cache/NVIDIA-Linux-x86_64-610.43.03.run" && -s "${prom}" ]] \
+      && command -v zstd >/dev/null; then
+	key="$(sha256sum "${ROOT}/../cache/610.43.03.tar.gz" | cut -c1-12)"
+	prov="${TMPDIR:-/tmp}/cmp50hx-fwfix-${key}"
+	if [[ ! -s "${prov}/fw/gpu-unlock/610.43.03/gsp_ga10x.bin" ]]; then
+		mkdir -p "${prov}"
+		tar xzf "${ROOT}/../cache/610.43.03.tar.gz" -C "${prov}" &&
+		bash "${ROOT}/firmware/extract.sh" \
+			"${prov}/open-gpu-kernel-modules-610.43.03" \
+			"${ROOT}/../cache/NVIDIA-Linux-x86_64-610.43.03.run" \
+			"${prov}/fw" >/dev/null &&
+		mkdir -p "${prov}/fw/gpu-unlock/610.43.03" &&
+		for f in "${prov}"/fw/*.bin; do
+			ln -sf "../../$(basename "$f")" "${prov}/fw/gpu-unlock/610.43.03/"
+		done || rm -rf "${prov}"
+	fi
+	if [[ -s "${prov}/fw/gpu-unlock/610.43.03/gsp_ga10x.bin" ]]; then
+		export CLAIM_FW_FIXTURE="${prov}/fw" CLAIM_PROM_FIXTURE="${prom}"
+	fi
+fi
+
 echo "== compiling ${#SRC[@]} TUs (production files verbatim) =="
 OBJS=()
 for s in "${SRC[@]}"; do

@@ -72,7 +72,22 @@ aperture claim itself (S11-S17: picker, exact contract sequence, busy-
 window rollback, flags guard, derived-state carry for the resume pass,
 capped-capability downsize, resize failure).
 
-Still open (knobs already stubbed): fwsec/booter-phase scenarios need the
+Deep-phase feed (landed 2026-11-13, S24/S25): the runner auto-provisions
+REAL fixtures — production `firmware/extract.sh` output (manifest-gated)
+for `request_firmware`, mirrored into the kernel-style `gpu-unlock/…`
+subdirs, plus the captured 90HX board PROM at `GU_PROM_DATA_OFFSET` — and
+drives the whole `gpu_unlock_610_unlock` orchestrator with the
+production `gu_card_find(0x220d)` recipe. S24 proves: real assets pass
+production validation, the real PROM parses FWSEC-FRTS, and a failed
+launch after BME RETAINS everything (the sacred invariant, `dma_live`
+kept >= 1, "firmware did not stop"). S25 proves the opposite side:
+`k_bme_stuck_off` refuses BEFORE the started boundary and unwinds
+CLEAN (`dma_live == 0`, no retention). Missing repo cache => loud SKIP,
+never a silent pass. Fixture lessons pinned the kernel contract: coherent
+DMA must be page-aligned (production's radix builder checks it), and
+`dev.dma_mask` is seeded at enumeration. Still open: booter-phase
+
+fwsec/booter-phase scenarios need the scenarios beyond the FWSEC boundary (`request_firmware` now file-backed via `fix_fw_dir`
 fixture to feed staged images (`request_firmware` currently fails by
 design — real asset fixtures belong there), and the X2 orchestration
 layer (module-init, multi-card targets parsing, bound-driver skip,
