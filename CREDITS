@@ -27,7 +27,7 @@ It includes the read-only consult entries for
 [physicsdolphin/nv-uefi-unlocker](https://github.com/physicsdolphin/nv-uefi-unlocker)
 (evaluated at `bbcb92f`, corpus pin `36b4089`) — both GPL-2.0, neither
 ever executed here; evaluation tables and public-citation caveats live in
-the ticket journals under `.scratch/` (`.scratch/gtuu-mining/source-eval.md`).
+the ticket journals under `.scratch/` (durable archive: `docs/gtuu-mining/source-eval.md`).
 
 Research lineage:
 

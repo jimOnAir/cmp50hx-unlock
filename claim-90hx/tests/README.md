@@ -2,7 +2,7 @@
 
 The claim module's transaction logic, compiled **on the host** and run
 against a fake Linux — no card, no reboot, no kernel. Rows X1/X2 of
-`.scratch/gtuu-mining/source-eval.md`: method ported from
+`docs/gtuu-mining/source-eval.md`: method ported from
 GPU-Tensor-Unlock-Universal @ `ab7bfc0` (`tests/unlock_shim`,
 `test_unlock_adapter.c` — analyzed READ-ONLY, never executed) with the
 named-fault-axis + reverse-assertion discipline from nv-uefi-unlocker

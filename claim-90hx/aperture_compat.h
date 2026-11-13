@@ -4,7 +4,7 @@
  *
  * Provenance: ported from GPU-Tensor-Unlock-Universal @ 1d6a508
  * kernel/gpu_unlock/aperture_compat.h (row K17 of
- * .scratch/gtuu-mining/source-eval.md). Replaces LINUX_VERSION_CODE
+ * docs/gtuu-mining/source-eval.md). Replaces LINUX_VERSION_CODE
  * gating with __has_include so a kernel that moves the header cannot
  * compile the wrong branch silently (the failure mode this repo
  * already documented for kbuild flag handling).
