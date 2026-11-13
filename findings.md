@@ -1200,3 +1200,28 @@ during the outage — claim/canary-gen2 rows n/a until it returns.
 Warm-vs-cold canary distinguishability now testable: efi slot armed with
 0x0164c0de — next boot (warm) must classify differently than this boot
 (cold); that's the t16 live-matrix's second row.
+
+## Stage-2 live proofs: PROM ENFORCE drill complete + layering honesty (2026-11-13, four boot cycles)
+
+ENFORCE ok boot: digest ae6497db… re-read identical from the real ROM a
+second boot running -> gate green line. Flipped-digit boot: "ENFORCE
+MISMATCH: live=ae… pin=be… REFUSE unlock" + "live ROM dumped to
+50hx_prom_fail.bin (262144 B)" + chainload continued (box up, pre-OS
+unlock refused) — every assertion of the ticket-09 drill, failure path
+included; artifacts then removed -> OBSERVE mode restored (verified next
+boot: OBSERVE line + *** UNLOCKED *** at +7 s). Layering discovered
+while verifying "booted locked": on the refused boot the cards STILL
+ended unlocked — the patched driver's OS-side V526 stock-relock unlock
+covers what the pre-OS path skipped, and cmp50hx-boot's own accounting
+shows it ("installed=2 unlocked_by_efi=1" — one card had missed the
+booter-window lottery this boot, rescued at OS level). So the PROM gate
+is precisely a PRE-OS supply-chain gate: it protects the firmware
+assets the booter stages; a fleet policy that should also pin the
+OS-side path would need the same check in cmp50hx-boot (recorded as a
+design consideration, not silently bundled into this ticket). t16 canary
+honest matrix row: this platform's warm reboot goes through a POST that
+resets both scratch and FEAT witnesses — warm reads identical to cold
+("power-cycle" verdict); the canary's distinct-live value is the
+no-reboot event classes (RTD3 park, manual FLR between boots) which skip
+POST. No forced PARTIAL/injection-failure experiments were run on the
+serving host — those rows stay harness-only per the runbook's rule.
