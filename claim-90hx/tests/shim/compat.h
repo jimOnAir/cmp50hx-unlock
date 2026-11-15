@@ -37,7 +37,9 @@ typedef unsigned int gfp_t;
 #define MODULE_PARM_DESC(x, y)
 #define module_param(name, type, perm)
 #define THIS_MODULE NULL
-#define LINUX_VERSION_CODE 0x060800 /* only used by nothing after t06's feature-detect */
+#define LINUX_VERSION_CODE 0x060800	/* shim poses as 6.8: exercises the
+					   3-arg pci_resize_resource branch */
+#define KERNEL_VERSION(a, b, c) (((a) << 16) + ((b) << 8) + (c))
 struct list_head { unsigned int count; };
 struct device;                 /* forward for the log prototype below */
 void test_device_log(const struct device *dev, const char *, ...) __attribute__((format(printf, 2, 3)));
@@ -126,7 +128,7 @@ void pci_disable_device(struct pci_dev *);
 resource_size_t pci_resource_len(struct pci_dev *, int);
 resource_size_t pci_resource_start(struct pci_dev *, int);
 u64 pci_rebar_get_possible_sizes(struct pci_dev *, int);
-int pci_resize_resource(struct pci_dev *, int, int, int);
+int pci_resize_resource(struct pci_dev *, int, int);	/* 6.8-era 3-arg form */
 int pci_request_selected_regions(struct pci_dev *, int, const char *);
 void pci_release_selected_regions(struct pci_dev *, int);
 void __iomem *pci_iomap(struct pci_dev *, int, unsigned long);

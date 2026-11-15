@@ -230,11 +230,10 @@ int fix_seq_has(const char *code)
 	return 0;
 }
 u64 pci_rebar_get_possible_sizes(struct pci_dev *p, int bar) { (void)p; (void)bar; return fix_rebar_sizes; }
-int pci_resize_resource(struct pci_dev *p, int bar, int size, int exclude)
+int pci_resize_resource(struct pci_dev *p, int bar, int size)  /* 6.8-era 3-arg */
 {
 	resource_size_t newlen = (resource_size_t)SZ_4M << size;
 
-	(void)exclude;
 	snprintf(fix_seq[fix_seq_n % 64], sizeof fix_seq[0], "rsz%d:%d", bar, size);
 	fix_seq_n++;
 	if (k_x2_resize_fail)

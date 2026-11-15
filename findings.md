@@ -1430,3 +1430,32 @@ harness main instead of the poison main — caught by the harness's own
 SyntaxError, restored from git, anchored properly). Meta-lesson for every
 gate in this repo: a self-test's negative control must fail LOUDLY on the
 PINNED image, not only pass on the author's box.
+
+## The prototype probe: Ubuntu backport defeats every version gate (docker-lifecycle hunt, day-2)
+CI lifecycle (linux-lifecycle job, first-ever dispatch of the tag-only
+workflow) died in postinst's claim-DKMS loop -> LIFECYCLE_LOOP_LEGS_FAILED=4.
+Repro pipeline: new cmp50hx-lifecycle image + tools/docker-lifecycle.sh
+(user-requested "use the prepared images" — the third image now bakes the
+CI job's exact package set; warm loop 2-3 min vs hours of CI round-trips).
+Chain of causes, each caught only by letting a DIFFERENT environment judge:
+(1) my LINUX_VERSION_CODE gate (6.12 boundary) passed 7.0.0-38/6.18.55/7.2.9
+and failed Ubuntu 6.8; (2) with a 3-arg fallback, 6.8.0-149-generic failed
+the OPPOSITE way — Ubuntu BACKPORTED exclude_bars into the 6.8 stable
+series mid-ABI: 124-generic declares 3 args, 149-generic declares 4,
+LINUX_VERSION_CODE IDENTICAL. No version gate can exist for this API.
+Final mechanism: claim-90hx/Kbuild greps the declaration in the very
+headers being built against (grep -A1 pci_resize_resource | grep -q
+exclude_bars -> -DGU_RESIZE_RESOURCE_4ARG) — the aperture_compat.h
+doctrine, applied to a prototype; both branches compile-proven across the
+full matrix (124=3arg, 149=4arg, 6.18.55, 7.2.9) + harness profile
+mimics 6.8-era (shim LINUX_VERSION_CODE/KERNEL_VERSION + 3-arg stub).
+Shipped consequence had it been missed: gpu-unlock-claim unbuildable on
+Ubuntu 24.04 LTS fleet -> claim unit fail-closed -> silent 90HX Gen2 loss
+(postinst hard-fails loudly instead — by design). Repro hygiene lessons:
+uname shim useless (dpkg restricts PATH to /usr/sbin:/usr/bin:/sbin:/bin);
+CMP_DEB_KREL is a build-set NARROWER than the assert set — passing it broke
+the equivalence the assert checks; faithful container run = no overrides
+(the outer kernel never enters build_kernels anyway — the earlier "uname
+leak" diagnosis was wrong; it was the 149 build failure surfacing as apt
+trigger depmod noise). gtuu11: LIFECYCLE_LOOP_LEGS_FAILED=0 locally
+(all legs; offline leg by design needs --network-none, which CI has).

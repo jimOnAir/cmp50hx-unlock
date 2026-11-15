@@ -1,0 +1,14 @@
+# cmp50hx-lifecycle — the ubuntu-24.04-host CI lifecycle job reproduced in a
+# container: same toolchain + the SAME pinned header set the workflow step
+# installs (linux-headers-generic, linux-headers-6.8.0-124-generic,
+# linux-image-generic). Bake once; tools/docker-lifecycle.sh uses it.
+#   docker build -t cmp50hx-lifecycle:latest -f docker/Dockerfile.lifecycle docker/
+FROM ubuntu:24.04
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dpkg-dev ca-certificates \
+        linux-headers-generic linux-headers-6.8.0-124-generic linux-image-generic \
+    && apt-get install -y --no-install-recommends \
+        dkms build-essential patch kmod pciutils python3 mokutil efibootmgr \
+        initramfs-tools \
+    && rm -rf /var/lib/apt/lists/*

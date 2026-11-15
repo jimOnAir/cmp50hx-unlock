@@ -736,6 +736,27 @@ static int x2_pick_size(u64 possible, u32 want_mib, int *best)
 	return 0;
 }
 
+/* pci_resize_resource() gained the exclude_bars argument in v6.12 (the
+ * "PCI: Use resource constraint information" series) AND Ubuntu backported
+ * it into the 6.8 stable series mid-ABI: Ubuntu headers 6.8.0-124-generic
+ * declare 3 args, 6.8.0-149-generic declare 4 with the SAME
+ * LINUX_VERSION_CODE (both halves of that were build-verified on the
+ * 2026-11-15 lifecycle hunt) — no version gate can exist. The probe is
+ * the declaration itself: claim-90hx/Kbuild greps the headers being built
+ * against for exclude_bars and defines GU_RESIZE_RESOURCE_4ARG (the
+ * aperture_compat.h doctrine, applied to a prototype).
+ * exclude_bars on 3-arg kernels: resize without constraints, pre-series
+ * semantics. */
+static inline int gu_pci_resize_bar(struct pci_dev *pdev, int bar, int size)
+{
+#ifdef GU_RESIZE_RESOURCE_4ARG
+	return pci_resize_resource(pdev, bar, size,
+				   pci_select_bars(pdev, IORESOURCE_MEM) & ~BIT(bar));
+#else
+	return pci_resize_resource(pdev, bar, size);
+#endif
+}
+
 static int gpu_unlock_x2_claim(struct unlock_transaction_work *work)
 {
 	struct pci_dev *pdev = work->pdev;
@@ -773,7 +794,7 @@ static int gpu_unlock_x2_claim(struct unlock_transaction_work *work)
 	 * fails the card must not sit resized with an unrequested window
 	 * for someone else to grab — resize back before returning. */
 	pci_release_selected_regions(pdev, BIT(X2_BAR));
-	ret = pci_resize_resource(pdev, X2_BAR, idx, pci_select_bars(pdev, IORESOURCE_MEM) & ~BIT(X2_BAR));
+	ret = gu_pci_resize_bar(pdev, X2_BAR, idx);
 	if (ret) {
 		dev_warn(&pdev->dev, "x2: BAR1 resize to %u MiB failed (%d)%s, claim skipped\n",
 			 x2_size_mb, ret,
@@ -782,9 +803,8 @@ static int gpu_unlock_x2_claim(struct unlock_transaction_work *work)
 	}
 	ret = pci_request_selected_regions(pdev, BIT(X2_BAR), "gpu_unlock");
 	if (ret) {
-		int back = pci_resize_resource(pdev, X2_BAR,
-					       cur ? ilog2((u64)cur) - 22 : 0,
-					       pci_select_bars(pdev, IORESOURCE_MEM) & ~BIT(X2_BAR));
+		int back = gu_pci_resize_bar(pdev, X2_BAR,
+						 cur ? ilog2((u64)cur) - 22 : 0);
 
 		dev_warn(&pdev->dev, "x2: BAR1 window claim refused (%d), rolled back to %pa%s\n",
 			 ret, &cur, back ? " (rollback FAILED, BAR stays resized)" : "");

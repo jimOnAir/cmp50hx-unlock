@@ -12,3 +12,11 @@ obj-m += gpu_unlock.o
 gpu_unlock-y := main.o gfw_eval.o prep_610.o layout_610.o \
 	vbios_610.o recipes.o payload.o firmware_610.o falcon.o unlock_610.o \
 	booter_diag.o
+
+# pci_resize_resource() prototype probe — Ubuntu BACKPORTED the 4-arg
+# exclude_bars form into the 6.8 stable series (headers 6.8.0-124 have 3
+# args, 6.8.0-149 have 4, IDENTICAL LINUX_VERSION_CODE: no version gate
+# can work, proven by the 2026-11-15 lifecycle hunt). The headers being
+# built against are the only truth: grep the actual declaration.
+gu_resize_4arg := $(shell grep -A1 pci_resize_resource $(srctree)/include/linux/pci.h 2>/dev/null | grep -q exclude_bars && echo y)
+ccflags-y += $(if $(gu_resize_4arg),-DGU_RESIZE_RESOURCE_4ARG)
