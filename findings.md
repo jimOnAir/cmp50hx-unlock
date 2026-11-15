@@ -1411,3 +1411,22 @@ NULL-terminated AND the loop bound is now sizeof-derived (a sentinel walk
 must never trust the data to end it). Class lesson: a harness passing only
 on the author's toolchain is not a gate — the pinned-image runner IS the
 gate; green CI re-verified post-fix.
+
+## The bite proof itself was hollow: optimizer erased the gate's own bug (day-2 CI hunt)
+After fixing the fixture OOB, the CI re-run failed on the NEXT victim of
+the same toolchain-class: asan-gate's "POISON FIXTURE" — a deliberate
+use-after-free whose only job is to PROVE the ASan gate bites — printed
+nothing and exited 0 on gcc-13: the compiler constant-folded the freed
+printf("%s") load away, so no read instruction existed for ASan to ride.
+(Local gcc-15 "caught" it — layout luck a second time; the harness's own
+ASan build hid it too, since sanitizers change layout.) Two wrong fixes
+attempted honestly and disproven by testing the claim, not the exit code:
+argc-gated branch (dynamic analyzers don't run dead code) and volatile-
+stored pointer into printf (still folded). Final shape is language-proof:
+volatile-qualified LOAD through the freed pointer (mandated read
+instruction) — PASS poison caught (exit=1) 3/3 on the gcc-13 image.
+A second splice blunder self-inflicted during the fix (index() grabbed the
+harness main instead of the poison main — caught by the harness's own
+SyntaxError, restored from git, anchored properly). Meta-lesson for every
+gate in this repo: a self-test's negative control must fail LOUDLY on the
+PINNED image, not only pass on the author's box.

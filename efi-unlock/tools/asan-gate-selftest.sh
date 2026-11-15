@@ -500,11 +500,19 @@ open(sys.argv[3], "w").write(r'''/* poison_fixture.c — deliberate heap-use-aft
 #include <stdlib.h>
 #include <string.h>
 int main(void) {
+    /* Bite MUST be real: plain printf("%s", pool) got constant-folded by
+     * gcc-13 (first GitHub CI run: empty print, rc=0 — hollow proof the
+     * local gcc-15 box never exposed), and even a volatile-stored pointer
+     * into printf evaded it. A volatile-qualified LOAD through the freed
+     * pointer cannot be folded away: the language mandates the read
+     * instruction, which is exactly what ASan's shadow check rides. */
     char *pool = malloc(256);
-    memcpy(pool, "digest", 7);
+    volatile char *v = (volatile char *)pool;
+    *v = 'D';
     free(pool);
-    printf("live=%s\n", pool);   /* use-after-free on the exit path */
-    return 0;
+    char sink = *v;                /* the use-after-free: mandated load */
+    printf("live=%c\n", sink);
+    
 }
 ''')
 print("generated")
