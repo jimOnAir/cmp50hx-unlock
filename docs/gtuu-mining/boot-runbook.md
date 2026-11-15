@@ -6,6 +6,21 @@ pushed`). ONE planned session closes every pending boot box. Host: llm2
 2026-11-11: rev .28, kernel 7.0.0-38, GPU0/GPU2 50HX + GPU1 90HX, all
 5.0 GT/s, 170 W x3 — diff everything against that.
 
+## Current bench topology (live 2026-11-15, supersedes any 2026-11-13 slot notes)
+
+- 01:00.0 = CMP 90HX (GA102, 10de:220d) — claim-module territory (needs the
+  systemd drop-in Environment=CMP90_BDF=0000:01:00.0 already installed; the
+  script's default 03:00.0 is the OLD slot -> silent no-op). Trains **x4**:
+  LnkCap=x16 + LnkCtl clean -> physical layer (slot/reseat), software
+  unfixable; unlock itself unaffected.
+- 03:00.0 + 04:00.0 = CMP 50HX (TU102) — EFI gate5 territory; 03:00.0 x16
+  healthy, the Nov-13 x4 drift there resolved with the card move.
+- Boot: Boot0001 (gate5 50HXUNLK.EFI 8237b24b) FIRST — restored 2026-11-15
+  after the power-off reset it to 0000; verified full chain BootCurrent
+  0001 (PROM digest stable 6th time, HALT@76ms, booter attempt#1, MEMMAP
+  line, canary armed, FINAL-GATE RELOCKED-GATE-class). RTC now keeps time
+  across power loss (hwclock==kernel at boot+2min) — battery likely fixed.
+
 ## Stage 0 — artifacts
 - Build the deb from HEAD — PREFERRED path since 2026-11-13:
   `CMP_DEB_REV=<rev> bash tools/docker-deb.sh --out DIR` (pre-baked

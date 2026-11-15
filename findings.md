@@ -1381,3 +1381,17 @@ bench still boots BootCurrent 0000 (GRUB direct) — pre-OS unlocker idle;
 50HX cards unlocked via OS-side V526 (cmp50hx-boot accounting). Trial
 config will be REVERTED same-day: CLAIM_90HX_OPTS removed, reboot, defaults
 verified.
+
+## Permanent path restored + topology ledger (2026-11-15, later boot)
+BootOrder had drifted to 0000-first (the power-off; BIOS reset defaults).
+Restored 0001-first (the promoted, owner-validated permanent path — same
+class of action as the Nov-13 restore) and plain-reboot-verified gate5:
+full chain on BootCurrent 0001, PROM OBSERVE ae6497db… stable SIXTH boot,
+FWSEC HALT tail 76 ms, booter attempt#1, canary armed, FINAL-GATE
+RELOCKED-GATE-class, MEMMAP line present. Fleet green: both 50HX
+register-UNLOCKED, 90HX claim "unlocked" (journal), Xid 0, units 0/0.
+RTC keeps time now (hwclock==kernel) — the battery appears replaced; the
+runbook carries a "Current bench topology" section so slot assumptions
+(topology changed when the 90HX returned) can never go stale silently.
+NEW PHYSICAL row for the owner list: 90HX slot 01:00.0 negotiates x4 with
+LnkCap=x16 and clean LnkCtl — physical layer (reseat/slot), not software.
