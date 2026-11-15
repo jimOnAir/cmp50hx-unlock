@@ -1395,3 +1395,19 @@ runbook carries a "Current bench topology" section so slot assumptions
 (topology changed when the 90HX returned) can never go stale silently.
 NEW PHYSICAL row for the owner list: 90HX slot 01:00.0 negotiates x4 with
 LnkCap=x16 and clean LnkCtl — physical layer (reseat/slot), not software.
+
+## CI caught what 15 local passes + local ASan could not: fixture OOB in mailbox-dict-selftest
+GitHub host-gates (first dispatch, run 43711399575) segfaulted the mailbox
+dictionary selftest on gcc-13 while Manjaro/gcc-15 passed 15/15 — even the
+ASan build on gcc-15 was clean (the sanitizer's layout hides this hazard).
+Reproduced deterministically inside cmp50hx-build (the pinned ubuntu:24.04
+gcc-13 image — the docker-image work paying for itself immediately), UBSan
+there pinpointed line 133: index 3 for char*[3]. Cause = MY OWN ticket-17
+fixture: two dictionary-contract entries left the third tokens[] slot
+uninitialized (2-of-3 explicit zeros) while the walk loops "until NULL" —
+gcc-15's stack layout made the garbage read zero (silent luck), gcc-13
+read garbage and died. Fix is structural not data-only: entries fully
+NULL-terminated AND the loop bound is now sizeof-derived (a sentinel walk
+must never trust the data to end it). Class lesson: a harness passing only
+on the author's toolchain is not a gate — the pinned-image runner IS the
+gate; green CI re-verified post-fix.

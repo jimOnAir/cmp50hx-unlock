@@ -136,15 +136,15 @@ int main(void) {
         { 0x8au, { "descriptor field", "D[+0xac]", 0 } },
         /* the 0x91 line must STATE the contract (ticket 17): */
         { 0x91u, { "EXACTLY 1 MiB", "0x100000", "live-WPR-geometry" } },
-        { 0x0bu, { "PSS final-hash", 0, 0 } },
-        { 0x11u, { "expected-value table", 0, 0 } },
+        { 0x0bu, { "PSS final-hash", 0, 0, 0 } },
+        { 0x11u, { "expected-value table", 0, 0, 0 } },
     };
     for (unsigned i = 0; i < sizeof mb / sizeof mb[0]; i++) {
         char tok[96];
         int ok = 1;
         const char *nm = booter_mailbox0_name(mb[i].v);
         if (!nm) ok = 0;
-        for (int t = 0; nm && mb[i].tokens[t]; t++)
+        for (int t = 0; nm && t < (int)(sizeof mb[i].tokens / sizeof mb[i].tokens[0]) && mb[i].tokens[t]; t++)
             if (!strstr(nm, mb[i].tokens[t])) ok = 0;
         snprintf(tok, sizeof tok, "B1 mailbox0 0x%02x contract tokens", mb[i].v);
         expect(tok, ok);
