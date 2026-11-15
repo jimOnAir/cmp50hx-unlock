@@ -96,3 +96,18 @@ Live row: the param stays 0 until a 90HX returns to the bench for a one-shot tri
 Packaging: the phase-2 claim module ships in cmp50hx-unlock 610.43.03-20261113.gtuu8
 (deb sha256 a9e2ada1…, smoke PASS; llm2 install + DKMS build on 7.0.0-38 +
 `modinfo gpu_unlock | grep x2_` owed at next power-on — bench was off 2026-11-13).
+
+#### X2 live verdict (2026-11-15, llm2, real CMP 90HX @01:00.0)
+gtuu9 booted the FULL production orchestrator on GA102 silicon for the first
+time (claim->...->host ss0=0x88888888 ss1=0x8->flr->handoff ret=0->"unlocked",
+nvidia bound, 0 Xid). Trial row: CLAIM_90HX_OPTS="x2_aperture=1" ->
+"x2: BAR1 resize to 256 MiB failed (-16), claim skipped" — EBUSY: firmware
+holds the 16 GiB boot-time reBAR aperture (fixtures model a free BAR; real
+firmware does not). Refusal named + non-fatal exactly as designed; unlock
+unaffected. VERDICT: X2 is correct-but-inert on this board; pursuing it
+would need a BIOS stock-BAR experiment not worth the bench time. Module
+semantics (incl. refusal path + clean release lifecycle S26) now LIVE-
+VALIDATED — phase-2 CLOSED. Field lessons: skip line carries the BUSY
+diagnosis; script default BDF 03:00.0 was stale after the card moved
+(CMP90_BDF drop-in fixes llm2; trap documented in-script). Trial config
+reverted same-day (defaults boot verified 11:50:50: unlocked, 0 Xid).
