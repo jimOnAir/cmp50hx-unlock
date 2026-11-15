@@ -123,13 +123,13 @@ jobs:
           DEB="$(pwd)/$(ls dist/cmp50hx-unlock_*_amd64.deb)"
           apt-get install -y "${DEB}"
           dpkg-query -s cmp50hx-unlock | grep -qx 'Status: install ok installed'
-          dkms status | grep -q '^cmp50hx/.*: installed'
+          dkms status | grep -c '^cmp50hx/.*: installed'
           krel=""
           for k in $(ls /usr/src | sed -n 's/^linux-headers-//p'); do
               [[ -d "/lib/modules/${k}/build" ]] && krel="${k}" && break
           done
           test -n "${krel}"
-          modinfo -k "${krel}" nvidia | grep -q 'updates/dkms/nvidia'
+          modinfo -k "${krel}" nvidia | grep -c 'updates/dkms/nvidia'
           apt-get remove -y cmp50hx-unlock
           ! test -e /usr/bin/nvidia-smi
 
@@ -151,23 +151,23 @@ jobs:
           # stock family members resolve normally BEFORE our pin exists
           drift_target="$(apt-cache search --names-only '^nvidia-driver-[0-9]' | head -1 | cut -d' ' -f1)"
           test -n "${drift_target}"
-          apt-cache policy "${drift_target}" | grep -q 'Candidate: [0-9]'
+          apt-cache policy "${drift_target}" | grep -c 'Candidate: [0-9]'
           # installing our deb freezes the family and keeps the stray in place
           apt-get install -y "${DEB}"
           test -s /etc/apt/preferences.d/cmp50hx-unlock
-          apt-cache policy libnvidia-compute-595 | grep -q 'Installed: 615.71.10-1ubuntu1'
-          apt-cache policy libnvidia-compute-595 | grep -q 'Candidate: (none)'
+          apt-cache policy libnvidia-compute-595 | grep -c 'Installed: 615.71.10-1ubuntu1'
+          apt-cache policy libnvidia-compute-595 | grep -c 'Candidate: (none)'
           # the same family member is now undrift-inable (pinned at -1)
-          apt-cache policy "${drift_target}" | grep -q 'Candidate: (none)'
+          apt-cache policy "${drift_target}" | grep -c 'Candidate: (none)'
           ! apt-get install -y "${drift_target}"
           # the sanctioned upgrade path (explicit local install) still works
           apt-get install -y --reinstall "${DEB}"
           test -s /etc/apt/preferences.d/cmp50hx-unlock
-          apt-cache policy libnvidia-compute-595 | grep -q 'Installed: 615.71.10-1ubuntu1'
+          apt-cache policy libnvidia-compute-595 | grep -c 'Installed: 615.71.10-1ubuntu1'
           # removal releases the pin, never purges others' packages
           apt-get remove -y cmp50hx-unlock
           ! test -e /etc/apt/preferences.d/cmp50hx-unlock
-          apt-cache policy libnvidia-compute-595 | grep -q 'Installed: 615.71.10-1ubuntu1'
+          apt-cache policy libnvidia-compute-595 | grep -c 'Installed: 615.71.10-1ubuntu1'
           dpkg-query -s libnvidia-compute-595 | grep -qx 'Status: install ok installed'
 
       - name: Dump the postinst log on failure
@@ -214,7 +214,7 @@ jobs:
               linux-headers-generic linux-headers-6.8.0-124-generic linux-image-generic
           DEB="$(pwd)/$(ls dist/cmp50hx-unlock_*_amd64.deb)"
           bash tools/lifecycle-test-deb.sh self --deb "${DEB}" | tee lifecycle.log
-          grep -q 'LIFECYCLE_LOOP_LEGS_FAILED=0' lifecycle.log
+          grep -c 'LIFECYCLE_LOOP_LEGS_FAILED=0' lifecycle.log
 
       - name: Dump the postinst log on failure
         if: failure()
