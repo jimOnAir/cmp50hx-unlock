@@ -122,7 +122,7 @@ jobs:
           set -eux
           DEB="$(pwd)/$(ls dist/cmp50hx-unlock_*_amd64.deb)"
           apt-get install -y "${DEB}"
-          dpkg-query -s cmp50hx-unlock | grep -qx 'Status: install ok installed'
+          dpkg-query -s cmp50hx-unlock | grep -cx 'Status: install ok installed'
           dkms status | grep -c '^cmp50hx/.*: installed'
           krel=""
           for k in $(ls /usr/src | sed -n 's/^linux-headers-//p'); do
@@ -168,7 +168,7 @@ jobs:
           apt-get remove -y cmp50hx-unlock
           ! test -e /etc/apt/preferences.d/cmp50hx-unlock
           apt-cache policy libnvidia-compute-595 | grep -c 'Installed: 615.71.10-1ubuntu1'
-          dpkg-query -s libnvidia-compute-595 | grep -qx 'Status: install ok installed'
+          dpkg-query -s libnvidia-compute-595 | grep -cx 'Status: install ok installed'
 
       - name: Dump the postinst log on failure
         if: failure()
