@@ -775,8 +775,9 @@ static int gpu_unlock_x2_claim(struct unlock_transaction_work *work)
 	pci_release_selected_regions(pdev, BIT(X2_BAR));
 	ret = pci_resize_resource(pdev, X2_BAR, idx, pci_select_bars(pdev, IORESOURCE_MEM) & ~BIT(X2_BAR));
 	if (ret) {
-		dev_warn(&pdev->dev, "x2: BAR1 resize to %u MiB failed (%d), claim skipped\n",
-			 x2_size_mb, ret);
+		dev_warn(&pdev->dev, "x2: BAR1 resize to %u MiB failed (%d)%s, claim skipped\n",
+			 x2_size_mb, ret,
+			 ret == -EBUSY ? " (current window is BUSY — claimed by firmware/boot reBAR; live llm2 90HX 16G@boot case)" : "");
 		return ret;
 	}
 	ret = pci_request_selected_regions(pdev, BIT(X2_BAR), "gpu_unlock");

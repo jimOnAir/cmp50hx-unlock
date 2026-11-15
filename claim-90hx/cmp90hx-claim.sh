@@ -10,6 +10,9 @@
 # boot, never retries across boots (ADR-0001).
 set -u
 
+# Default slot 03:00.0 is the ORIGINAL bench slot; the card physically
+# moved to 01:00.0 (live 2026-11-15: silent no-op until CMP90_BDF override).
+# Set CMP90_BDF (env or systemd drop-in) whenever the bench topology changes.
 BDF="${CMP90_BDF:-0000:03:00.0}"
 KO="$(modprobe -R gpu_unlock 2>/dev/null || true)"
 if [[ -z "$KO" || ! -f "$KO" ]]; then

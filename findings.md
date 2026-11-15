@@ -1362,3 +1362,22 @@ reload after reset or FWSEC legitimately refuses; (e) the assessor's
 config_ok needs a readable vendor id — fixture ordering bug. Runner caches
 provisioning under $TMPDIR keyed by the tarball sha (warm run 2.2 s); no
 repo cache => loud SKIP. k_fw_name_fail remains the negative control.
+
+## 90HX live again — first full-orchestrator unlock on real silicon + X2 live row (2026-11-15)
+Card returned at 01:00.0 (10de:220d). gtuu9 boots: claim unit insmods with
+the new CLAIM_90HX_OPTS hook; dmesg shows the entire production sequence on
+REAL GA102 silicon: claim->layout(fb=2.5G)->dma(20606 pages)->gfw->fwsec
+(v3, fuse ver=2, real WPR2)->publish->host ss0=0x88888888 ss1=0x8->FLR->
+stage=flr clean->handoff ret=0->"unlocked". X2 trial (x2_aperture=1):
+"x2: BAR1 resize to 256 MiB failed (-16), claim skipped" — EBUSY: firmware
+owns the 16 GiB boot-time reBAR aperture (topology reality the host fixture
+doesn't model); named skip, unlock proceeded, nvidia bound, 0 Xid. Verdict:
+X2-as-designed is correct-but-inert on this board (resize-from-16G is
+firmware-guarded); skip line now prints the BUSY hint (field-actionable).
+Bench operational lesson: script default BDF was the ORIGINAL slot
+03:00.0 — silent no-op after the card moved; fixed by systemd drop-in
+Environment=CMP90_BDF=0000:01:00.0 (documented in script). Boot-path note:
+bench still boots BootCurrent 0000 (GRUB direct) — pre-OS unlocker idle;
+50HX cards unlocked via OS-side V526 (cmp50hx-boot accounting). Trial
+config will be REVERTED same-day: CLAIM_90HX_OPTS removed, reboot, defaults
+verified.
