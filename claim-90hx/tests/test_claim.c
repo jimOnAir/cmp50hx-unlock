@@ -509,6 +509,40 @@ int main(void)
 	}
 
 
+	/* ---- S26: X2 window release lifecycle — a transient claim module
+	 * (rmmod after claim) must leave BAR1 UNCLAIMED for the driver:
+	 * clean unwind releases the selected region symmetric with BAR0. */
+	claim_ready(&w);
+	x2_aperture = true; x2_size_mb = 256;
+	ret = gpu_unlock_x2_claim(&w);
+	ck("S26a precondition: claimed and busy",
+	   ret == 0 && w.x2_claimed && (fx_pdev.resource[1].flags & IORESOURCE_BUSY));
+	w.bar = (void __iomem *)fix_mmio();
+	w.region = true;
+	w.cmd_valid = true;
+	w.original_cmd = 0x0002;
+	w.state = GU_QUIESCED;
+	fix_config()[PCI_COMMAND >> 2] = 0x0002;
+	ret = unlock_transaction_unwind(&w);
+	ck("S26b clean unwind -> 0 and x2_claimed cleared", ret == 0 && !w.x2_claimed);
+	ck("S26c BAR1 BUSY released (driver can claim)",
+	   !(fx_pdev.resource[1].flags & IORESOURCE_BUSY));
+	/* reverse pair: the REFUSED unwind retains everything (firmware may
+	 * still DMA): window must stay busy. */
+	claim_ready(&w);
+	ret = gpu_unlock_x2_claim(&w);
+	w.firmware_started = true;
+	w.state = GU_ACTIVE;
+	w.cmd_valid = true;
+	w.original_cmd = 0x0006;
+	fix_config()[PCI_COMMAND >> 2] = 0x0006;
+	ret = unlock_transaction_unwind(&w);
+	ck("S26d refused unwind keeps the window claimed",
+	   ret == -EBUSY && w.retained && w.x2_claimed &&
+	   (fx_pdev.resource[1].flags & IORESOURCE_BUSY));
+	x2_aperture = false;
+	x2_size_mb = 256;
+
 	/* ---- S24/S25: deep-phase feed — the orchestrator with REAL 610
 	 * firmware (extract.sh, manifest-gated) and the REAL captured 90HX
 	 * board PROM, production recipe from gu_card_find(0x220d).

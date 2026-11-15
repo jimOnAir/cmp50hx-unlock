@@ -92,6 +92,8 @@ struct gu_boot_state {
 static void gu_snapshot(struct unlock_transaction_work *work, const char *function,
 			unsigned int line, int error);
 
+#define X2_BAR 1	/* claim window: BAR1 (see gpu_unlock_x2_claim) */
+
 static int unlock_transaction_result(struct unlock_transaction_work *work, int error,
 			  const char *function, unsigned int line)
 {
@@ -423,6 +425,14 @@ static int unlock_transaction_unwind(struct unlock_transaction_work *work)
 		pci_release_region(work->pdev, 0);
 		work->region = false;
 	}
+	/* X2 window: released only on the clean-handoff path, symmetric with
+	 * BAR0 above — the driver must find its BARs unclaimed. The retained
+	 * branch returned early: if firmware may still DMA, the window stays
+	 * claimed exactly like every other resource (handover refused). */
+	if (work->x2_claimed) {
+		pci_release_selected_regions(work->pdev, BIT(X2_BAR));
+		work->x2_claimed = false;
+	}
 	if (work->enabled) {
 		pci_disable_device(work->pdev);
 		work->enabled = false;
@@ -700,8 +710,6 @@ MODULE_PARM_DESC(x2_aperture, "resize+claim BAR1 at x2_size_mb after post-FLR BA
 static uint x2_size_mb = 256;
 module_param(x2_size_mb, uint, 0644);
 MODULE_PARM_DESC(x2_size_mb, "BAR1 claim size in MiB for x2_aperture (must be a Resizable BAR size; default: 256)");
-
-#define X2_BAR 1
 
 /* Largest Resizable-BAR size index whose byte size (PCIe r4.0 §7.8.6:
  * 2^(20+N) bytes, our index counts from 4 MiB = 2^22) fits want_mib.

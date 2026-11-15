@@ -28,6 +28,19 @@ disabled() {
     [[ "$v" == "disabled" ]]
 }
 
+claim_module_opts() {
+    # Space-separated extra insmod params from boot.conf (default: none).
+    # The only knob today is x2_aperture=1 (+ x2_size_mb=N) for the
+    # gtuu-mining ticket-11 phase-2 window claim; default-off semantics
+    # live in the module. Unquoted expansion on the insmod line below is
+    # deliberate (word-splitting into params); values are operator-set,
+    # not user input.
+    local conf=/etc/cmp50hx/boot.conf v
+    [[ -f "$conf" ]] || return 0
+    v="$(sed -n 's/^CLAIM_90HX_OPTS=\(.*\)/\1/p' "$conf" | tail -1)"
+    printf '%s' "${v%\"}" | tr -d '\"'
+}
+
 bar0_read() { # <addr-hex> -> value or empty; wedge-safe (mmap RO like maskread)
     python3 - "$BDF" "$1" << 'PY' 2>/dev/null || true
 import mmap, os, struct, sys
@@ -235,7 +248,7 @@ fi
 
 mkdir -p "$STATE"
 claim_ok=0
-if insmod "$KO" targets="$BDF" resume=0 2>/tmp/cmp90hx-claim.insmod; then
+if insmod "$KO" targets="$BDF" resume=0 $(claim_module_opts) 2>/tmp/cmp90hx-claim.insmod; then
     # The ko synchronously verifies every write (pass=… ret=0) and prints
     # "unlocked" before handoff — that IS the authoritative verdict: the ko
     # restores the command register afterwards, so a BAR0 re-read from here
