@@ -92,6 +92,12 @@ jobs:
   linux-2604-install:
     needs: linux
     runs-on: ubuntu-24.04
+    # container jobs run /bin/sh by default on the runners; this
+    # job's bashisms ([[ ... ]]) need bash explicitly (found by
+    # the FIRST dispatch of this tag-only workflow, 2026-11-15).
+    defaults:
+      run:
+        shell: bash
     container:
       image: ubuntu:26.04
     env:
@@ -181,6 +187,12 @@ jobs:
   linux-lifecycle:
     needs: linux
     runs-on: ubuntu-24.04
+    # container jobs run /bin/sh by default on the runners; this
+    # job's bashisms ([[ ... ]]) need bash explicitly (found by
+    # the FIRST dispatch of this tag-only workflow, 2026-11-15).
+    defaults:
+      run:
+        shell: bash
     container:
       image: ubuntu:24.04
     env:
