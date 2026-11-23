@@ -135,6 +135,13 @@ claim_src="${stage}/usr/src/gpu-unlock-claim-${driver_version}"
 mkdir -p "${claim_src}"
 tar -C "${root}/claim-90hx" --exclude='*.o' --exclude='*.ko' --exclude='*.mod' --exclude='*.mod.c' --exclude='Module.symvers' --exclude='modules.order' --exclude='./.*' -cf - . | tar -C "${claim_src}" -xf -
 [[ -s "${claim_src}/dkms.conf" ]] || { printf 'gpu-unlock-claim staging produced no dkms.conf (excludes too greedy?)\n' >&2; exit 6; }
+# recipes.h bakes /lib/firmware/gpu-unlock/<driver-version>/ paths; rewrite
+# the version component to THIS build's pin so the module's firmware
+# requests always point at the directory postinst stages (pattern matches
+# any literal — a future bump never needs to touch recipes.h).
+sed -i "s#gpu-unlock/[0-9][0-9.]*/#gpu-unlock/${driver_version}/#g" "${claim_src}/recipes.h"
+grep -q "gpu-unlock/${driver_version}/" "${claim_src}/recipes.h" \
+    || { printf 'claim recipes.h version rewrite produced no match\n' >&2; exit 6; }
 # gtuu-mining ticket 17: the claim tree builds standalone under DKMS (no
 # sibling common/), so stage a BYTE copy of the shared decode dictionary
 # next to the module sources; booter_diag.c's quoted include finds it
@@ -229,7 +236,7 @@ install -m 0755 "${root}/claim-90hx/cmp90hx-claim.sh" "${libdir}/cmp90hx-claim.s
 mkdir -p "${stage}/usr/local/sbin"
 install -m 0755 "${root}/gpu-peek/cmp-peek" "${stage}/usr/local/sbin/cmp-peek"
 log "extracting the 90HX claim firmware assets (deterministic: source bindata + official .run)"
-bash "${root}/claim-90hx/firmware/extract.sh" "${src_tree}" "${run_file}" "${opt}/firmware-90hx" >/dev/null
+bash "${root}/claim-90hx/firmware/extract.sh" "${src_tree}" "${run_file}" "${opt}/firmware-90hx" "${driver_version}" >/dev/null
 # gtuu-mining t13 (row X5): the EFI asset blobs must be regenerable from
 # this exact source tree — GENERATED-class byte-equality + full-digest
 # manifest gate; a corrupted cache or tampered blob fails the build loudly.

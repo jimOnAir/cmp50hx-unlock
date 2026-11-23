@@ -190,12 +190,11 @@ for patch_name in "${patch_order[@]}"; do
     patch_files+=("${patch_file}")
 done
 fi
-common_patch_file="${script_dir}/patches/common/01-nvidia-kernel-string-api.patch"
-[[ -f "${common_patch_file}" ]] || {
-    printf 'missing common patch: %s\n' "${common_patch_file}" >&2
-    exit 5
-}
-patch_files+=("${common_patch_file}")
+# The string-API common patch was retired here too: NVIDIA absorbed every
+# site it fixed upstream by 610.57.04 (os-interface.c strscpy, uvm_pmm
+# snprintf, nvswitch/nvkms equivalents — verified hunk-by-hunk on the bump;
+# the sole remaining strcpy() at os-interface.c:422 is untouched by both
+# the patch and NVIDIA). History: patches/common/README.md + git log.
 if [[ -z "${prepare_source}" ]]; then
 [[ ! -e "${artifact_dir}" ]] || {
     printf 'artifact directory already exists: %s\n' "${artifact_dir}" >&2

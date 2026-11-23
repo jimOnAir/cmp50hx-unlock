@@ -1545,3 +1545,27 @@ named + reference impl). EFI + claim unaffected by driver version. Verdict
 recorded in 615 investigation doc §"Can we move": 615 no; 620 yes-as-bounded-
 project at R610 EOL (2027-08-03) or concrete need; NOW = 610.57.04 security
 bump (zero-risk, pending owner call).
+
+## 610.57.04 security bump executed (2026-11-23/24; owner: "let's bump 610 first")
+Pin triple flipped (source 619d7b5c = triple-verified: ours + Cyridd + the
+GitHub tag; .run b2e935c6 verified against NVIDIA's own published .sha256sum
+after a TLS-truncated first download — retry+`-C -`+`sha256sum -c`). The
+series fight was all in ONE place and it was honest signal, not noise:
+patches/common/01 (string-API backport) — its own README says "retired
+(615 absorbed upstream)"; measurement says **610.57.04 already absorbed
+every fixed site** (os-interface strscpy, uvm_pmm snprintf, nvswitch/nvkms;
+the lone surviving strcpy at os-interface.c:422 was never a patch target).
+Container death mode explained: common applied PARTIALLY in build.sh order
+→ 08-profiling dry-run conflict; retired it per the README (git rm, history
+kept) → 15/15 clean. Second honest signal: firmware MANIFEST gate flagged
+exactly gsp_ga10x.bin changed (3/4 unlock assets byte-identical, as the
+byte-identical g_bindata sources predicted) — regenerated manifest, one
+line, digests cross-checked against a fresh direct .run extraction.
+Third: recipes.h baked gpu-unlock/610.43.03/ firmware paths vs postinst's
+<driver_version> dir — fixed at staging with a version-agnostic sed +
+assert (future bumps never touch recipes.h; harness unaffected, it compiles
+the verbatim source). Tooling drift found en route: docker-deb.sh hardcoded
+the old .run filename in the offline probe (now pin-driven) and root residue
+from failed builds drowned errors (resilient cleanup trap, tail 30→120).
+Gates: docker-deb PASS + smoke; claim harness 86/86; lifecycle
+LEGS_FAILED=0 on the bumped deb. Bench + CI pending this commit.

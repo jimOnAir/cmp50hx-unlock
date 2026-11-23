@@ -15,11 +15,10 @@ FIRMWARE = (
     "firmware/gsp_tu10x.bin",
 )
 NOTICE = "LICENSE"
-VERSION = "610.43.03"
 HEADER_BYTES = 1 << 20
 
 
-def payload_offset(installer: Path) -> int:
+def payload_offset(installer: Path, expected_version: str) -> int:
     """Offset of the makeself payload after its shell header."""
     with installer.open("rb") as stream:
         header = stream.read(HEADER_BYTES)
@@ -27,8 +26,8 @@ def payload_offset(installer: Path) -> int:
     skip = re.search(rb"^skip=(\d+)$", header, re.M)
     if not version or not skip:
         raise ValueError("not an NVIDIA makeself installer")
-    if version[1].decode() != VERSION:
-        raise ValueError(f"installer version is {version[1].decode()}, expected {VERSION}")
+    if version[1].decode() != expected_version:
+        raise ValueError(f"installer version is {version[1].decode()}, expected {expected_version}")
     # The installer extracts with `tail -n +$skip`, so the payload starts
     # after skip - 1 header lines.
     offset = 0
@@ -60,8 +59,8 @@ def read_members(archive: tarfile.TarFile, names: tuple[str, ...]) -> dict[str, 
     return result
 
 
-def extract_members(installer: Path, names: tuple[str, ...]) -> dict[str, bytes]:
-    offset = payload_offset(installer)
+def extract_members(installer: Path, names: tuple[str, ...], expected_version: str) -> dict[str, bytes]:
+    offset = payload_offset(installer, expected_version)
     with installer.open("rb") as stream:
         stream.seek(offset)
         process = subprocess.Popen(["zstd", "-dc"], stdin=stream, stdout=subprocess.PIPE)
@@ -81,11 +80,12 @@ def extract_members(installer: Path, names: tuple[str, ...]) -> dict[str, bytes]
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("installer", type=Path, help="NVIDIA-Linux-x86_64-610.43.03-no-compat32.run")
+    parser.add_argument("installer", type=Path, help="NVIDIA-Linux-x86_64-<version>.run (official installer)")
     parser.add_argument("output", type=Path, help="directory for extracted firmware")
+    parser.add_argument("expected_version", help="driver version the installer must carry (driver-pin.env is the source)")
     args = parser.parse_args()
 
-    members = extract_members(args.installer, (*FIRMWARE, NOTICE))
+    members = extract_members(args.installer, (*FIRMWARE, NOTICE), args.expected_version)
     args.output.mkdir(parents=True, exist_ok=True)
     for path in FIRMWARE:
         (args.output / Path(path).name).write_bytes(members[path])

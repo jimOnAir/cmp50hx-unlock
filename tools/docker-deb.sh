@@ -31,7 +31,14 @@ for img in cmp50hx-build:latest docker/Dockerfile.build \
 done
 
 build_dir="$(mktemp -d /tmp/cmp50hx-deb.XXXXXX)"
-trap 'rm -rf "${build_dir}"' EXIT
+# Cleanup must survive root-owned container residue (a failed build mid-way
+# used to trap the host rm, and its noise drowned the real error).
+cleanup() {
+    docker run --rm -v "${build_dir}:/bd" cmp50hx-build:latest \
+        sh -c 'rm -rf /bd/* /bd/.[!.]* 2>/dev/null || true' >/dev/null 2>&1 || true
+    rm -rf "${build_dir}"
+}
+trap cleanup EXIT
 printf '==> staging sources into %s\n' "${build_dir}"
 rsync -a --exclude .git --exclude work --exclude 'dist*' --exclude cache \
       --exclude '.scratch' --exclude '*.deb' --exclude 'docker' \
@@ -46,13 +53,14 @@ docker run --rm \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     cmp50hx-build:latest bash -c '
         set -e
-        [[ -s cache/NVIDIA-Linux-x86_64-610.43.03.run ]] \
+        source driver-pin.env   # offline-cache probe must follow the pin, not a literal
+        [[ -s "cache/NVIDIA-Linux-x86_64-${DRIVER_VERSION}.run" ]] \
             && echo "cache mount: $(du -sh cache | cut -f1) available offline"
         rm -f efi-unlock/50HXUNLK.EFI
         (cd efi-unlock && bash build.sh >/dev/null)
         sha256sum efi-unlock/50HXUNLK.EFI
         bash tools/build-deb.sh --out . > /tmp/build-deb.log 2>&1 \
-            || { tail -30 /tmp/build-deb.log; exit 1; }
+            || { tail -120 /tmp/build-deb.log; exit 1; }
         grep -E "^(PASS|OK)" /tmp/build-deb.log | tail -5 || true
         ls cmp50hx-unlock_*_amd64.deb
         chown -R "${HOST_UID}:${HOST_GID}" /src'   # root residue would trap the cleanup
