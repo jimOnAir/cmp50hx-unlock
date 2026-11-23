@@ -238,3 +238,40 @@ outcome. (Bash-greppable: one URL per bullet.)
 - Upstream drafts for posting (jdowning b1 + WildFlash):
   `.scratch/90hx-gen2-p2p/upstream-issue-draft*.md` — user posts; never
   published from this side.
+
+## Batch 2 corpus additions (2026-11-24)
+
+User: "add all mentioned repos to analysis" — every repo this repo's tracked
+prose references is now cloned and pinned in CLONES.md batch 2 (corpus 17 →
+34). One-liners:
+
+- https://github.com/NatsumeAi/CMP-90HX-Compute-PCIE2.0-unlock — 90HX Gen2
+  precedent; https://github.com/Rhonstin/cmp90hx-unlock ·
+  https://github.com/Cyridd/cmpunlocker ·
+  https://github.com/elias-gaeros/gpu-unlock — lineage siblings.
+- Dead references, documented not cloned (2026-11-24 checks):
+  `minicx/cmpunlocker` 404, `studebaker8/cmp170hx-gen2` 404,
+  `PZH1gdmu/CMP40HX-Unlock` → ghost 301 to `PZH1gdmu/GPU-Unlock`, both names
+  and the owner profile now 404 (rename, then account deletion). Prose refs
+  in CREDITS/README kept as historical provenance.
+- https://github.com/dartraiden/NVIDIA-patcher — signed-driver patching
+  mechanics; https://github.com/bmgjet/Ampere-Bios-Editor — vBIOS table
+  editor (2021-era, archival); https://github.com/notfromstatefarm/nvflashk —
+  open nvflash reimpl (VBIOS ops reference).
+- Toolchain/semantics deps: https://github.com/ncroxon/gnu-efi (EFI build
+  toolchain behind `efi-unlock/`), https://github.com/tianocore/edk2
+  (BootNext/DMA/memory-map semantics of our gate5 EFI, depth-1 pin),
+  https://github.com/envytools/envytools (XP3G/FECS register oracle),
+  https://github.com/DMTF/libspdm (vendored in open-gpu-kernel-modules —
+  SPDM/HSPROM semantics source).
+- Integration/bench: https://github.com/ilya-zlobintsev/LACT (the DRM
+  consumer our nvidia-drm late-load fix serves),
+  https://github.com/ProjectPhysX/OpenCL-Benchmark (A/B methodology ref).
+- https://huggingface.co/TOTORONG/AD103_win_unlocker — cloned from HF with
+  `GIT_LFS_SKIP_SMUDGE=1` (metadata only, LFS blobs deliberately not fetched).
+
+Pinned HEADs + live-remote drift now recorded on every regeneration:
+`tools/clone-upstream.sh` gained batch 2, HF/URL entries, and ls-remote
+drift markers (metadata only — pinned trees are never auto-updated; drift
+means "read the delta as fresh supply-chain review", as done for the batch-1
+five moved repos on 2026-11-23).

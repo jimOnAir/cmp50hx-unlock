@@ -1499,3 +1499,18 @@ MindAllik v1.3.2-1.3.4 (Nov 13-20: TU102 two-write payload, BCR_CTRL fix,
 dma_alloc_coherent mask, RM_RISCV_UCODE_DESC v4 parsing) explicitly updates
 "v67-tu102-610.43.03.bin"; physicsdolphin likewise "pinned 610.43.03". No
 upstream publishes 615-Linux unlock work either way.
+
+## Corpus batch 2: every referenced repo is now in the pinned analysis set (2026-11-24)
+User: "add all mentioned repos to analysis". tools/clone-upstream.sh extended
+(batch 2 list, full-URL/HF entries, GIT_LFS_SKIP_SMUDGE for HF, ls-remote
+drift column — pinned trees never auto-update, drift = "fresh review
+needed"). work/upstream 17 → 34 repos, 658 MB, rc=0. Notables pinned:
+tianocore/edk2 + DMTF/libspdm + ncroxon/gnu-efi (toolchain), P104-100 Gen2
+lever repo cloned straight (was docs-mirror only), 90HX Gen2 siblings
+(NatsumeAi/Rhonstin/Cyridd/elias-gaeros). Dead references proven and
+recorded: minicx/cmpunlocker 404, studebaker8/cmp170hx-gen2 404,
+PZH1gdmu/CMP40HX-Unlock ghost-301→404 (rename then account deletion).
+Batch-1 drift persists as expected (5 repos, physicsdolphin already at
+45db233 — two days after our c231ac3 sighting; fastest-moving lineage repo).
+Manifest: docs/cmp90hx/upstream/CLONES.md (git-tracked) regenerates
+deterministically.

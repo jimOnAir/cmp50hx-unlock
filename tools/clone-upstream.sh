@@ -8,12 +8,16 @@
 # per repo).
 #
 # Usage: tools/clone-upstream.sh          # clone missing, verify present
+# Re-runs never move a pinned clone: existing trees are verified and
+# reported only; drift vs the live remote HEAD is recorded in the manifest
+# (ls-remote metadata only — new commits are NOT fetched into pinned trees).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 DEST=work/upstream
 MANIFEST=docs/cmp90hx/upstream/CLONES.md
 mkdir -p "$DEST"
 
+# Batch 1 — unlock lineage corpus (original 2026-11-11 selection).
 REPOS=(
   "Zagitta/gpu-unlock"                 # pre-driver V67 executor, path #5a carrier
   "KohakuBlueleaf/KohakUnlock"         # TU102 initramfs port + Ampere pointer
@@ -34,18 +38,53 @@ REPOS=(
   "MindAllik/GPU-Tensor-Unlock-Universal" # consumer-line GUI suite, RTX 20/30/40 only
 )
 
-declare -a LINES=() FAILED=()
-for r in "${REPOS[@]}"; do
-  slug="${r/\//-}"
-  d="$DEST/$slug"
+# Batch 2 (2026-11-24) — everything else this repo's tracked prose references:
+# lineage siblings, mechanism/lever precedents, and build/toolchain deps.
+# Entries are "owner/repo" (GitHub) or a full URL (Hugging Face etc.).
+BATCH2=(
+  "skbskhud/p104-unlock-v3"            # GP104 Gen2-no-XP3G lever (ticket 11 §9)
+  "JustAResearcher/gpu-unlock-ada"     # AD10x four-write chain source
+  "Consensus-Protocol/cmp170hx"        # PLM semantics + validation methodology
+  "Cyridd/cmpunlocker"                 # lineage sibling (notes reference)
+  "NatsumeAi/CMP-90HX-Compute-PCIE2.0-unlock" # 90HX Gen2 precedent
+  "Rhonstin/cmp90hx-unlock"            # 90HX variant
+  "elias-gaeros/gpu-unlock"            # gpu-unlock variant
+  "dartraiden/NVIDIA-patcher"          # signed-driver patching mechanics
+  "bmgjet/Ampere-Bios-Editor"          # vBIOS editing (reBAR/SS tables)
+  "notfromstatefarm/nvflashk"          # nvflash open reimpl (VBIOS ops)
+  "ncroxon/gnu-efi"                    # EFI build toolchain for efi-unlock/
+  "tianocore/edk2"                     # UEFI reference (BootNext/DMA semantics)
+  "envytools/envytools"                # register-semantics oracle
+  "DMTF/libspdm"                       # SPDM vendored inside NVIDIA source
+  "ilya-zlobintsev/LACT"               # DRM consumer our nvidia-drm fix serves
+  "ProjectPhysX/OpenCL-Benchmark"      # benchmark methodology reference
+  "https://huggingface.co/TOTORONG/AD103_win_unlocker" # board-specific Ada UEFI research
+)
+
+clone_url() { [[ "$1" == http* ]] && printf '%s' "$1" || printf 'https://github.com/%s' "$1"; }
+slug_of()    { local s="${1#*://}"; s="${s#*.co/}"; s="${s#*.com/}"; printf '%s' "${s//\//-}"; }
+
+declare -a L1=() L2=() FAILED=()
+drift_count=0
+scan() { # $1=repo-or-url  $2=name-of-manifest-lines-array
+  local -n arr="$2"
+  local r="$1" slug d sha date url remote drift=""
+  slug=$(slug_of "$r"); url=$(clone_url "$r"); d="$DEST/$slug"
   if [[ ! -d "$d/.git" ]]; then
-    git clone --quiet --depth 1 --single-branch "https://github.com/$r" "$d" \
-      || { FAILED+=("$r"); continue; }
+    GIT_LFS_SKIP_SMUDGE=1 git clone --quiet --depth 1 --single-branch "$url" "$d" \
+      || { FAILED+=("$r"); return; }
   fi
   sha=$(git -C "$d" rev-parse HEAD)
   date=$(git -C "$d" log -1 --format=%cs)
-  LINES+=("| \`$r\` | \`$sha\` | $date | \`$d\` |")
-done
+  remote=$(GIT_TERMINAL_PROMPT=0 git ls-remote "$url" HEAD 2>/dev/null | cut -c1-10 || true)
+  if [[ -n "$remote" && "${remote:0:7}" != "${sha:0:7}" ]]; then
+    drift=" **→ REMOTE \`$(printf '%s' "${remote:0:7}")\`**"; drift_count=$((drift_count+1))
+  fi
+  arr+=("| \`$r\` | \`$sha\` | $date | \`$d\` |$drift")
+}
+
+for r in "${REPOS[@]}";   do scan "$r" L1; done
+for r in "${BATCH2[@]}";  do scan "$r" L2; done
 
 {
   echo "# Upstream clone corpus — provenance manifest"
@@ -57,21 +96,47 @@ done
   echo "live window without separate review. Link-by-link rationale and"
   echo "reflection pointers live in [\`docs/cmp90hx/SOURCES.md\`](../SOURCES.md)."
   echo
-  echo "| Repo | Pinned HEAD | Commit date | Path |"
-  echo "|---|---|---|---|"
-  printf '%s\n' "${LINES[@]}"
+  echo "The \`→ REMOTE\` marker means the upstream moved since pinning; pinned"
+  echo "trees are NEVER auto-updated (audit stability) — re-pin deliberately,"
+  echo "reading new commits as a fresh supply-chain review."
+  echo
+  echo "## Batch 1 — unlock lineage corpus (2026-11-11)"
+  echo
+  echo "| Repo | Pinned HEAD | Commit date | Path | Live remote |"
+  echo "|---|---|---|---|---|"
+  printf '%s\n' "${L1[@]}"
+  echo
+  echo "## Batch 2 — all remaining repos referenced by tracked prose (2026-11-24)"
+  echo
+  echo "Lineage siblings, lever precedents, and toolchain deps pulled from"
+  echo "SOURCES.md/decompil notes; HF repo cloned with \`GIT_LFS_SKIP_SMUDGE=1\`"
+  echo "(metadata only, LFS blobs not fetched); \`tianocore/edk2\` kept depth-1"
+  echo "for size. \`user-attachments\`, license-header URLs and doc placeholders"
+  echo "(\`spec/v1\`, \`your-repo/...\`) are not repos and were excluded."
+  echo
+  echo "| Repo | Pinned HEAD | Commit date | Path | Live remote |"
+  echo "|---|---|---|---|---|"
+  printf '%s\n' "${L2[@]}"
   if (( ${#FAILED[@]} )); then
     echo
     echo "Failed to clone (verify name/availability):"
     printf -- '- %s\n' "${FAILED[@]}"
   fi
   echo
+  echo
+  echo "Referenced but unclonable as of 2026-11-24 (deleted/privated GitHub"
+  echo "upstreams; prose references in CREDITS/README keep their historical"
+  echo "names as provenance): \`minicx/cmpunlocker\` (404),"
+  echo "\`studebaker8/cmp170hx-gen2\` (404), \`PZH1gdmu/CMP40HX-Unlock\`"
+  echo "(301 → \`PZH1gdmu/GPU-Unlock\` → owner profile and both names now 404:"
+  echo "rename then account deletion; ghost redirect persists)."
+  echo
   echo "Not cloned (recorded in SOURCES.md only): xrip/cmp50hx-unlock (this"
-  echo "repo's origin), the pinned NVIDIA driver archives (\`cache/\`, sha-verified"
-  echo "against driver-pin.env), the"
-  echo "campaign patched tree (\`work/build.1vZgdr/source/\`), huggingface AD103."
+  echo "repo's origin — cloning our own upstream adds nothing to the corpus),"
+  echo "the pinned NVIDIA driver archives (\`cache/\`, sha-verified against"
+  echo "driver-pin.env), and the campaign patched tree (\`work/build.1vZgdr/source/\`)."
 } > "$MANIFEST"
 
-echo "manifest -> $MANIFEST"
-printf '%s\n' "${LINES[@]}" | sed 's/|//g'
+echo "manifest -> $MANIFEST (drift: ${drift_count} repos have newer upstream HEAD)"
+printf '%s\n' "${L1[@]}" "${L2[@]}" | sed 's/|//g'
 if (( ${#FAILED[@]} )); then printf 'FAILED: %s\n' "${FAILED[@]}"; exit 1; fi
