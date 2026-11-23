@@ -1459,3 +1459,12 @@ the equivalence the assert checks; faithful container run = no overrides
 leak" diagnosis was wrong; it was the 149 build failure surfacing as apt
 trigger depmod noise). gtuu11: LIFECYCLE_LOOP_LEGS_FAILED=0 locally
 (all legs; offline leg by design needs --network-none, which CI has).
+
+## 615 source sweep (2026-11-23, user: "check sources for 615 driver update")
+No 615 update exists to check: unified .run tree's last 615 = 615.78.08
+(our cached, sha-pinned build — falsified 2026-11-01, closure final); DC
+line has 615.71.10 (10-19, Blackwell TMA fix only, no Turing/booter
+surface, no .run). The real movement: R620 opened 2026-11-04 as the
+current PRODUCTION branch (620.70.06/.73.04, Turing still supported) —
+future unlock-port target if ever is 620, skip 615. R610 EOL 2027-08-03.
+Dated addendum appended to docs/CMP50HX-615-UNLOCK-INVESTIGATION.md.

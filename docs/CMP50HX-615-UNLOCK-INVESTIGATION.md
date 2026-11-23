@@ -137,3 +137,42 @@ copy from the bench host before cleanup if needed again)
 Commits: `f04ed34` (booter-correction narrative), `328a199` (patch 12),
 `43f35f0`/`3a9861e` (patch 13/14), `7694c14` (xp3g ESP phase) — local
 only; `origin` is the third-party upstream and was never pushed.
+
+---
+
+## Re-check 2026-11-23: no 615 update reopens this (source sweep)
+
+Prompted by "check sources for a 615 driver update". Canonical distribution
+points swept: `download.nvidia.com/XFree86/Linux-x86_64/` full index, NVIDIA
+Data Center release notes, the forum release index, endoflife.date.
+
+- **Unified `.run` tree (what this deb embeds): 615.78.08 is still the last
+  615 build** — no 615.79+ since we cached it 2026-10-31 (sha-pinned in
+  `cache/sha256-615.78.08.txt`). NVIDIA's own index still lists it as the
+  *current new-feature-branch* release.
+- **Data-center package line:** 615.71.09 → **615.71.10** (2026-10-19), not
+  published as a `.run` on the unified tree. Its only fixed issue is a
+  Blackwell TMA-multicast memory hang — zero Turing/TU102/booter surface.
+- **Branch movement (the actual news):** **R620 opened 2026-11-04**
+  (620.70.06, then 620.73.04) and is NVIDIA's *current production branch*;
+  Turing stays supported (CUDA 13.x list, T4/T4G passthrough matrix). 615
+  is therefore now a superseded feature branch. endoflife.date puts R610
+  (our pin's branch) at EOL **2027-08-03**.
+
+Consequences:
+
+1. The in-kernel closure above was falsified against **615.78.08 — the
+   final 615 Linux build**. There is no newer 615 booter blob to re-run
+   the V1–V7 matrix against; the closure stands as-is. Stay 610.43.03.
+2. If the fleet ever moves, the port target is **620 (PB), skip 615
+   (NFB, unlock falsified)**. This document remains the re-derivation
+   playbook; step one is still the TU102 BooterLoadUcode digest
+   comparison (610 `0xe700 e0f0fc93` vs 620's blob).
+3. R615-era packaging intel recorded for that future bump: proprietary
+   kernel-module deb/rpm flavors are dropped ("starting in 615 only
+   OpenGPU"; `nvidia-driver-pinning-615` exists for legacy pinning), and
+   the DC notes document a **610→615 upgrade hazard** — a rare unkillable
+   CUDA-process infinite loop immediately after upgrade, prevented by a
+   one-time reboot. Our flow already reboots for every unlock-stack
+   change, so the hazard is structurally covered; noted for anyone doing
+   in-place .run swaps instead.
