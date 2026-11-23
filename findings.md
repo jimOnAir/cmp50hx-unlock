@@ -1514,3 +1514,22 @@ Batch-1 drift persists as expected (5 repos, physicsdolphin already at
 45db233 — two days after our c231ac3 sighting; fastest-moving lineage repo).
 Manifest: docs/cmp90hx/upstream/CLONES.md (git-tracked) regenerates
 deterministically.
+
+## Driver-update investigation via corpus batch 2 (2026-11-24): the landscape moved around our pins
+NVIDIA axis: nothing new since 11-22 (615 frozen .78.08; 620.73.04 still newest;
+latest.txt now points at 620.73.04 — production recommendation flipped to R620;
+PSRT 2026 GPU-display bulletins = Jan/May/Sep only, September still current →
+the 610.57.04 security-bump analysis stands unchanged).
+Corpus axis (35 repos incl. new amoghmunikote/cmpunlocker): the unlock
+community HAS moved to 615/620 while we sit on 610 — Cyridd ships fuzz-0
+patch trees for 610.57.04/615.71.09/615.78.08/620.70.06 on CMP40HX (TU106),
+rediscovering our exact 0x1c@0x1b38 wall and bypassing it by embedding the
+signed 610.57.04 TU102 booter archive as a temporary unlock-only booter
+(native booter kept for GSP launch). Their archive SHAs match our computed
+hashes byte-exact (independent supply-chain verification). amoghmunikote
+(GA100 line) maintains through 615.71.10. physicsdolphin's 621.01/GSP-620.67.01
+observations = Windows-side FLR-rezero investigation (consumer TU106): "losses
+only on the 621.01/630.20 generation" — Windows-only axis, noted.
+Net: production unchanged; a future 620 port now has a public TU10x reference
+implementation + named API gotcha (kvbiosExecuteFwsecFrtsCmd_HAL) — the 615
+investigation doc carries the full addendum.

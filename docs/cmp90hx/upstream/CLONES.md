@@ -44,6 +44,7 @@ for size. `user-attachments`, license-header URLs and doc placeholders
 | Repo | Pinned HEAD | Commit date | Path | Live remote |
 |---|---|---|---|---|
 | `skbskhud/p104-unlock-v3` | `ef45a8d3dd4cdbcde6a4611dd9ecda75ac4efb56` | 2026-11-01 | `work/upstream/skbskhud-p104-unlock-v3` |
+| `amoghmunikote/cmpunlocker` | `2c7e2ecd7944e791fec040d2680036beb4a9327b` | 2026-10-27 | `work/upstream/amoghmunikote-cmpunlocker` |
 | `JustAResearcher/gpu-unlock-ada` | `d28c485418c3d9d034cd4bac19200bc33dd3453b` | 2026-10-25 | `work/upstream/JustAResearcher-gpu-unlock-ada` |
 | `Consensus-Protocol/cmp170hx` | `d923a25fb2ecb6ee3d62654983f453194b66485f` | 2026-08-22 | `work/upstream/Consensus-Protocol-cmp170hx` |
 | `Cyridd/cmpunlocker` | `bfdb4cb210bfe43c8f6f6c02a204326ca4e82015` | 2026-11-21 | `work/upstream/Cyridd-cmpunlocker` |

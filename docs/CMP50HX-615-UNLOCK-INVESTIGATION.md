@@ -184,3 +184,45 @@ Consequences:
    one-time reboot. Our flow already reboots for every unlock-stack
    change, so the hazard is structurally covered; noted for anyone doing
    in-place .run swaps instead.
+
+### Corpus intelligence 2026-11-24 (batch-2 analysis): the 0x1c wall has a known bypass — on OUR silicon
+
+The corpus sweep (all referenced repos pinned, see CLONES.md) found
+**Cyridd/cmpunlocker** (CMP 40HX = TU106 `1f0b`, the TU102 family sibling):
+
+- Their port to stock 615.78.08 hit **our exact failure signature** —
+  `sizeOfSignature=0xfa00`, `mailbox0=0x1c tracepc=0x1b38` (independently
+  rediscovered; confirms our falsification was a property of the 615 booter,
+  not our implementation).
+- Their fix re-frames our "closed": do NOT attack the native 615/620 verifier —
+  **embed the complete signed 610.57.04 TU102 BooterLoadUcode archive**
+  (PROD/DBG images + headers + signatures) and execute it as a *temporary*
+  booter **only in the unlock branch**; `pBooterLoadUcode` keeps the native
+  615/620 booter for all normal GSP traffic. Allocation freed post-exec.
+  Verified: unlock + GSP launch + nvidia-smi + Gen2 + CUPTI on 615.78.08
+  (default at the time) and on **620.70.06** (`UNLOCK_BOOTER=610.57.04
+  GSP_BOOTER=620.70.06`). Native 620 booter hashes == 615's (booter frozen
+  between the branches — only the surrounding RM moved).
+- 620-specific gotcha they solved (ours too, if we ever port): 620 removed the
+  prepared-FWSEC command field → call `kvbiosExecuteFwsecFrtsCmd_HAL` for the
+  initial FRTS + both retries; free the stock-signature copy in
+  `kgspFreeBootArgsCommon`.
+- Their toolchain cross-validates our supply chain: pinned source-archive
+  shas match ours **byte-exact** (610.57.04 `619d7b5c…`, 615.78.08
+  `eac0ecd5…`).
+- Caveats they state: 620 first-cold-boot pass unverified (manual-switch
+  tests only); their Gen2 first-init failure remains unresolved.
+
+Also pinned: **amoghmunikote/cmpunlocker** (MIT, GA100 cmpunlocker line —
+the 90HX family) maintains support through **610.43.02 → 610.57.04 →
+615.71.09 → 615.71.10** ("Add 615.71.10" HEAD 2026-10-27) — the whole
+community lineage is already living past the 615 security line.
+
+Decision impact: production **unchanged** (stay 610.43.03; security bump to
+610.57.04 needs none of this — ucode identical). But the 2027 answer changes
+from "re-derive the ROP against a hardened verifier" to "port the V526 recipe
++ booter-embed mechanism; public fuzz-0 reference implementation exists for
+TU10x under 615/620". If a forced-620 scenario ever arrives, start from
+`work/upstream/Cyridd-cmpunlocker/patches/620.70.06/0001-cmp40hx-unlock.patch`
+(6239 lines, touches the same kernel_gsp_booter_tu102.c territory our
+0014–0020 series does).

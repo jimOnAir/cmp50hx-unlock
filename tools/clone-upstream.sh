@@ -43,6 +43,7 @@ REPOS=(
 # Entries are "owner/repo" (GitHub) or a full URL (Hugging Face etc.).
 BATCH2=(
   "skbskhud/p104-unlock-v3"            # GP104 Gen2-no-XP3G lever (ticket 11 §9)
+  "amoghmunikote/cmpunlocker"          # cmpunlocker MIT variant; ports CMP 170HX GA100 to 615.71.09 (ee41902, cited by Cyridd)
   "JustAResearcher/gpu-unlock-ada"     # AD10x four-write chain source
   "Consensus-Protocol/cmp170hx"        # PLM semantics + validation methodology
   "Cyridd/cmpunlocker"                 # lineage sibling (notes reference)
