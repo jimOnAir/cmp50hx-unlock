@@ -168,7 +168,15 @@ Consequences:
    (NFB, unlock falsified)**. This document remains the re-derivation
    playbook; step one is still the TU102 BooterLoadUcode digest
    comparison (610 `0xe700 e0f0fc93` vs 620's blob).
-3. R615-era packaging intel recorded for that future bump: proprietary
+3. **Side-finding, more urgent than 615**: the September-2026 PSRT bulletin
+   (5861) marks *all* Linux R610 Tesla builds prior to **610.57.04**
+   vulnerable (~60 CVEs incl. CVE-2026-47591 NvRoot) — our pin 610.43.03
+   is below that line. Measured bump cost to 610.57.04 turned out to be
+   minimal (9/9 boot-asset sources byte-identical, 16/16 patch series
+   clean cumulative) — full evidence in `findings.md` 2026-11-23; owner
+   decision on the pin pending. If the pin ever moves, this document's
+   re-derivation playbook is exercised on the *610-terminal* build first.
+4. R615-era packaging intel recorded for that future bump: proprietary
    kernel-module deb/rpm flavors are dropped ("starting in 615 only
    OpenGPU"; `nvidia-driver-pinning-615` exists for legacy pinning), and
    the DC notes document a **610→615 upgrade hazard** — a rare unkillable

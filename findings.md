@@ -1468,3 +1468,34 @@ surface, no .run). The real movement: R620 opened 2026-11-04 as the
 current PRODUCTION branch (620.70.06/.73.04, Turing still supported) —
 future unlock-port target if ever is 620, skip 615. R610 EOL 2027-08-03.
 Dated addendum appended to docs/CMP50HX-615-UNLOCK-INVESTIGATION.md.
+
+## The real find of the 615 source sweep: our 610 pin is below NVIDIA's September security fix line
+Sweep continued past NVIDIA's trees into PSRT (nvidia/product-security GitHub,
+bulletin 5861 = "GPU Display Driver - September 2026", fetched raw md): the
+authoritative table lists for **every** Linux R610 product line (GeForce,
+RTX/Quadro/NVS, **Tesla**): "All driver versions prior to 610.57.04" affected,
+updated 610.57.04. Our production pin is 610.43.03 -> affected. Batch: ~60
+CVEs, worst CVE-2026-47591 (NvRoot, CVSS 7.8 NVIDIA / 9.3 Stealthium
+estimate for multi-tenant: unprivileged local user -> read-only memory
+write -> code exec/EoP; container-relevant). All local-privilege: single-
+tenant bench = low urgency, multi-tenant hosts = real.
+Bump cost measured end-to-end (this was cheap, so it was done):
+- 610.43.03 (2026-07-03) vs 610.57.04 (2026-07-29, branch-terminal): 114
+  files differ in open-gpu-kernel-modules source.
+- **All 9 boot-asset sources (TU102/GA102/AD102 BooterLoadUcode + GspRmBoot
+  + ksec2 BlUcode) BYTE-IDENTICAL** (sha256 of the 9 g_bindata_*.c files,
+  both trees) -> the unlock-critical ucode is unchanged; changed bindata are
+  GH100/GB100/GB202/GR100 families only. EFI ATTEST manifest gate unaffected.
+- **16/16 product patches (both-flavor series, cumulative replay on 610.57.04
+  scratch tree) apply clean, zero conflicts** — the only changed patch-target
+  file (kernel-open/nvidia/nv.c) takes no context conflict. build.sh already
+  dry-runs every patch (line 241) — the bump rides the same harness.
+- source sha recorded: 610.57.04 tarball 619d7b5ce1f7... (cache/610.57.04.tar.gz).
+Decision left to owner (production pin = owner domain): bump driver-pin.env
+triple + gtuu12 + lifecycle + bench drill, OR stay 610.43.03 with local-
+trust mitigation. NOT executed: driver-pin.env untouched, nothing installed.
+Corpus context: the consumer-lineage ecosystem itself stayed on 610.43.03 —
+MindAllik v1.3.2-1.3.4 (Nov 13-20: TU102 two-write payload, BCR_CTRL fix,
+dma_alloc_coherent mask, RM_RISCV_UCODE_DESC v4 parsing) explicitly updates
+"v67-tu102-610.43.03.bin"; physicsdolphin likewise "pinned 610.43.03". No
+upstream publishes 615-Linux unlock work either way.
