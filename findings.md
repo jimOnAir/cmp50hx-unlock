@@ -1533,3 +1533,15 @@ only on the 621.01/630.20 generation" — Windows-only axis, noted.
 Net: production unchanged; a future 620 port now has a public TU10x reference
 implementation + named API gotcha (kvbiosExecuteFwsecFrtsCmd_HAL) — the 615
 investigation doc carries the full addendum.
+
+## "Can we move to 615/620?" — answered with measurements, not opinion (2026-11-24)
+620.70.06 source downloaded (sha bc9fa156 == Cyridd's pin, triple-verified
+supply chain). Booter per-label digests (raw data, TU102+GA102): 615==620
+byte-identical EVERY label — one wall for both branches. 16-patch series on
+620: 11 clean / 5 conflict (both stockflow bases + rebar + p2p pair — the
+620 nv-pci.c/io_vaspace.c/gsp moves; context-level). In-driver unlock needs
+the booter-embed port (the only real engineering; mechanism + API gotcha
+named + reference impl). EFI + claim unaffected by driver version. Verdict
+recorded in 615 investigation doc §"Can we move": 615 no; 620 yes-as-bounded-
+project at R610 EOL (2027-08-03) or concrete need; NOW = 610.57.04 security
+bump (zero-risk, pending owner call).

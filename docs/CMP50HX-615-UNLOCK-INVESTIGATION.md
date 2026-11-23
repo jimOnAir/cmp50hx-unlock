@@ -226,3 +226,26 @@ TU10x under 615/620". If a forced-620 scenario ever arrives, start from
 `work/upstream/Cyridd-cmpunlocker/patches/620.70.06/0001-cmp40hx-unlock.patch`
 (6239 lines, touches the same kernel_gsp_booter_tu102.c territory our
 0014–0020 series does).
+
+## "Can we move to 615/620?" — measured answer (2026-11-24, target 620.70.06)
+
+Booter data (per-label image/header/signature digests, TU102 + GA102,
+computed from raw source): **615.78.08 == 620.70.06 byte-identical on every
+label** (620's C-file hashes differ only in version-string labels — matches
+Cyridd's log-label note). One wall for both branches, verified from data.
+620.70.06 source sha `bc9fa156…` computed here == Cyridd's pinned value.
+
+| Component | On 620.70.06 today | Work to move |
+|---|---|---|
+| EFI gate5 (50HX pre-OS unlock) | **works as-is** (driver-independent) | none |
+| claim module (90HX) | **works as-is** (DKMS, own assets; 615+ NvU64 bindata format already parsed; 615==620 data now proven) | none for unlock; re-verify the Gen2/X2 chain |
+| product patch series (16, `both` flavor) | **11 apply clean, 5 conflict** — 0014 & both/01 (stockflow bases), 03-rebar (`nv-pci.c`,`g_kern_bus_nvoc.c`), 06/07 p2p (`io_vaspace.c`), GSP files rejected where 620 moved FWSEC APIs | rebase 5 patch files (context-level, hours) |
+| **in-driver unlock (V526 crafted frame)** | rejected — native booter wall (`0x1c @ 0x1b38`, frozen since 615) | the real project: booter-embed mechanism (Cyridd pattern, TU106-validated) + `kvbiosExecuteFwsecFrtsCmd_HAL` adaptation; reference patch 6239 lines (mostly the embedded archive) |
+| deb/DKMS/CI packaging | generic (`--driver-version` flows, Kbuild probes) | pin bump + full gate re-run |
+
+**Answer: 615 — no (superseded NFB, same wall, shorter EOL). 620 — yes, as a
+bounded project: ~days (patch rebase + booter-embed + validation incl.
+cold-boot statistics), with a public reference implementation and every
+blocking unknown now resolved to a named mechanism.** But moving now buys
+nothing the 610.57.04 security bump doesn't: production stays 610, revisit
+at R610 EOL (2027-08-03) or on a concrete 620 feature need.
