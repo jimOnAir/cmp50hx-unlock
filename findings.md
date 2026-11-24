@@ -1569,3 +1569,17 @@ the old .run filename in the offline probe (now pin-driven) and root residue
 from failed builds drowned errors (resilient cleanup trap, tail 30→120).
 Gates: docker-deb PASS + smoke; claim harness 86/86; lifecycle
 LEGS_FAILED=0 on the bumped deb. Bench + CI pending this commit.
+
+## NeithOS survey (2026-11-24, user: investigate neithos.ru)
+Full-site read + engine identification; durable note: docs/neithos-survey-2026-11-24.md.
+Headlines: closed panel, weekly releases, CMP50/CMP170 are FIRST-CLASS
+hardware for them (dedicated vLLM SM75 branch, CMP presets since 1.0.35,
+own blog posts for both cards) = external production validation of the
+unlocked-CMP-as-LLM-tier thesis, incl. FP16-not-BF16/FA2-caveat on Turing
+and "re-verify VRAM exposure after every driver update" (our bump, exactly).
+Engines behind it are mostly open and adoptable (QEngine MIT RTX30-class,
+Haru-neo/qengine Apache-2.0 for sm_70 mining cards, SDNQ GPL-3.0 INT8-on-
+Turing). Ranked adoptables in doc: doctor preflight, card-capability sheet,
+health-check updater, opt-in GPU Lab telemetry, Pearl Mining co-tenant,
+ops phrasing. Open data point: their 50HX are modified 20 GB; stock MSI
+spec 10 GB -> verify our cards' actual memory.total (TODO on a CMP host).
