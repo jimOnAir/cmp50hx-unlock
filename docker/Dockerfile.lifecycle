@@ -6,7 +6,7 @@
 FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        dpkg-dev ca-certificates \
+        dpkg-dev ca-certificates zstd \
         linux-headers-generic linux-headers-6.8.0-124-generic linux-image-generic \
     && apt-get install -y --no-install-recommends \
         dkms build-essential patch kmod pciutils python3 mokutil efibootmgr \

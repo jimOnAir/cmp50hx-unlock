@@ -25,6 +25,18 @@ else
     deb="${cands[0]}"
     printf '==> newest deb: %s%s\n' "$deb" "$( ((${#cands[@]}>1)) && printf ' (%d stale siblings ignored — pass an explicit path to pick one)' "${#cands[@]}")"
 fi
+# Optional 2nd deb = cross-version upgrade leg (install OLD, then upgrade to
+# NEW). This is the leg that caught the gtuu11->gtuu12 half-configured
+# DKMS bug — running the wrapper WITHOUT it silently skips that coverage.
+old_deb=""
+if [[ $# -ge 2 ]]; then
+    old_deb="$2"; [[ -f "$old_deb" ]] || { printf 'no such old deb: %s\n' "$old_deb" >&2; exit 2; }
+    # (version-differs assertion lives container-side in lifecycle-test-deb.sh —
+    #  the dev host may be Arch/Manjaro with no dpkg-deb)
+    printf '==> upgrade leg: OLD=%s -> NEW=%s\n' "$(basename "$old_deb")" "$(basename "$deb")"
+else
+    printf '==> NOTE: no OLD deb passed — cross-version upgrade leg SKIPPED (give it an older .deb as $2)\n'
+fi
 
 out="$(mktemp -d)"
 trap 'rm -rf "${out}"' EXIT
@@ -36,15 +48,31 @@ if [[ "${deb}" != "${root}"/* ]]; then
     deb_mount=(-v "$(dirname "${deb}"):/deb:ro")
     deb_in="/deb/$(basename "${deb}")"
 fi
+old_mount=()
+old_in=""
+if [[ -n "${old_deb}" ]]; then
+    old_in="/src/$(realpath --relative-to="${root}" "${old_deb}" 2>/dev/null || true)"
+    if [[ "${old_deb}" != "${root}"/* && "$(dirname "${old_deb}")" != "$(dirname "${deb}")" ]]; then
+        old_mount=(-v "$(dirname "${old_deb}"):/debold:ro")
+        old_in="/debold/$(basename "${old_deb}")"
+    elif [[ "${old_deb}" != "${root}"/* ]]; then
+        old_in="/deb/$(basename "${old_deb}")"
+    fi
+fi
 docker run --rm \
-    -v "${root}:/src" -v "${out}:/out" "${deb_mount[@]}" -w /src -e HOME=/tmp \
-    -e DEB_IN="${deb_in}" \
+    -v "${root}:/src" -v "${out}:/out" "${deb_mount[@]}" "${old_mount[@]}" -w /src -e HOME=/tmp \
+    -e DEB_IN="${deb_in}" -e OLD_IN="${old_in}" \
     cmp50hx-lifecycle:latest bash -c '
         set -e
         DEB="${DEB_IN}"
         [[ -f "$DEB" ]] || { echo "deb missing in container: $DEB"; exit 2; }
+        extra=()
+        if [[ -n "${OLD_IN:-}" ]]; then
+            [[ -f "$OLD_IN" ]] || { echo "old deb missing in container: $OLD_IN"; exit 2; }
+            extra=(--upgrade-from "$OLD_IN")
+        fi
         rc=0
-        bash tools/lifecycle-test-deb.sh self --deb "$DEB" || rc=$?
+        bash tools/lifecycle-test-deb.sh self --deb "$DEB" "${extra[@]}" || rc=$?
         [[ -f /var/log/cmp50hx-unlock-install.log ]] &&
             cp /var/log/cmp50hx-unlock-install.log /out/postinst.log || true
         exit $rc'

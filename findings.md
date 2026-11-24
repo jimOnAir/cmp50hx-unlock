@@ -1583,3 +1583,24 @@ Turing). Ranked adoptables in doc: doctor preflight, card-capability sheet,
 health-check updater, opt-in GPU Lab telemetry, Pearl Mining co-tenant,
 ops phrasing. Open data point: their 50HX are modified 20 GB; stock MSI
 spec 10 GB -> verify our cards' actual memory.total (TODO on a CMP host).
+
+## Cross-version upgrade: second bug found by the container control run (2026-11-24)
+Control (unfixed gtuu12 + new --upgrade-from leg) FAILED differently from the
+bench — and that delta was the real lesson:
+- bench dkms (Ubuntu 26.04): dangling old /usr/src makes `dkms install`'s
+  auto-swap HARD-fail -> postinst dies -> dpkg iF (observed live).
+- container dkms (24.04): same dangling tree -> install survives, BUT the
+  orphan registration then poisons every later `dkms status` (kernel-update
+  autoinstall silent-skip = the real-world trap) -> our assert caught it.
+- and dkms on 24.04 EXITS 0 WHILE PRINTING "Could not locate dkms.conf" —
+  first sweep fix trusted rc, `|| rm -rf` never fired, orphan survived.
+  Fix: best-effort remove, then VERIFY and force-remove what remains.
+Sweep is deliberately narrow: only dirs with a DANGLING source symlink
+(dkms's own kernel-<ver>-<arch> state dirs have no source link — untouched;
+earlier loose glob would have rm -rf'd live state). Container bonus find:
+lifecycle image lacked zstd -> `dkms: zstd: command not found` during .zst
+install — baked into Dockerfile.lifecycle (26.04 base already has it).
+Final matrix on gtuu15: fresh-install legs + upgrade gtuu11->gtuu15 + purge
+ALL PASS, LIFECYCLE_LOOP_LEGS_FAILED=0 (control failed exactly one leg:
+upgrade_assert). Wrapper gap closed: docker-lifecycle.sh now takes the old
+deb as $2 and screams when the upgrade leg is skipped.

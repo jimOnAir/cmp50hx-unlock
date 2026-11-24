@@ -129,6 +129,37 @@ fi
 mkdir -p "${state_dir}/efi"
 cp -a "${install_dir}/efi/." "${state_dir}/efi/"
 
+# --- sweep orphaned DKMS registrations (cross-version upgrade survival) ----
+# dpkg deletes the OUTGOING package's /usr/src tree during unpack — before
+# this postinst runs. DKMS then dies inside `dkms install` while auto-swapping
+# the previous version's registration: the /var/lib/dkms/<ver>/source symlink
+# dangles, the uninstall half of the swap fails, and dpkg leaves the package
+# half-configured (bench 2026-11-24, first live cross-version upgrade
+# gtuu11->gtuu12: "Could not locate dkms.conf ... Failed to uninstall
+# cmp50hx/610.43.03"). Sweep registrations whose source tree is gone for ALL
+# our modules — this also self-heals an already-broken state when dpkg
+# re-runs postinst. Registrations with a live source (same-version reinstall)
+# are left for DKMS's own swap logic.
+for mod in "${dkms_module}" gpu-unlock-claim gpu-unlock-peek; do
+    for reg in "/var/lib/dkms/${mod}"/*/; do
+        [[ -d "${reg}" ]] || continue
+        ver="${reg%/}"; ver="${ver##*/}"
+        # True orphan = a registration dir whose source symlink dangles (the
+        # dpkg-deleted old tree). Entries without a source link (dkms's own
+        # kernel-<ver>-<arch> state dirs) and live registrations stay alone.
+        [[ -L "${reg}source" && ! -f "${reg}source/dkms.conf" ]] || continue
+        log "orphaned DKMS registration ${mod}/${ver} (source tree gone) — sweeping"
+        # Best-effort polite removal (drops dkms's own bookkeeping if it can
+        # read it), then VERIFY: this dkms family prints "Could not locate
+        # dkms.conf" and STILL exits 0 (container proof 2026-11-24), so the
+        # exit code cannot gate the cleanup. Anything that remains is
+        # force-removed, else the dangling symlink poisons every later
+        # `dkms status`/`dkms autoinstall` (kernel-update silent-skip trap).
+        dkms remove -m "${mod}" -v "${ver}" --all >/dev/null 2>&1 || true
+        [[ -e "${reg}" ]] && rm -rf "${reg}"
+    done
+done
+
 # --- patched kernel modules via DKMS ---------------------------------------
 src_tree="/usr/src/${dkms_module}-${dkms_version}"
 [[ -f "${src_tree}/dkms.conf" ]] || die "broken package: ${src_tree}/dkms.conf missing"
