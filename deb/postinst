@@ -158,6 +158,16 @@ for mod in "${dkms_module}" gpu-unlock-claim gpu-unlock-peek; do
         dkms remove -m "${mod}" -v "${ver}" --all >/dev/null 2>&1 || true
         [[ -e "${reg}" ]] && rm -rf "${reg}"
     done
+    # Per-kernel state entries pointing into a swept-away version dir poison
+    # `dkms install` exactly like the orphan itself — and their layout
+    # differs by dkms generation (real dirs on 24.04, symlinks INTO the
+    # version dir on 26.04; bench showed kernel-7.0.0-38-generic-x86_64 ->
+    # 610.43.03/... surviving the first sweep fix). Drop dangling ones.
+    for reg in "/var/lib/dkms/${mod}"/*; do
+        [[ -L "${reg}" && ! -e "${reg}" ]] || continue
+        log "dangling DKMS state entry ${mod}/${reg##*/} — sweeping"
+        rm -f "${reg}"
+    done
 done
 
 # --- patched kernel modules via DKMS ---------------------------------------

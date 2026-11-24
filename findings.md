@@ -1604,3 +1604,16 @@ Final matrix on gtuu15: fresh-install legs + upgrade gtuu11->gtuu15 + purge
 ALL PASS, LIFECYCLE_LOOP_LEGS_FAILED=0 (control failed exactly one leg:
 upgrade_assert). Wrapper gap closed: docker-lifecycle.sh now takes the old
 deb as $2 and screams when the upgrade leg is skipped.
+
+## sweep v3: the layout lesson (2026-11-24, bench vs container)
+v2 passed every container leg, then the bench (Ubuntu 26.04) STILL died
+identically: dkms there keeps per-kernel state as top-level SYMLINKS INTO
+the version dir (kernel-7.0.0-38-generic-x86_64 -> 610.43.03/7.0.0-38-
+generic/x86_64), while 24.04 uses real dirs. Sweeping the version dir left
+the symlink dangling; dkms install followed it back to the vanished old
+version. v3 = also drop dangling per-kernel entries after sweeping a
+version. Verified on BOTH: bench iF->ii, `dkms status` clean rc=0 with all
+three modules 610.57.04 installed, 0 failed units; container full loop
+(gtuu16 + upgrade-from gtuu11) LEGS_FAILED=0. Standing truth reinforced:
+the container matrix proves CONTRACTS, only the bench proves the STACK —
+both are load-bearing, neither substitutes for the other.
